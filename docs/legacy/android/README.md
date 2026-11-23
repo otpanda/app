@@ -25,4 +25,3 @@ workflow existed in the placeholder. Retiring the repository does not remove
 Android support from the shared Flutter client.
 
 Bundle SHA256: fdf8c2ae65993f3e1439f07a6b4637d72be1b85aae466525b5fd675b9b7066ee.
-The additional fast-export is portable but does not retain the signed commit ID.
