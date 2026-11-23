@@ -13,7 +13,7 @@ class _ReadTransport implements SessionTransport {
   Future<void> close() async {}
 }
 
-/// Separate from fictional preview. No mutation or native-auth claim.
+/// Separate from fictional preview. Read-only data and browser signout only.
 class BrowserAccountPage extends StatefulWidget {
   final BrowserSessionBridge? bridge;
   final bool loginEnabled;
@@ -200,6 +200,26 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     ),
                   ),
               ],
+              if (status != 'unsupported' && widget.loginEnabled)
+                OutlinedButton(
+                  onPressed: busy
+                      ? null
+                      : () {
+                          revision++;
+                          store.clear();
+                          try {
+                            bridge.logout();
+                            message = 'Confirm signout on the API page. Until then the saved browser session is not revoked.';
+                          } catch (_) {
+                            message = 'Could not open signout. Local access is cleared but the saved browser session is not revoked.';
+                          }
+                          setState(() {
+                            status = bridge.status;
+                            busy = false;
+                          });
+                        },
+                  child: const Text('Sign out of this browser'),
+                ),
               if (status != 'unsupported')
                 TextButton(
                   onPressed: clear,

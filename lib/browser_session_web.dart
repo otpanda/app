@@ -12,6 +12,7 @@ extension type _Session(JSObject _) implements JSObject {
   external JSPromise<JSAny?> start(JSString mode);
   external JSPromise<JSAny?> passkey();
   external void clear();
+  external void logout();
   external JSPromise<_ReadResponse> read(JSString path);
 }
 
@@ -42,6 +43,8 @@ class _Browser implements BrowserSessionBridge {
 
   @override
   void clear() => _session.clear();
+  @override
+  void logout() => _session.logout();
   @override
   Future<SessionResponse> read(String path) async {
     final response = await _session.read(path.toJS).toDart;
