@@ -1,0 +1,13 @@
+blob
+mark :1
+data 79
+# android
+OTPanda Android companion app for collecting SMS verification codes.
+
+reset refs/heads/main
+commit refs/heads/main
+mark :2
+author Abraham Murciano <abrahammurciano@gmail.com> 1795379214 +0200
+committer GitHub <noreply@github.com> 1795379214 +0200
+data 14
+Initial commitM 100644 :1 README.md
