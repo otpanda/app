@@ -8,4 +8,6 @@ abstract interface class BrowserSessionBridge {
   void clear();
   void logout();
   Future<SessionResponse> read(String path);
+  Future<SessionResponse> organize(String method, String body);
+  Future<SessionResponse> copied(String entryId, int createdAt);
 }
