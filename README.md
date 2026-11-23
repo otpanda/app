@@ -1,2 +1,37 @@
-# client
-Shared Flutter client for OTPanda: Android, web and desktop targets.
+# OTPanda client
+
+One Flutter project for Android, web, Linux, Windows and macOS. Android and web
+are first; desktop platform integration/testing is still required. API, extension
+and landing page remain separate components.
+
+## Current revision
+
+This is a fictional-data development shell, not a cloud account or replacement
+for the existing web client. It implements search, code cards, an explicit
+owned-entry assignment dialog and navigation. Source/access management, login,
+secure storage, SMS collection and management parity are not connected yet.
+No Google SDK or production credential is bundled. Existing preview remains at
+https://otpanda.github.io/web/ until replacement parity is verified.
+
+Tested locally with Flutter 3.50.1: clean analyzer, three model/widget tests and
+web release build. Inspected rendered 320/390/1280 layouts. This is not evidence
+of native Google login, Android runtime behavior or desktop readiness.
+
+## Build
+
+Use Flutter 3.50.1. Run `bash tool/bootstrap.sh`, `flutter test` and
+`flutter build web --base-href /client/ --no-wasm-dry-run`. Platform host folders
+are generated from the pinned Flutter version during this first scaffold. The
+identifier `org.otpanda.development.otpanda_client` is development-only, not the
+selected release identity. Host folders should be checked in once stable platform
+identity/adapters are configured. Never store local SDK paths or keys in Git.
+
+The standard APK will use native-first Google login with browser fallback.
+A separate FLOSS F-Droid flavor is allowed if required; OS-level auth there is
+preferred but unverified. Flutter does not remove that dependency constraint.
+SMS collection remains opt-in and separate from ordinary client login.
+
+CI produces a web artifact, not a deployed preview or a signed release. Android
+APK and desktop CI targets will follow their platform build checks. Dedicated
+release signing/key custody and stable package identity must be settled before
+trusted downloadable GitHub Releases. No production signing key is generated.
