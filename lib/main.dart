@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'models.dart';
 import 'branding.dart';
+import 'source_preview.dart';
 
 const ink = Color(0xff17332a), green = Color(0xff0a7955);
 const line = Color(0xffdfe8e2), pale = Color(0xffe7f8ee);
@@ -48,6 +49,7 @@ class _ClientHomeState extends State<ClientHome> {
   int tab = 0;
   String query = '';
   int entrySequence = 0;
+  bool sourceRevoked = false;
   final entries = [
     const AccountEntry('north', 'Northstar', 'alex@example.test', true),
     const AccountEntry('harbor', 'Harbor', 'team@example.test', false),
@@ -604,11 +606,14 @@ class _ClientHomeState extends State<ClientHome> {
             entryManagement(visible)
           else if (tab == 3)
             unassigned ? unassignedCard() : const Text('No unassigned codes.')
+          else if (tab == 1)
+            SourcePreview(
+              revoked: sourceRevoked,
+              onRevoke: () => setState(() => sourceRevoked = true),
+            )
           else
-            Text(
-              tab == 1
-                  ? 'Source setup is not connected in this Flutter preview. SMS collection will be a separate opt-in.'
-                  : 'Automation token management is not connected in this Flutter preview. Use the existing web preview to inspect that flow.',
+            const Text(
+              'Automation token management is not connected in this Flutter preview. Use the existing web preview to inspect that flow.',
             ),
           const SizedBox(height: 24),
           const Text(
