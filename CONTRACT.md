@@ -22,3 +22,11 @@ still separate work. These constraints are not implemented by this interface.
 Not yet covered: mutations, unassigned-code data, token reveal, enrollment,
 real OAuth and platform lifecycle wiring. The existing fictional UI deliberately
 remains separate until behavior and design parity are verified.
+
+## Management mutation contract
+
+`ManagementClient` covers owned entry creation, rename, account changes and deletion, source revocation, explicit code assignment and token revocation. It uses the current API request shapes. It does not mint tokens, enroll sources or create sharing grants.
+
+The platform transport must supply session authentication and CSRF, reject redirects and use no-store responses. Never use an automation token as the session. No concrete network transport or UI binding ships here yet. The current UI remains fictional data.
+
+No mutation retries automatically. Network failures, server errors and malformed success responses are reported as uncertain because the server might already have committed the write. Refresh/reconcile before offering a retry. Owner checks remain server-enforced.
