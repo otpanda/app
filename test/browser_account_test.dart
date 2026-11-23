@@ -9,7 +9,7 @@ import 'package:otpanda_client/session_contract.dart';
 class Bridge implements BrowserSessionBridge {
   @override
   String status = 'idle';
-  int reads = 0, prompts = 0;
+  int reads = 0, prompts = 0, logouts = 0;
   bool denied = false;
   @override
   Future<void> get ready async {}
@@ -23,6 +23,12 @@ class Bridge implements BrowserSessionBridge {
 
   @override
   void clear() {
+    status = 'idle';
+  }
+
+  @override
+  void logout() {
+    logouts++;
     status = 'idle';
   }
 
@@ -100,4 +106,19 @@ void main() {
     expect(b.reads, 1);
     expect(find.text('Browser session available.'), findsNothing);
   });
+  testWidgets(
+    'server signout distinct from local clear and disabled until enabled',
+    (t) async {
+      final b = Bridge()..status = 'restored';
+      await t.pumpWidget(
+        MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+      );
+      await t.pumpAndSettle();
+      await t.tap(find.text('Sign out of this browser'));
+      await t.pumpAndSettle();
+      expect(b.logouts, 1);
+      expect(b.status, 'idle');
+      expect(find.text('Browser session available.'), findsNothing);
+    },
+  );
 }
