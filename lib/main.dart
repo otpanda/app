@@ -5,6 +5,7 @@ import 'models.dart';
 import 'branding.dart';
 import 'source_preview.dart';
 import 'access_preview.dart';
+import 'account_preview.dart';
 
 const ink = Color(0xff17332a), green = Color(0xff0a7955);
 const line = Color(0xffdfe8e2), pale = Color(0xffe7f8ee);
@@ -673,6 +674,15 @@ class _ClientHomeState extends State<ClientHome> {
                       ),
                     ),
                     const Spacer(),
+                    IconButton(
+                      tooltip: 'Account & security',
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (context) => const AccountSecurityPreview(),
+                        ),
+                      ),
+                      icon: const Icon(Icons.person_outline),
+                    ),
                     if (desktop)
                       const Text(
                         'YOUR PRIVATE CODE SPACE',
