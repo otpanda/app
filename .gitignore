@@ -1,0 +1,15 @@
+.dart_tool/
+.packages
+build/
+.flutter-plugins*
+.idea/
+*.iml
+android/
+web/
+linux/
+windows/
+macos/
+*.jks
+*.keystore
+signing.properties
+local.properties
