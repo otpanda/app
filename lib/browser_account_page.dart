@@ -300,6 +300,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
               Text(
                 status == 'unsupported'
                     ? 'Native sign-in is not connected yet.'
+                    : status == 'signup-ready'
+                    ? 'Create a passkey for your verified account email.'
+                    : status == 'signup-retry-required'
+                    ? 'Passkey setup did not finish. Return to the signup form in this same browser and retry using the email proof. If you already created the passkey, use ordinary sign-in.'
+                    : status == 'check-clock-or-restart'
+                    ? 'Check your device date and time, then restart signup or sign-in. The secure request may have expired.'
                     : status == 'passkey-ready'
                     ? 'Your browser is ready for its passkey prompt.'
                     : status == 'restored'
@@ -317,14 +323,17 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                   child: Text(message),
                 ),
               const SizedBox(height: 16),
-              if (status == 'passkey-ready')
+              if (status == 'passkey-ready' || status == 'signup-ready')
                 FilledButton(
                   onPressed: busy ? null : () => run(bridge.passkey),
-                  child: const Text('Use passkey'),
+                  child: Text(
+                    status == 'signup-ready' ? 'Create passkey' : 'Use passkey',
+                  ),
                 ),
               if (status != 'unsupported' &&
                   status != 'restored' &&
-                  status != 'passkey-ready') ...[
+                  status != 'passkey-ready' &&
+                  status != 'signup-ready') ...[
                 FilledButton(
                   onPressed: busy || !widget.loginEnabled
                       ? null
@@ -336,6 +345,15 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       ? null
                       : () => run(() => bridge.start('restore')),
                   child: const Text('Restore saved browser session'),
+                ),
+                OutlinedButton(
+                  onPressed: busy || !widget.loginEnabled
+                      ? null
+                      : () => run(() => bridge.start('signup')),
+                  child: const Text('Create account with a passkey'),
+                ),
+                const Text(
+                  'After opening an email, return to the browser where signup started. Reloading this page clears a pending passkey request. Return to the same signup form to retry, or sign in if the passkey was already created.',
                 ),
                 if (!widget.loginEnabled)
                   const Text(

@@ -101,6 +101,47 @@ class Bridge implements BrowserSessionBridge {
 }
 
 void main() {
+  testWidgets('signup ready uses explicit create label and manual prompt', (
+    t,
+  ) async {
+    final b = Bridge()..status = 'signup-ready';
+    await t.pumpWidget(MaterialApp(home: BrowserAccountPage(bridge: b)));
+    await t.pumpAndSettle();
+    expect(find.text('Create passkey'), findsOneWidget);
+    expect(b.prompts, 0);
+    await t.tap(find.text('Create passkey'));
+    await t.pumpAndSettle();
+    expect(b.prompts, 1);
+    await t.pumpWidget(const SizedBox());
+  });
+  testWidgets('clock and retry guidance remains readable at phone width', (
+    t,
+  ) async {
+    t.view.physicalSize = const Size(360, 780);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+    for (final status in ['check-clock-or-restart', 'signup-retry-required']) {
+      final b = Bridge()..status = status;
+      await t.pumpWidget(
+        MaterialApp(
+          home: BrowserAccountPage(key: ValueKey(status), bridge: b),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+      expect(
+        find.textContaining(
+          status == 'check-clock-or-restart'
+              ? 'Check your device date'
+              : 'Passkey setup did not finish',
+        ),
+        findsOneWidget,
+      );
+      await t.pumpWidget(const SizedBox());
+    }
+  });
+
   testWidgets('disabled connection is separate and does not launch auth', (
     t,
   ) async {
