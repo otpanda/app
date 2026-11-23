@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+
+import 'organization_contract.dart';
+import 'organization_panel.dart';
 
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -38,6 +42,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   bool busy = true;
   String status = 'loading', message = '';
   int revision = 0;
+  final organization = OrganizationStore();
+  bool organizationReady = false, organizationBusy = false;
+  int organizationEpoch = 0, organizationSnapshot = 0, organizationRequest = 0;
   Timer? expiryTick;
   int now() => widget.clock?.call() ?? DateTime.now().millisecondsSinceEpoch;
   @override
@@ -49,6 +56,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     expiryTick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && status == 'restored') {
         if (store.sessionExpired(now())) {
+          clearOrganization();
           store.clear();
           status = 'sign-in-required';
           message = 'Browser access expired. Sign in again.';
@@ -87,12 +95,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       status = bridge.status;
       if (status == 'restored' && loadAfter) {
         await store.load(now, includePrivateInbox: true);
+        await loadOrganization();
       } else if (status == 'sign-in-required') {
         message =
             'Sign-in did not finish. Start again when sign-in is available.';
       }
     } catch (_) {
       if (!mounted || attempt != revision) return;
+      clearOrganization();
       store.clear();
       status = bridge.status;
       message = 'Could not complete that request. Try again.';
@@ -101,11 +111,80 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
-  Future<void> refresh() =>
-      run(() => store.load(now, includePrivateInbox: true), loadAfter: false);
+  Future<void> refresh() => run(() async {
+    clearOrganization();
+    await store.load(now, includePrivateInbox: true);
+    if (bridge.status == 'restored') await loadOrganization();
+  }, loadAfter: false);
+  void clearOrganization() {
+    organizationEpoch++;
+    organizationRequest++;
+    organization.clear();
+    organizationReady = false;
+    organizationBusy = false;
+  }
+
+  Future<void> loadOrganization() async {
+    final epoch = organizationEpoch;
+    final request = ++organizationRequest;
+    final response = await bridge.organize('GET', '');
+    if (!mounted ||
+        epoch != organizationEpoch ||
+        request != organizationRequest) {
+      return;
+    }
+    if (response.status == 401) {
+      clearOrganization();
+      store.clear();
+      status = 'sign-in-required';
+      return;
+    }
+    if (response.status != 200) {
+      organizationReady = false;
+      return;
+    }
+    try {
+      organization.restore(
+        jsonDecode(response.body) as Map<String, dynamic>,
+        store.entries.map((e) => e.id),
+      );
+      organizationSnapshot++;
+      organizationReady = true;
+    } catch (_) {
+      organizationReady = false;
+    }
+  }
+
+  Future<void> saveOrganization() async {
+    if (!organizationReady || organizationBusy || status != 'restored') return;
+    final epoch = organizationEpoch;
+    setState(() => organizationBusy = true);
+    try {
+      final response = await bridge.organize(
+        'PUT',
+        jsonEncode({
+          'revision': organization.revision,
+          'document': organization.document(),
+        }),
+      );
+      if (!mounted || epoch != organizationEpoch) return;
+      if (response.status != 200) message = 'Organization was not saved. Refresh to check current cloud choices.';
+      await loadOrganization();
+    } catch (_) {
+      if (!mounted || epoch != organizationEpoch) return;
+      organizationReady = false;
+      message = 'Could not confirm organization changes. Refresh before editing again.';
+    } finally {
+      if (mounted && epoch == organizationEpoch) {
+        setState(() => organizationBusy = false);
+      }
+    }
+  }
+
   void clear() {
     revision++;
     bridge.clear();
+    clearOrganization();
     store.clear();
     setState(() {
       busy = false;
@@ -117,6 +196,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
+      clearOrganization();
       store.clear();
       if (mounted) setState(() {});
     }
@@ -126,6 +206,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   void dispose() {
     revision++;
     expiryTick?.cancel();
+    clearOrganization();
     store.clear();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -158,11 +239,26 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   }
 
   Future<void> copyAssigned(ReceivedCode code) async {
+    final epoch = organizationEpoch;
     if (status != 'restored' || !store.visibleCodes(now()).contains(code)) {
       return;
     }
     try {
       await Clipboard.setData(ClipboardData(text: code.value));
+      if (mounted &&
+          epoch == organizationEpoch &&
+          status == 'restored' &&
+          store.visibleCodes(now()).contains(code)) {
+        try {
+          await bridge.copied(code.entryId, now());
+          if (mounted && epoch == organizationEpoch) {
+            await loadOrganization();
+            if (mounted && epoch == organizationEpoch) setState(() {});
+          }
+        } catch (_) {
+          /* Clipboard success does not depend on ranking sync. */
+        }
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -304,19 +400,20 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     padding: EdgeInsets.all(16),
                     child: Text('No active codes in selected entries.'),
                   ),
-                for (final entry in store.entries)
-                  ListTile(
-                    title: Text(entry.service),
-                    subtitle: Text(
-                      entry.account.isEmpty
-                          ? 'No account label'
-                          : entry.account,
+                if (!organizationReady)
+                  for (final entry in store.entries)
+                    ListTile(
+                      title: Text(entry.service),
+                      subtitle: Text(
+                        entry.account.isEmpty
+                            ? 'No account label'
+                            : entry.account,
+                      ),
+                      trailing: Text(
+                        '${codes.where((c) => c.entryId == entry.id).length} active',
+                        semanticsLabel: 'Active code count',
+                      ),
                     ),
-                    trailing: Text(
-                      '${codes.where((c) => c.entryId == entry.id).length} active',
-                      semanticsLabel: 'Active code count',
-                    ),
-                  ),
               ],
               if (status != 'unsupported' && widget.loginEnabled)
                 OutlinedButton(
@@ -324,6 +421,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       ? null
                       : () {
                           revision++;
+                          clearOrganization();
                           store.clear();
                           try {
                             bridge.logout();
@@ -343,6 +441,21 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                   onPressed: clear,
                   child: const Text('Clear local access'),
                 ),
+              if (status == 'restored' && organizationReady)
+                AbsorbPointer(
+                  absorbing: organizationBusy,
+                  child: OrganizationPanel(
+                    key: ValueKey('$organizationEpoch:$organizationSnapshot'),
+                    store: organization,
+                    entries: [
+                      for (final e in store.entries)
+                        OrganizationPanelEntry(e.id, e.service, e.account),
+                    ],
+                    viewerEpoch: organizationSnapshot,
+                    onChanged: saveOrganization,
+                  ),
+                ),
+              if (organizationBusy) const LinearProgressIndicator(),
             ],
           ),
         ),
