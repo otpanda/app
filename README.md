@@ -38,3 +38,8 @@ trusted downloadable GitHub Releases. No production signing key is generated.
 ### Shared preview progress
 
 Responsive Otty branding, compact received codes, owned-entry create/edit/delete and source revoke confirmation are implemented with fictional data. Shared entries remain read-only. Source revocation changes a fictional source only, not a real upload connection or the demo code cards. The management read/write contracts have synthetic tests, but no platform network transport or live session integration yet. Native ARM64 debug compilation through source/access previews has passed locally; this is not a signed release or device-runtime verification.
+
+## Account/security and branding preview
+The account icon opens a clearly labelled setup preview with sample recovery readiness and last-option removal warnings. No credentials are collected or enrolled.24 Flutter tests cover preview behavior and320px layouts.
+
+`tool/brand_hosts.py` runs after reproducible host creation. It applies the approved Otty mascot to favicon/PWA/apple-touch, Android legacy/adaptive launchers, Windows/macOS icons, display titles and social-preview image. The PWA id/start/scope are `/app/`; descriptions explicitly state development-preview limitations. Public application identifiers and signing identity remain development-only and are not changed by branding. Generated desktop packaging still needs platform build verification. Browser/PWA/social services may cache old metadata.
