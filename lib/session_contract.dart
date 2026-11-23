@@ -71,6 +71,53 @@ class ReceivedCode {
   String toString() => 'ReceivedCode(redacted)';
 }
 
+class PrivateSource {
+  final String id, kind, label;
+  const PrivateSource(this.id, this.kind, this.label);
+  factory PrivateSource.fromJson(Map<String, dynamic> j) {
+    final kind = _text(j, 'kind');
+    if (!['sms', 'gmail', 'outlook'].contains(kind)) {
+      throw const FormatException('Invalid source kind');
+    }
+    return PrivateSource(
+      _text(j, 'source_id'),
+      kind,
+      _text(j, 'label', max: 120),
+    );
+  }
+  @override
+  String toString() => 'PrivateSource(redacted)';
+}
+
+class UnassignedCode {
+  final String sourceId, eventId, value;
+  final int receivedAt, expiresAt;
+  const UnassignedCode._(
+    this.sourceId,
+    this.eventId,
+    this.value,
+    this.receivedAt,
+    this.expiresAt,
+  );
+  factory UnassignedCode.fromJson(Map<String, dynamic> j) {
+    final r = j['receivedAt'],
+        e = j['expiresAt'],
+        v = _text(j, 'code', max: 32);
+    if (r is! int ||
+        e is! int ||
+        r < 0 ||
+        e <= r ||
+        e - r > 86400000 ||
+        !RegExp(r'^[A-Za-z0-9-]{4,32}$').hasMatch(v)) {
+      throw const FormatException('Invalid private code');
+    }
+    return UnassignedCode._(_text(j, 'sourceId'), _text(j, 'eventId'), v, r, e);
+  }
+  bool active(int now) => receivedAt <= now && now < expiresAt;
+  @override
+  String toString() => 'UnassignedCode(redacted)';
+}
+
 String _text(Map<String, dynamic> json, String key, {int max = 256}) {
   final value = json[key];
   if (value is! String || value.isEmpty || value.length > max) {
@@ -84,17 +131,30 @@ String _text(Map<String, dynamic> json, String key, {int max = 256}) {
 class CodeStore {
   final SessionTransport transport;
   int _generation = 0;
+  int? _sessionExpiresAt;
+  bool sessionExpired(int now) =>
+      _sessionExpiresAt != null && now >= _sessionExpiresAt!;
   List<ManagedEntry> _entries = const [];
   List<ReceivedCode> _codes = const [];
+  List<PrivateSource> _sources = const [];
+  List<UnassignedCode> _unassigned = const [];
+  List<PrivateSource> get sources => List.unmodifiable(_sources);
+  List<UnassignedCode> visibleUnassigned(int now) => List.unmodifiable(
+    _unassigned.where((c) => !sessionExpired(now) && c.active(now)),
+  );
   CodeStore(this.transport);
   List<ManagedEntry> get entries => List.unmodifiable(_entries);
-  List<ReceivedCode> visibleCodes(int now) =>
-      List.unmodifiable(_codes.where((code) => code.active(now)));
+  List<ReceivedCode> visibleCodes(int now) => List.unmodifiable(
+    _codes.where((code) => !sessionExpired(now) && code.active(now)),
+  );
 
   void clear() {
     _generation++;
+    _sessionExpiresAt = null;
     _entries = const [];
     _codes = const [];
+    _sources = const [];
+    _unassigned = const [];
   }
 
   Future<Map<String, dynamic>> _get(String path) async {
@@ -110,7 +170,10 @@ class CodeStore {
     return body;
   }
 
-  Future<void> load(int Function() clock) async {
+  Future<void> load(
+    int Function() clock, {
+    bool includePrivateInbox = false,
+  }) async {
     clear();
     final generation = _generation;
     try {
@@ -141,6 +204,41 @@ class CodeStore {
               .where((code) => known.contains(code.entryId) && code.active(now))
               .toList()
             ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+      List<PrivateSource> sources = const [];
+      List<UnassignedCode> unassigned = const [];
+      if (includePrivateInbox) {
+        final sourceBody = await _get('/v1/manage/sources');
+        if (generation != _generation) return;
+        sources = _list(sourceBody, 'sources', 100)
+            .where((j) => j['revoked_at'] == null)
+            .map(PrivateSource.fromJson)
+            .toList();
+        if (sources.map((s) => s.id).toSet().length != sources.length) {
+          throw const FormatException('Duplicate source');
+        }
+        final inboxBody = await _get('/v1/manage/unassigned');
+        if (generation != _generation) return;
+        final knownSources = sources.map((s) => s.id).toSet();
+        unassigned =
+            _list(inboxBody, 'records', 20)
+                .map(UnassignedCode.fromJson)
+                .where(
+                  (c) => knownSources.contains(c.sourceId) && c.active(clock()),
+                )
+                .toList()
+              ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+        if (unassigned
+                .map((c) => jsonEncode([c.sourceId, c.eventId]))
+                .toSet()
+                .length !=
+            unassigned.length) {
+          throw const FormatException('Duplicate private code');
+        }
+      }
+      if (expires <= clock()) throw const ClientFailure(401);
+      _sessionExpiresAt = expires;
+      _sources = sources;
+      _unassigned = unassigned;
       _entries = entries;
       _codes = codes;
     } catch (error) {

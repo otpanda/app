@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'browser_session.dart';
@@ -17,7 +20,13 @@ class _ReadTransport implements SessionTransport {
 class BrowserAccountPage extends StatefulWidget {
   final BrowserSessionBridge? bridge;
   final bool loginEnabled;
-  const BrowserAccountPage({super.key, this.bridge, this.loginEnabled = false});
+  final int Function()? clock;
+  const BrowserAccountPage({
+    super.key,
+    this.bridge,
+    this.loginEnabled = false,
+    this.clock,
+  });
   @override
   State<BrowserAccountPage> createState() => _BrowserAccountPageState();
 }
@@ -29,12 +38,24 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   bool busy = true;
   String status = 'loading', message = '';
   int revision = 0;
+  Timer? expiryTick;
+  int now() => widget.clock?.call() ?? DateTime.now().millisecondsSinceEpoch;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     bridge = widget.bridge ?? createBrowserSession();
     store = CodeStore(_ReadTransport(bridge));
+    expiryTick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && status == 'restored') {
+        if (store.sessionExpired(now())) {
+          store.clear();
+          status = 'sign-in-required';
+          message = 'Browser access expired. Sign in again.';
+        }
+        setState(() {});
+      }
+    });
     initialize();
   }
 
@@ -65,7 +86,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       if (!mounted || attempt != revision) return;
       status = bridge.status;
       if (status == 'restored' && loadAfter) {
-        await store.load(() => DateTime.now().millisecondsSinceEpoch);
+        await store.load(now, includePrivateInbox: true);
       } else if (status == 'sign-in-required') {
         message =
             'Sign-in did not finish. Start again when sign-in is available.';
@@ -80,10 +101,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
-  Future<void> refresh() => run(
-    () => store.load(() => DateTime.now().millisecondsSinceEpoch),
-    loadAfter: false,
-  );
+  Future<void> refresh() =>
+      run(() => store.load(now, includePrivateInbox: true), loadAfter: false);
   void clear() {
     revision++;
     bridge.clear();
@@ -106,14 +125,41 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   @override
   void dispose() {
     revision++;
+    expiryTick?.cancel();
     store.clear();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
+  Future<void> copyPrivate(UnassignedCode code) async {
+    if (status != 'restored' ||
+        !code.active(now()) ||
+        !store.visibleUnassigned(now()).contains(code)) {
+      return;
+    }
+    try {
+      await Clipboard.setData(ClipboardData(text: code.value));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Code copied. Other apps may retain clipboard contents.',
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not copy code.')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final codes = store.visibleCodes(DateTime.now().millisecondsSinceEpoch);
+    final codes = store.visibleCodes(now());
     return Scaffold(
       appBar: AppBar(title: const Text('Browser account')),
       body: Center(
@@ -177,6 +223,29 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                   ),
               ],
               if (status == 'restored') ...[
+                if (store.visibleUnassigned(now()).isNotEmpty) ...[
+                  const Text(
+                    'Fresh private unassigned codes',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const Text(
+                    'Only you can see these. No service or shared entry has been selected.',
+                  ),
+                  for (final code in store.visibleUnassigned(now()))
+                    ListTile(
+                      title: Text(code.value),
+                      subtitle: Text(
+                        store.sources
+                            .firstWhere((s) => s.id == code.sourceId)
+                            .label,
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Copy private code',
+                        onPressed: () => copyPrivate(code),
+                        icon: const Icon(Icons.copy_outlined),
+                      ),
+                    ),
+                ],
                 FilledButton(
                   onPressed: busy ? null : refresh,
                   child: const Text('Refresh real codes'),
@@ -184,7 +253,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 if (!busy && codes.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(16),
-                    child: Text('No active real codes.'),
+                    child: Text('No active codes in selected entries.'),
                   ),
                 for (final entry in store.entries)
                   ListTile(

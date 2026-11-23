@@ -28,6 +28,132 @@ Map<String, Object> code(String id, {int received = 100, int expires = 200}) =>
       'expiresAt': expires,
     };
 void main() {
+  test('private inbox only includes live owner source records, retains empty entries and redacts', () async {
+    final store = CodeStore(
+      FakeTransport((path) async {
+        if (path.endsWith('/session')) {
+          return ok({'ownerId': 'owner', 'expiresAt': 999});
+        }
+        if (path.endsWith('/entries')) {
+          return ok({
+            'entries': [entry('empty')],
+          });
+        }
+        if (path.endsWith('/sources')) {
+          return ok({
+            'sources': [
+              {
+                'source_id': 'mine',
+                'kind': 'sms',
+                'label': 'Phone',
+                'revoked_at': null,
+              },
+              {
+                'source_id': 'revoked',
+                'kind': 'gmail',
+                'label': 'Old mailbox',
+                'revoked_at': 1,
+              },
+            ],
+          });
+        }
+        if (path.endsWith('/unassigned')) {
+          return ok({
+            'records': [
+              {
+                'sourceId': 'mine',
+                'eventId': 'one',
+                'code': '123456',
+                'receivedAt': 100,
+                'expiresAt': 200,
+              },
+              {
+                'sourceId': 'other',
+                'eventId': 'two',
+                'code': '999999',
+                'receivedAt': 100,
+                'expiresAt': 200,
+              },
+              {
+                'sourceId': 'revoked',
+                'eventId': 'three',
+                'code': '333333',
+                'receivedAt': 100,
+                'expiresAt': 200,
+              },
+            ],
+          });
+        }
+        return ok({'records': []});
+      }),
+    );
+    await store.load(() => 150, includePrivateInbox: true);
+    expect(store.entries.single.id, 'empty');
+    expect(store.sources.single.label, 'Phone');
+    expect(store.visibleUnassigned(150).single.value, '123456');
+    expect(store.visibleUnassigned(200), isEmpty);
+    expect(
+      store.visibleUnassigned(150).single.toString(),
+      isNot(contains('123456')),
+    );
+    store.clear();
+    expect(store.sources, isEmpty);
+    expect(store.visibleUnassigned(150), isEmpty);
+  });
+  test('clear during private inbox request prevents late source or code publication', () async {
+    final pending = Completer<SessionResponse>();
+    final store = CodeStore(
+      FakeTransport((p) async {
+        if (p.endsWith('/session')) {
+          return ok({'ownerId': 'owner', 'expiresAt': 999});
+        }
+        if (p.endsWith('/entries')) return ok({'entries': []});
+        if (p.endsWith('/sources')) return pending.future;
+        return ok({'records': []});
+      }),
+    );
+    final load = store.load(() => 150, includePrivateInbox: true);
+    await Future<void>.delayed(Duration.zero);
+    store.clear();
+    pending.complete(
+      ok({
+        'sources': [
+          {
+            'source_id': 'mine',
+            'kind': 'sms',
+            'label': 'Phone',
+            'revoked_at': null,
+          },
+        ],
+      }),
+    );
+    await load;
+    expect(store.sources, isEmpty);
+    expect(store.entries, isEmpty);
+  });
+  test('private endpoint denial clears the complete snapshot', () async {
+    final store = CodeStore(
+      FakeTransport((p) async {
+        if (p.endsWith('/session')) {
+          return ok({'ownerId': 'owner', 'expiresAt': 999});
+        }
+        if (p.endsWith('/entries')) {
+          return ok({
+            'entries': [entry('a')],
+          });
+        }
+        if (p.endsWith('/sources')) return const SessionResponse(401, '{}');
+        return ok({'records': []});
+      }),
+    );
+    await expectLater(
+      store.load(() => 150, includePrivateInbox: true),
+      throwsA(isA<ClientFailure>()),
+    );
+    expect(store.entries, isEmpty);
+    expect(store.sources, isEmpty);
+  });
+
   test(
     'only current codes for visible entries, explicit capabilities, redaction',
     () async {
