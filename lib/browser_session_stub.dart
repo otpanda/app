@@ -15,6 +15,8 @@ class _Unsupported implements BrowserSessionBridge {
   @override
   void clear() {}
   @override
+  void logout() {}
+  @override
   Future<SessionResponse> read(String path) async =>
       throw const ClientFailure();
 }
