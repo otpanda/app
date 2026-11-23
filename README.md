@@ -8,12 +8,12 @@ and landing page remain separate components.
 
 This is a fictional-data development shell, not a cloud account or replacement
 for the existing web client. It implements search, code cards, an explicit
-owned-entry assignment dialog and navigation. Source/access management, login,
-secure storage, SMS collection and management parity are not connected yet.
+owned-entry assignment dialog and navigation. Source/access previews include separate people/app permissions and confirmation-based revocation. Login,
+secure storage, SMS collection and live management are not connected yet.
 No Google SDK or production credential is bundled. Existing preview remains at
 https://otpanda.github.io/web/ until replacement parity is verified.
 
-Tested locally with Flutter 3.50.1: clean analyzer, three model/widget tests and
+Tested locally with Flutter 3.50.1: clean analyzer, 21 model/widget/contract tests and
 web release build. Inspected rendered 320/390/1280 layouts. This is not evidence
 of native Google login, Android runtime behavior or desktop readiness.
 
@@ -31,11 +31,10 @@ A separate FLOSS F-Droid flavor is allowed if required; OS-level auth there is
 preferred but unverified. Flutter does not remove that dependency constraint.
 SMS collection remains opt-in and separate from ordinary client login.
 
-CI produces a web artifact, not a deployed preview or a signed release. Android
-APK and desktop CI targets will follow their platform build checks. Dedicated
+CI produces a web artifact and an ARM64 development debug APK, not a deployed preview or a trusted signed release. The debug APK uses the development identifier and a temporary runner debug key, not a stable update/sign-in identity. It is for compile checks and development only. Desktop CI targets still need their platform checks. Dedicated
 release signing/key custody and stable package identity must be settled before
 trusted downloadable GitHub Releases. No production signing key is generated.
 
 ### Shared preview progress
 
-Responsive Otty branding, compact received codes, owned-entry create/edit/delete and source revoke confirmation are implemented with fictional data. Shared entries remain read-only. Source revocation changes a fictional source only, not a real upload connection or the demo code cards. The management read/write contracts have synthetic tests, but no platform network transport or live session integration yet. Native ARM64 debug compilation has passed locally; this is not a signed release or device-runtime verification.
+Responsive Otty branding, compact received codes, owned-entry create/edit/delete and source revoke confirmation are implemented with fictional data. Shared entries remain read-only. Source revocation changes a fictional source only, not a real upload connection or the demo code cards. The management read/write contracts have synthetic tests, but no platform network transport or live session integration yet. Native ARM64 debug compilation through source/access previews has passed locally; this is not a signed release or device-runtime verification.
