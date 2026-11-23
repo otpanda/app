@@ -1,4 +1,4 @@
-# OTPanda client
+# OTPanda app
 
 One Flutter project for Android, web, Linux, Windows and macOS. Android and web
 are first; desktop platform integration/testing is still required. API, extension
@@ -20,7 +20,7 @@ of native Google login, Android runtime behavior or desktop readiness.
 ## Build
 
 Use Flutter 3.50.1. Run `bash tool/bootstrap.sh`, `flutter test` and
-`flutter build web --base-href /client/ --no-wasm-dry-run`. Platform host folders
+`flutter build web --base-href /app/ --no-wasm-dry-run`. Platform host folders
 are generated from the pinned Flutter version during this first scaffold. The
 identifier `org.otpanda.development.otpanda_client` is development-only, not the
 selected release identity. Host folders should be checked in once stable platform
@@ -31,7 +31,7 @@ A separate FLOSS F-Droid flavor is allowed if required; OS-level auth there is
 preferred but unverified. Flutter does not remove that dependency constraint.
 SMS collection remains opt-in and separate from ordinary client login.
 
-CI produces a web artifact and an ARM64 development debug APK, not a deployed preview or a trusted signed release. The debug APK uses the development identifier and a temporary runner debug key, not a stable update/sign-in identity. It is for compile checks and development only. Desktop CI targets still need their platform checks. Dedicated
+CI checks web and Android on GitHub Actions. Successful main builds deploy the fictional-data Flutter preview to https://otpanda.github.io/app/. This is not a working cloud account or a trusted signed release. CI also produces a web artifact and an ARM64 development debug APK. The debug APK uses the development identifier and a temporary runner debug key, not a stable update/sign-in identity. It is for compile checks and development only. Desktop CI targets still need their platform checks. Dedicated
 release signing/key custody and stable package identity must be settled before
 trusted downloadable GitHub Releases. No production signing key is generated.
 
