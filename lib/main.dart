@@ -47,6 +47,7 @@ class ClientHome extends StatefulWidget {
 class _ClientHomeState extends State<ClientHome> {
   int tab = 0;
   String query = '';
+  int entrySequence = 0;
   final entries = [
     const AccountEntry('north', 'Northstar', 'alex@example.test', true),
     const AccountEntry('harbor', 'Harbor', 'team@example.test', false),
@@ -133,6 +134,183 @@ class _ClientHomeState extends State<ClientHome> {
       });
     }
   }
+
+  Widget dialogTitle(BuildContext context, String title) => Row(
+    children: [
+      Expanded(child: Text(title)),
+      IconButton(
+        tooltip: 'Close dialog',
+        onPressed: () => Navigator.pop(context),
+        icon: const Icon(Icons.close),
+      ),
+    ],
+  );
+
+  Future<void> editEntry([AccountEntry? entry]) async {
+    if (entry != null && !entry.manage) return;
+    final service = TextEditingController(text: entry?.service ?? '');
+    final account = TextEditingController(text: entry?.account ?? '');
+    final form = GlobalKey<FormState>();
+    final result = await showDialog<AccountEntry>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: dialogTitle(context, entry == null ? 'Add entry' : 'Edit entry'),
+        content: SingleChildScrollView(
+          child: Form(
+            key: form,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Fictional preview only. This does not create a real account, connect a source or add an authenticator key.',
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: service,
+                  maxLength: 120,
+                  decoration: const InputDecoration(
+                    labelText: 'Service or entry label',
+                  ),
+                  validator: (v) => v == null || v.trim().isEmpty
+                      ? 'Enter a service or label.'
+                      : null,
+                ),
+                TextFormField(
+                  controller: account,
+                  maxLength: 120,
+                  decoration: const InputDecoration(
+                    labelText: 'Username or login (optional)',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (form.currentState!.validate()) {
+                Navigator.pop(
+                  context,
+                  AccountEntry(
+                    entry?.id ?? 'demo-${++entrySequence}',
+                    service.text.trim(),
+                    account.text.trim(),
+                    true,
+                  ),
+                );
+              }
+            },
+            child: Text(entry == null ? 'Create entry' : 'Save changes'),
+          ),
+        ],
+      ),
+    );
+    // Dispose after the dialog's closing animation releases its text fields.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    service.dispose();
+    account.dispose();
+    if (result != null && mounted) {
+      setState(() {
+        final index = entries.indexWhere((e) => e.id == result.id);
+        if (index < 0) {
+          entries.add(result);
+        } else {
+          entries[index] = result;
+        }
+      });
+    }
+  }
+
+  Future<void> deleteEntry(AccountEntry entry) async {
+    if (!entry.manage) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: dialogTitle(context, 'Delete entry?'),
+        content: Text(
+          'Delete ${entry.service} and its fictional saved code? This cannot be undone except by restarting this demo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete entry'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      setState(() {
+        entries.removeWhere((e) => e.id == entry.id);
+        codes.remove(entry.id);
+      });
+    }
+  }
+
+  Widget entryManagement(List<AccountEntry> visible) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Align(
+        alignment: Alignment.centerRight,
+        child: FilledButton.icon(
+          onPressed: () => editEntry(),
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('Add entry'),
+        ),
+      ),
+      const SizedBox(height: 12),
+      if (visible.isEmpty)
+        const Padding(
+          padding: EdgeInsets.all(18),
+          child: Text('No matching entries.'),
+        ),
+      ...visible.map(
+        (entry) => Padding(
+          padding: const EdgeInsets.only(bottom: 11),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  identity(entry),
+                  const SizedBox(height: 10),
+                  if (entry.manage)
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        OutlinedButton(
+                          onPressed: () => editEntry(entry),
+                          child: const Text('Edit entry'),
+                        ),
+                        TextButton(
+                          onPressed: () => deleteEntry(entry),
+                          child: const Text('Delete entry'),
+                        ),
+                      ],
+                    )
+                  else
+                    const Text(
+                      'Shared, read-only. Only the owner can change this entry.',
+                      style: TextStyle(fontSize: 11, color: Color(0xff657e70)),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ],
+  );
 
   Future<void> copy(String value) async {
     await Clipboard.setData(ClipboardData(text: value));
@@ -423,7 +601,7 @@ class _ClientHomeState extends State<ClientHome> {
               grid(rest, width - (desktop ? 0 : 24), !desktop),
             ],
           ] else if (tab == 4)
-            grid(visible, width - (desktop ? 0 : 24), !desktop)
+            entryManagement(visible)
           else if (tab == 3)
             unassigned ? unassignedCard() : const Text('No unassigned codes.')
           else
