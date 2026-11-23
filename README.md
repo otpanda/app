@@ -35,3 +35,7 @@ CI produces a web artifact, not a deployed preview or a signed release. Android
 APK and desktop CI targets will follow their platform build checks. Dedicated
 release signing/key custody and stable package identity must be settled before
 trusted downloadable GitHub Releases. No production signing key is generated.
+
+### Shared preview progress
+
+Responsive Otty branding, compact received codes, owned-entry create/edit/delete and source revoke confirmation are implemented with fictional data. Shared entries remain read-only. Source revocation changes a fictional source only, not a real upload connection or the demo code cards. The management read/write contracts have synthetic tests, but no platform network transport or live session integration yet. Native ARM64 debug compilation has passed locally; this is not a signed release or device-runtime verification.
