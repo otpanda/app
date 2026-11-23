@@ -173,6 +173,8 @@ void main() {
   testWidgets('background, local clear and signout remove private code', (
     t,
   ) async {
+    await t.binding.setSurfaceSize(const Size(800, 1100));
+    addTearDown(() => t.binding.setSurfaceSize(null));
     for (final action in ['background', 'clear', 'signout']) {
       final b = privateBridge(100000);
       await t.pumpWidget(
