@@ -15,6 +15,7 @@ p=Path('android/app/build.gradle.kts')
 s=p.read_text().replace('            signingConfig = signingConfigs.getByName("debug")\n','')
 p.write_text(s)
 PY
+node --test test/session_bootstrap_test.cjs
 python3 tool/brand_hosts.py
 python3 tool/test_branding.py/test_branding.py
 flutter pub get
