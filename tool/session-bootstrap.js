@@ -8,6 +8,16 @@
   const encode = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
   const random = () => encode(crypto.getRandomValues(new Uint8Array(32)));
   const clear = () => { generation++; access = undefined; expires = 0; loginPending=undefined; };
+  // Bound bytes as they arrive. A post-buffer string length check is too late.
+  const readBounded = async (response, limit) => {
+    const advertised=response.headers?.get('content-length');
+    if(advertised!==null&&advertised!==undefined&&(!/^[0-9]+$/.test(advertised)||Number(advertised)>limit))throw Error('Response too large');
+    if(!response.body?.getReader)throw Error('Readable response required');
+    const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});let size=0,text='';
+    try {while(true){const {done,value}=await reader.read();if(done)break;if(!(value instanceof Uint8Array))throw Error('Byte stream required');size+=value.byteLength;if(size>limit)throw Error('Response too large');text+=decoder.decode(value,{stream:true});}return text+decoder.decode();}
+    catch(error){try{await reader.cancel();}catch{}throw error;}
+    finally{reader.releaseLock();}
+  };
   const pending = location.hash;
   // Callback fragment is always removed before a promise, fetch or Flutter load.
   if (pending) history.replaceState(null, '', location.pathname + location.search);
@@ -32,7 +42,7 @@
       const code=values.get('code');if(!/^otpda_[A-Za-z0-9_-]{55}$/.test(code))throw Error();
       const response = await fetch(API+'/auth/exchange', {method:'POST', credentials:'omit', cache:'no-store', redirect:'error', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code,verifier:p.verifier,redirect_uri:REDIRECT})});
       if (!response.ok) throw Error();
-      const text = await response.text(); if (text.length > 2048) throw Error();
+      const text = await readBounded(response,2048);
       const result = JSON.parse(text);
       if (Object.keys(result).sort().join(',') !== 'access,accessExpiresAt' || !/^otpda_[A-Za-z0-9_-]{55}$/.test(result.access) || !Number.isSafeInteger(result.accessExpiresAt) || result.accessExpiresAt <= Date.now() || result.accessExpiresAt > Date.now()+300000) throw Error();
       if(attempt!==generation)return;
@@ -48,7 +58,7 @@
     read:async path=>{
       if(!['/v1/manage/session','/v1/manage/entries','/v1/manage/active-codes'].includes(path))throw Error('Read path required');
       const attempt=generation,token=Date.now()<expires?access:undefined;if(!token){if(access!==undefined){clear();status='sign-in-required';}return {status:401,body:'{}'};}
-      const r=await fetch(API+path,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}});const body=await r.text();if(body.length>524288)throw Error('Response too large');
+      const r=await fetch(API+path,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}});const body=await readBounded(r,524288);
       if(attempt!==generation)return {status:401,body:'{}'};
       if(r.status===401){clear();status='sign-in-required';}
       return {status:r.status,body};
@@ -63,7 +73,7 @@
         if(attempt!==generation)return;
         if(!c||c.type!=='public-key')throw Error();
         const response={id:c.id,rawId:encode(new Uint8Array(c.rawId)),type:c.type,clientExtensionResults:c.getClientExtensionResults(),response:{clientDataJSON:encode(new Uint8Array(c.response.clientDataJSON)),authenticatorData:encode(new Uint8Array(c.response.authenticatorData)),signature:encode(new Uint8Array(c.response.signature)),userHandle:c.response.userHandle?encode(new Uint8Array(c.response.userHandle)):null}};
-        const r=await fetch(API+'/auth/login/verify',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:pending.ceremony.token,response})});if(!r.ok)throw Error();const text=await r.text();if(text.length>2048)throw Error();const result=JSON.parse(text);
+        const r=await fetch(API+'/auth/login/verify',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:pending.ceremony.token,response})});if(!r.ok)throw Error();const text=await readBounded(r,2048);const result=JSON.parse(text);
         if(Object.keys(result).sort().join(',')!=='expiresAt,handoff'||!/^otpda_[A-Za-z0-9_-]{55}$/.test(result.handoff)||!Number.isSafeInteger(result.expiresAt)||result.expiresAt<=Date.now()||result.expiresAt>Date.now()+60000)throw Error();
         if(attempt!==generation)return;
         sessionStorage.setItem(KEY,JSON.stringify(pending.saved));status='completing';location.assign(API+'/auth/login/complete#'+new URLSearchParams({handoff:result.handoff}));
