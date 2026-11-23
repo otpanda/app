@@ -44,6 +44,7 @@
     status:()=>status,
     access:()=>{if(access!==undefined&&Date.now()>=expires){clear();status='sign-in-required';}return access;},
     clear:()=>{clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
+    logout:()=>{clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}location.assign(API+'/auth/device/logout');},
     read:async path=>{
       if(!['/v1/manage/session','/v1/manage/entries','/v1/manage/active-codes'].includes(path))throw Error('Read path required');
       const attempt=generation,token=Date.now()<expires?access:undefined;if(!token){if(access!==undefined){clear();status='sign-in-required';}return {status:401,body:'{}'};}
