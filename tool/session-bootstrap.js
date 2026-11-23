@@ -30,13 +30,20 @@
       if (location.origin + location.pathname !== REDIRECT || location.search || pending.length > 8192 || !saved) throw Error();
       const values = new URLSearchParams(pending.slice(1));
       const state=values.get('state'),p=JSON.parse(saved),now=Date.now();
-      if(!/^[A-Za-z0-9_-]{43}$/.test(state)||state!==p.state||!/^[A-Za-z0-9_-]{43}$/.test(p.verifier)||!Number.isSafeInteger(p.created)||now<p.created||now-p.created>300000)throw Error();
-      if([...values.keys()].sort().join(',')==='login,state'){
-        const encoded=values.get('login');if(!/^[A-Za-z0-9_-]{1,6000}$/.test(encoded))throw Error();
+      if(!/^[A-Za-z0-9_-]{43}$/.test(state)||state!==p.state||!/^[A-Za-z0-9_-]{43}$/.test(p.verifier)||!Number.isSafeInteger(p.created)||now<p.created||now-p.created>(values.has('signup')?900000:300000))throw Error();
+      if(['login,state','signup,state'].includes([...values.keys()].sort().join(','))){
+        const registration=values.has('signup');
+        const encoded=values.get(registration?'signup':'login');if(!/^[A-Za-z0-9_-]{1,6000}$/.test(encoded))throw Error();
         const c=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(atob(encoded.replaceAll('-','+').replaceAll('_','/')),v=>v.charCodeAt(0))));
-        if(Object.keys(c).sort().join(',')!=='expiresAt,options,token'||!/^otpda_[A-Za-z0-9_-]{55}$/.test(c.token)||!Number.isSafeInteger(c.expiresAt)||c.expiresAt<=now||c.expiresAt>now+120000)throw Error();
-        const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','userVerification','allowCredentials','extensions'].includes(k))||o.rpId!=='otpanda.github.io'||o.userVerification!=='required'||!/^[A-Za-z0-9_-]{43}$/.test(o.challenge)||o.timeout!==120000||(o.allowCredentials!==undefined&&(!Array.isArray(o.allowCredentials)||o.allowCredentials.length))||(o.extensions!==undefined&&Object.keys(o.extensions).length))throw Error();
-        loginPending={ceremony:c,saved:p};status='passkey-ready';return;
+        if(Object.keys(c).sort().join(',')!=='expiresAt,options,token'||!/^otpda_[A-Za-z0-9_-]{55}$/.test(c.token)||!Number.isSafeInteger(c.expiresAt))throw Error();
+        if(c.expiresAt<=now||c.expiresAt>now+120000){clear();status='check-clock-or-restart';return;}
+        const o=c.options;
+        if(registration){
+          if(!o||Object.keys(o).some(k=>!['rp','user','challenge','pubKeyCredParams','timeout','attestation','excludeCredentials','authenticatorSelection','extensions','hints'].includes(k))||o.rp?.id!=='otpanda.github.io'||o.rp.name!=='OTPanda'||typeof o.user?.id!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(o.user.id)||typeof o.user.name!=='string'||o.user.name.length>254||typeof o.user.displayName!=='string'||o.user.displayName.length>254||!/^[A-Za-z0-9_-]{43}$/.test(o.challenge)||o.timeout!==120000||o.attestation!=='none'||o.authenticatorSelection?.residentKey!=='required'||o.authenticatorSelection?.userVerification!=='required'||!Array.isArray(o.pubKeyCredParams)||o.pubKeyCredParams.length!==2||o.pubKeyCredParams.some(v=>v.type!=='public-key'||![-7,-257].includes(v.alg))||!Array.isArray(o.excludeCredentials)||o.excludeCredentials.length||(o.extensions&&Object.keys(o.extensions).some(k=>k!=='credProps'||o.extensions[k]!==true))||(o.hints&&(!Array.isArray(o.hints)||o.hints.length)))throw Error();
+        }else{
+const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','userVerification','allowCredentials','extensions'].includes(k))||o.rpId!=='otpanda.github.io'||o.userVerification!=='required'||!/^[A-Za-z0-9_-]{43}$/.test(o.challenge)||o.timeout!==120000||(o.allowCredentials!==undefined&&(!Array.isArray(o.allowCredentials)||o.allowCredentials.length))||(o.extensions!==undefined&&Object.keys(o.extensions).length))throw Error();
+        }
+        loginPending={ceremony:c,saved:p,registration};status=registration?'signup-ready':'passkey-ready';return;
       }
       if ([...values.keys()].sort().join(',') !== 'code,state') throw Error();
       const code=values.get('code');if(!/^otpda_[A-Za-z0-9_-]{55}$/.test(code))throw Error();
@@ -80,28 +87,28 @@
       if(r.status===401){clear();status='sign-in-required';}return {status:r.status,body};
     },
     passkey:async()=>{
-      const pending=loginPending;if(!pending||status!=='passkey-ready')throw Error('Start sign-in again');
+      const pending=loginPending;if(!pending||!['passkey-ready','signup-ready'].includes(status))throw Error('Start sign-in again');
       loginPending=undefined;const attempt=++generation;status='authenticating';
       try{
-        if(pending.ceremony.expiresAt<=Date.now()||Date.now()-pending.saved.created>300000)throw Error();
+        if(pending.ceremony.expiresAt<=Date.now()||Date.now()-pending.saved.created>(pending.registration?900000:300000))throw Error();
         const decode=v=>Uint8Array.from(atob(v.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0));
-        const o=pending.ceremony.options,c=await navigator.credentials.get({publicKey:{rpId:'otpanda.github.io',challenge:decode(o.challenge),timeout:Math.min(120000,pending.ceremony.expiresAt-Date.now()),userVerification:'required'}});
+        const o=pending.ceremony.options,c=pending.registration?await navigator.credentials.create({publicKey:{rp:o.rp,user:{...o.user,id:decode(o.user.id)},challenge:decode(o.challenge),pubKeyCredParams:o.pubKeyCredParams,timeout:Math.min(120000,pending.ceremony.expiresAt-Date.now()),attestation:'none',authenticatorSelection:{residentKey:'required',userVerification:'required'},excludeCredentials:[],extensions:{credProps:true}}}):await navigator.credentials.get({publicKey:{rpId:'otpanda.github.io',challenge:decode(o.challenge),timeout:Math.min(120000,pending.ceremony.expiresAt-Date.now()),userVerification:'required'}});
         if(attempt!==generation)return;
         if(!c||c.type!=='public-key')throw Error();
-        const response={id:c.id,rawId:encode(new Uint8Array(c.rawId)),type:c.type,clientExtensionResults:c.getClientExtensionResults(),response:{clientDataJSON:encode(new Uint8Array(c.response.clientDataJSON)),authenticatorData:encode(new Uint8Array(c.response.authenticatorData)),signature:encode(new Uint8Array(c.response.signature)),userHandle:c.response.userHandle?encode(new Uint8Array(c.response.userHandle)):null}};
-        const r=await fetch(API+'/auth/login/verify',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:pending.ceremony.token,response})});if(!r.ok)throw Error();const text=await readBounded(r,2048);const result=JSON.parse(text);
+        const response={id:c.id,rawId:encode(new Uint8Array(c.rawId)),type:c.type,clientExtensionResults:c.getClientExtensionResults(),response:pending.registration?{clientDataJSON:encode(new Uint8Array(c.response.clientDataJSON)),attestationObject:encode(new Uint8Array(c.response.attestationObject)),transports:typeof c.response.getTransports==='function'?c.response.getTransports():[]}:{clientDataJSON:encode(new Uint8Array(c.response.clientDataJSON)),authenticatorData:encode(new Uint8Array(c.response.authenticatorData)),signature:encode(new Uint8Array(c.response.signature)),userHandle:c.response.userHandle?encode(new Uint8Array(c.response.userHandle)):null}};
+        const r=await fetch(API+(pending.registration?'/auth/signup/verify':'/auth/login/verify'),{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:pending.ceremony.token,response})});if(!r.ok)throw Error();const text=await readBounded(r,2048);const result=JSON.parse(text);
         if(Object.keys(result).sort().join(',')!=='expiresAt,handoff'||!/^otpda_[A-Za-z0-9_-]{55}$/.test(result.handoff)||!Number.isSafeInteger(result.expiresAt)||result.expiresAt<=Date.now()||result.expiresAt>Date.now()+60000)throw Error();
         if(attempt!==generation)return;
-        sessionStorage.setItem(KEY,JSON.stringify(pending.saved));status='completing';location.assign(API+'/auth/login/complete#'+new URLSearchParams({handoff:result.handoff}));
-      }catch{if(attempt===generation){clear();status='sign-in-required';}}
+        sessionStorage.setItem(KEY,JSON.stringify({...pending.saved,created:Date.now()}));status='completing';location.assign(API+'/auth/login/complete#'+new URLSearchParams({handoff:result.handoff}));
+      }catch{if(attempt===generation){clear();status=pending.registration?'signup-retry-required':'sign-in-required';}}
     },
     start:async(mode='restore')=>{
       if(location.origin+location.pathname!==REDIRECT||location.search)throw Error('Canonical app URL required');
-      if(!['restore','login'].includes(mode))throw Error('Known session flow required');
+      if(!['restore','login','signup'].includes(mode))throw Error('Known session flow required');
       clear();const attempt=generation,verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
       if(attempt!==generation)return;
       sessionStorage.setItem(KEY,JSON.stringify({verifier,state,created:Date.now()}));
-      const url=new URL(API+(mode==='login'?'/auth/login/start':'/auth/restore'));url.search=new URLSearchParams({challenge,state,redirect_uri:REDIRECT});location.assign(url.href);
+      const url=new URL(API+(mode==='signup'?'/auth/signup/start':mode==='login'?'/auth/login/start':'/auth/restore'));url.search=new URLSearchParams({challenge,state,redirect_uri:REDIRECT});location.assign(url.href);
     },
   }),writable:false,configurable:false});
 })();
