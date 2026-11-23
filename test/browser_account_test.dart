@@ -15,6 +15,7 @@ class Bridge implements BrowserSessionBridge {
   int? clockNow;
   int lifetime = 60000;
   List<Map<String, Object>> sources = [], inbox = [];
+  List<Map<String, Object>> entries = [], codes = [];
   @override
   Future<void> get ready async {}
   @override
@@ -57,7 +58,8 @@ class Bridge implements BrowserSessionBridge {
           'expiresAt':
               (clockNow ?? DateTime.now().millisecondsSinceEpoch) + lifetime,
         },
-        '/v1/manage/entries' => {'entries': []},
+        '/v1/manage/entries' => {'entries': entries},
+        '/v1/manage/active-codes' => {'records': codes},
         _ => {'records': []},
       }),
     );
@@ -263,4 +265,70 @@ void main() {
     expect(find.text('654321'), findsNothing);
     expect(find.text('Browser access expired. Sign in again.'), findsOneWidget);
   });
+  testWidgets(
+    'authorized assigned code shows shared boundary and expires before copy',
+    (t) async {
+      var clock = 100000;
+      var copied = '';
+      t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied = (call.arguments as Map)['text'] as String;
+          }
+          return null;
+        },
+      );
+      final b = privateBridge(clock)
+        ..entries = [
+          {
+            'entry_id': 'shared',
+            'service_name': 'Shared service',
+            'account_name': 'viewer',
+            'capabilities': {'manage': false},
+          },
+        ]
+        ..codes = [
+          {
+            'entryId': 'shared',
+            'code': '123456',
+            'receivedAt': clock - 1000,
+            'expiresAt': clock + 2000,
+          },
+        ];
+      await t.binding.setSurfaceSize(const Size(800, 1100));
+      addTearDown(() => t.binding.setSurfaceSize(null));
+      await t.pumpWidget(
+        MaterialApp(
+          home: BrowserAccountPage(bridge: b, clock: () => clock),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(find.text('123456'), findsOneWidget);
+      expect(find.textContaining('Read-only · Source hidden'), findsOneWidget);
+      expect(
+        t.getTopLeft(find.text('654321')).dy,
+        lessThan(t.getTopLeft(find.text('123456')).dy),
+      );
+      final button = t.widget<IconButton>(
+        find.byWidgetPredicate(
+          (w) => w is IconButton && w.tooltip == 'Copy entry code',
+        ),
+      );
+      button.onPressed!();
+      await t.pump();
+      expect(copied, '123456');
+      copied = '';
+      clock += 2000;
+      button.onPressed!();
+      await t.pump(const Duration(seconds: 1));
+      expect(copied, '');
+      expect(find.text('123456'), findsNothing);
+      expect(find.text('Shared service'), findsOneWidget);
+      t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    },
+  );
 }

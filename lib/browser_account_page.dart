@@ -157,6 +157,30 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
+  Future<void> copyAssigned(ReceivedCode code) async {
+    if (status != 'restored' || !store.visibleCodes(now()).contains(code)) {
+      return;
+    }
+    try {
+      await Clipboard.setData(ClipboardData(text: code.value));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Code copied. Other apps may retain clipboard contents.',
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not copy code.')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final codes = store.visibleCodes(now());
@@ -244,6 +268,31 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                         onPressed: () => copyPrivate(code),
                         icon: const Icon(Icons.copy_outlined),
                       ),
+                    ),
+                ],
+                if (codes.isNotEmpty) ...[
+                  const Text(
+                    'Received entry codes',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  for (final code in codes)
+                    Builder(
+                      builder: (context) {
+                        final entry = store.entries.firstWhere(
+                          (e) => e.id == code.entryId,
+                        );
+                        return ListTile(
+                          title: Text(code.value),
+                          subtitle: Text(
+                            '${entry.service}${entry.account.isEmpty ? '' : ' · ${entry.account}'}${entry.manage ? '' : '\nShared with you · Read-only · Source hidden'}',
+                          ),
+                          trailing: IconButton(
+                            tooltip: 'Copy entry code',
+                            onPressed: () => copyAssigned(code),
+                            icon: const Icon(Icons.copy_outlined),
+                          ),
+                        );
+                      },
                     ),
                 ],
                 FilledButton(
