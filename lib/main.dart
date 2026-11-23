@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'models.dart';
 import 'branding.dart';
 import 'source_preview.dart';
+import 'access_preview.dart';
 
 const ink = Color(0xff17332a), green = Color(0xff0a7955);
 const line = Color(0xffdfe8e2), pale = Color(0xffe7f8ee);
@@ -50,6 +51,7 @@ class _ClientHomeState extends State<ClientHome> {
   String query = '';
   int entrySequence = 0;
   bool sourceRevoked = false;
+  bool tokenRevoked = false;
   final entries = [
     const AccountEntry('north', 'Northstar', 'alex@example.test', true),
     const AccountEntry('harbor', 'Harbor', 'team@example.test', false),
@@ -612,8 +614,9 @@ class _ClientHomeState extends State<ClientHome> {
               onRevoke: () => setState(() => sourceRevoked = true),
             )
           else
-            const Text(
-              'Automation token management is not connected in this Flutter preview. Use the existing web preview to inspect that flow.',
+            AccessPreview(
+              tokenRevoked: tokenRevoked,
+              onRevoke: () => setState(() => tokenRevoked = true),
             ),
           const SizedBox(height: 24),
           const Text(
