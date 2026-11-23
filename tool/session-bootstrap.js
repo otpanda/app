@@ -38,7 +38,8 @@
     clear:()=>{clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
     start:async()=>{
       if(location.origin+location.pathname!==REDIRECT||location.search)throw Error('Canonical app URL required');
-      clear();const verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
+      clear();const attempt=generation,verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
+      if(attempt!==generation)return;
       sessionStorage.setItem(KEY,JSON.stringify({verifier,state,created:Date.now()}));
       const url=new URL(API+'/auth/restore');url.search=new URLSearchParams({challenge,state,redirect_uri:REDIRECT});location.assign(url.href);
     },
