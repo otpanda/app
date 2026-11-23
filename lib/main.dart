@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
 import 'models.dart';
+import 'branding.dart';
 
 const ink = Color(0xff17332a), green = Color(0xff0a7955);
 const line = Color(0xffdfe8e2), pale = Color(0xffe7f8ee);
@@ -470,8 +471,8 @@ class _ClientHomeState extends State<ClientHome> {
                 padding: EdgeInsets.symmetric(horizontal: desktop ? 32 : 16),
                 child: Row(
                   children: [
-                    Image.asset(
-                      'assets/otty.png',
+                    Image.memory(
+                      ottyImage,
                       width: desktop ? 48 : 42,
                       height: desktop ? 48 : 42,
                     ),
