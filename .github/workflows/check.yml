@@ -1,7 +1,8 @@
-name: Shared client checks
+name: Shared app checks and preview
 on:
   push:
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -18,10 +19,14 @@ jobs:
       - run: bash tool/bootstrap.sh
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build web --base-href /client/ --no-wasm-dry-run
+      - run: flutter build web --base-href /app/ --no-wasm-dry-run
       - uses: actions/upload-artifact@v4
         with:
           name: fictional-web-preview
+          path: build/web
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
           path: build/web
   android-debug:
     runs-on: ubuntu-latest
@@ -47,3 +52,20 @@ jobs:
           name: development-only-android-arm64-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 7
+  deploy-preview:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [web, android-debug]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: app-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy fictional-data app preview
+        id: deployment
+        uses: actions/deploy-pages@v4
