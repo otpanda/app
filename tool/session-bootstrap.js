@@ -63,6 +63,22 @@
       if(r.status===401){clear();status='sign-in-required';}
       return {status:r.status,body};
     },
+    organize:async(method,body='')=>{
+      if(!['GET','PUT'].includes(method)||typeof body!=='string'||new TextEncoder().encode(body).byteLength>131072||(method==='GET'&&body))throw Error('Organization request required');
+      const attempt=generation,token=Date.now()<expires?access:undefined;
+      if(!token)return {status:401,body:'{}'};
+      const r=await fetch(API+'/v1/manage/organization',{method,credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,...(method==='PUT'?{'Content-Type':'application/json'}:{})},...(method==='PUT'?{body}:{})});
+      const text=await readBounded(r,524288);if(attempt!==generation)return {status:401,body:'{}'};
+      if(r.status===401){clear();status='sign-in-required';}return {status:r.status,body:text};
+    },
+    copied:async(entryId,createdAt)=>{
+      if(typeof entryId!=='string'||!entryId||entryId.length>256||!Number.isSafeInteger(createdAt))throw Error('Copy receipt required');
+      const attempt=generation,token=Date.now()<expires?access:undefined;if(!token)return {status:401,body:'{}'};
+      const receiptId=random();
+      const r=await fetch(API+'/v1/manage/organization-copy',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({entryId,receiptId,createdAt})});
+      const body=await readBounded(r,4096);if(attempt!==generation)return {status:401,body:'{}'};
+      if(r.status===401){clear();status='sign-in-required';}return {status:r.status,body};
+    },
     passkey:async()=>{
       const pending=loginPending;if(!pending||status!=='passkey-ready')throw Error('Start sign-in again');
       loginPending=undefined;const attempt=++generation;status='authenticating';

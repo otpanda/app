@@ -14,6 +14,11 @@ extension type _Session(JSObject _) implements JSObject {
   external void clear();
   external void logout();
   external JSPromise<_ReadResponse> read(JSString path);
+  external JSPromise<_ReadResponse> organize(JSString method, JSString body);
+  external JSPromise<_ReadResponse> copied(
+    JSString entryId,
+    JSNumber createdAt,
+  );
 }
 
 extension type _ReadResponse(JSObject _) implements JSObject {
@@ -45,6 +50,18 @@ class _Browser implements BrowserSessionBridge {
   void clear() => _session.clear();
   @override
   void logout() => _session.logout();
+  @override
+  Future<SessionResponse> organize(String method, String body) async {
+    final r = await _session.organize(method.toJS, body.toJS).toDart;
+    return SessionResponse(r.status.toDartInt, r.body.toDart);
+  }
+
+  @override
+  Future<SessionResponse> copied(String entryId, int createdAt) async {
+    final r = await _session.copied(entryId.toJS, createdAt.toJS).toDart;
+    return SessionResponse(r.status.toDartInt, r.body.toDart);
+  }
+
   @override
   Future<SessionResponse> read(String path) async {
     final response = await _session.read(path.toJS).toDart;

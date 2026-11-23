@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +15,15 @@ class Bridge implements BrowserSessionBridge {
   bool denied = false;
   int? clockNow;
   int lifetime = 60000;
+  int copyReceipts = 0, organizationWrites = 0, organizationReads = 0;
+  Completer<SessionResponse>? pendingReceipt;
+  bool conflict = false, organizationDenied = false;
+  Map<String, dynamic> cloud = {
+    'revision': 0,
+    'tags': [],
+    'entries': [],
+    'ranking': [],
+  };
   List<Map<String, Object>> sources = [], inbox = [];
   List<Map<String, Object>> entries = [], codes = [];
   @override
@@ -35,6 +45,30 @@ class Bridge implements BrowserSessionBridge {
   void logout() {
     logouts++;
     status = 'idle';
+  }
+
+  @override
+  Future<SessionResponse> organize(String method, String body) async {
+    if (organizationDenied) return const SessionResponse(401, '{}');
+    if (method == 'GET') organizationReads++;
+    if (method == 'PUT') {
+      if (conflict) return const SessionResponse(409, '{}');
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      organizationWrites++;
+      cloud = {
+        ...(data['document'] as Map<String, dynamic>),
+        'revision': (cloud['revision'] as int) + 1,
+        'ranking': cloud['ranking'],
+      };
+    }
+    return SessionResponse(200, jsonEncode(cloud));
+  }
+
+  @override
+  Future<SessionResponse> copied(String entryId, int createdAt) async {
+    copyReceipts++;
+    if (pendingReceipt != null) return pendingReceipt!.future;
+    return const SessionResponse(200, '{"accepted":true}');
   }
 
   @override
@@ -318,17 +352,236 @@ void main() {
       button.onPressed!();
       await t.pump();
       expect(copied, '123456');
+      expect(b.copyReceipts, 1);
       copied = '';
       clock += 2000;
       button.onPressed!();
       await t.pump(const Duration(seconds: 1));
       expect(copied, '');
+      expect(b.copyReceipts, 1);
       expect(find.text('123456'), findsNothing);
       expect(find.text('Shared service'), findsOneWidget);
       t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
         null,
       );
+    },
+  );
+  testWidgets(
+    'cloud organization restores private tags pins and automatic recent ranking without controls',
+    (t) async {
+      await t.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => t.binding.setSurfaceSize(null));
+      final b = Bridge()
+        ..status = 'restored'
+        ..clockNow = 100000
+        ..entries = [
+          {
+            'entry_id': 'first',
+            'service_name': 'First',
+            'capabilities': {'manage': true},
+          },
+          {
+            'entry_id': 'second',
+            'service_name': 'Second',
+            'capabilities': {'manage': false},
+          },
+        ]
+        ..cloud = {
+          'revision': 4,
+          'tags': [
+            {'id': 'tag', 'label': 'Work'},
+          ],
+          'entries': [
+            {
+              'entryId': 'first',
+              'pinned': false,
+              'tagIds': ['tag'],
+            },
+            {'entryId': 'second', 'pinned': true, 'tagIds': []},
+          ],
+          'ranking': [
+            {'entryId': 'first', 'score': 5},
+          ],
+        };
+      await t.pumpWidget(
+        MaterialApp(
+          home: BrowserAccountPage(bridge: b, clock: () => 100000),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(find.text('Reset copy counts'), findsNothing);
+      expect(find.textContaining('confirmed copies'), findsNothing);
+      expect(find.textContaining('Sort:'), findsNothing);
+      expect(
+        find.text(
+          'Private cloud organization. Recent successful copies help order your unpinned entries automatically.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        t.getTopLeft(find.text('Second')).dy,
+        lessThan(t.getTopLeft(find.text('First')).dy),
+      );
+      await t.tap(find.byTooltip('Unpin Second'));
+      await t.pumpAndSettle();
+      expect(b.organizationWrites, 1);
+      expect(
+        t.getTopLeft(find.text('First')).dy,
+        lessThan(t.getTopLeft(find.text('Second')).dy),
+      );
+      await t.tap(find.text('Clear local access'));
+      await t.pumpAndSettle();
+      expect(find.text('Work'), findsNothing);
+    },
+  );
+  testWidgets('clipboard failure never submits a ranking receipt', (t) async {
+    final b = privateBridge(100000)
+      ..entries = [
+        {
+          'entry_id': 'e',
+          'service_name': 'Example',
+          'capabilities': {'manage': true},
+        },
+      ]
+      ..codes = [
+        {
+          'entryId': 'e',
+          'code': '112233',
+          'receivedAt': 99000,
+          'expiresAt': 110000,
+        },
+      ];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          throw PlatformException(code: 'denied');
+        }
+        return null;
+      },
+    );
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(bridge: b, clock: () => 100000),
+      ),
+    );
+    await t.pumpAndSettle();
+    final button = t.widget<IconButton>(
+      find.byWidgetPredicate(
+        (w) => w is IconButton && w.tooltip == 'Copy entry code',
+      ),
+    );
+    button.onPressed!();
+    await t.pumpAndSettle();
+    expect(b.copyReceipts, 0);
+    expect(find.text('Could not copy code.'), findsOneWidget);
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      null,
+    );
+  });
+  testWidgets('late copy receipt after clear cannot reload cloud state', (
+    t,
+  ) async {
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async => null,
+    );
+    addTearDown(
+      () => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final pending = Completer<SessionResponse>();
+    final b = privateBridge(100000)
+      ..pendingReceipt = pending
+      ..entries = [
+        {
+          'entry_id': 'e',
+          'service_name': 'Example',
+          'capabilities': {'manage': true},
+        },
+      ]
+      ..codes = [
+        {
+          'entryId': 'e',
+          'code': '112233',
+          'receivedAt': 99000,
+          'expiresAt': 110000,
+        },
+      ];
+    await t.binding.setSurfaceSize(const Size(800, 1400));
+    addTearDown(() => t.binding.setSurfaceSize(null));
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(bridge: b, clock: () => 100000),
+      ),
+    );
+    await t.pumpAndSettle();
+    final before = b.organizationReads;
+    final button = t.widget<IconButton>(
+      find.byWidgetPredicate(
+        (w) => w is IconButton && w.tooltip == 'Copy entry code',
+      ),
+    );
+    button.onPressed!();
+    await t.pump();
+    expect(b.copyReceipts, 1);
+    await t.tap(find.text('Clear local access'));
+    await t.pumpAndSettle();
+    pending.complete(const SessionResponse(200, '{"accepted":true}'));
+    await t.pumpAndSettle();
+    expect(b.organizationReads, before);
+    expect(find.text('Organize your entries'), findsNothing);
+  });
+  testWidgets('organization401 clears codes and cloud editor', (t) async {
+    final b = privateBridge(100000)..organizationDenied = true;
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(bridge: b, clock: () => 100000),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(find.text('654321'), findsNothing);
+    expect(find.text('Organize your entries'), findsNothing);
+  });
+  testWidgets(
+    'stale cloud edit reports conflict and restores server preferences',
+    (t) async {
+      await t.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => t.binding.setSurfaceSize(null));
+      final b = Bridge()
+        ..status = 'restored'
+        ..clockNow = 100000
+        ..conflict = true
+        ..entries = [
+          {
+            'entry_id': 'e',
+            'service_name': 'Example',
+            'capabilities': {'manage': true},
+          },
+        ]
+        ..cloud = {
+          'revision': 2,
+          'tags': [],
+          'entries': [
+            {'entryId': 'e', 'pinned': false, 'tagIds': []},
+          ],
+          'ranking': [],
+        };
+      await t.pumpWidget(
+        MaterialApp(
+          home: BrowserAccountPage(bridge: b, clock: () => 100000),
+        ),
+      );
+      await t.pumpAndSettle();
+      await t.tap(find.byTooltip('Pin Example'));
+      await t.pumpAndSettle();
+      expect(find.byTooltip('Pin Example'), findsOneWidget);
+      expect(find.byTooltip('Unpin Example'), findsNothing);
+      expect(find.textContaining('Organization was not saved'), findsOneWidget);
     },
   );
 }
