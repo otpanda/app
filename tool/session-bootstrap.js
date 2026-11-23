@@ -42,8 +42,16 @@
   Object.defineProperty(globalThis,'OTPandaSession',{value:Object.freeze({
     ready,
     status:()=>status,
-    access:()=>{if(Date.now()>=expires)clear();return access;},
+    access:()=>{if(access!==undefined&&Date.now()>=expires){clear();status='sign-in-required';}return access;},
     clear:()=>{clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
+    read:async path=>{
+      if(!['/v1/manage/session','/v1/manage/entries','/v1/manage/active-codes'].includes(path))throw Error('Read path required');
+      const attempt=generation,token=Date.now()<expires?access:undefined;if(!token){if(access!==undefined){clear();status='sign-in-required';}return {status:401,body:'{}'};}
+      const r=await fetch(API+path,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}});const body=await r.text();if(body.length>524288)throw Error('Response too large');
+      if(attempt!==generation)return {status:401,body:'{}'};
+      if(r.status===401){clear();status='sign-in-required';}
+      return {status:r.status,body};
+    },
     passkey:async()=>{
       const pending=loginPending;if(!pending||status!=='passkey-ready')throw Error('Start sign-in again');
       loginPending=undefined;const attempt=++generation;status='authenticating';

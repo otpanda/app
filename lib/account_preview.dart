@@ -1,3 +1,5 @@
+import 'browser_account_page.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 /// An explorable security setup preview. Never collects credentials or claims
@@ -169,6 +171,14 @@ class _AccountSecurityPreviewState extends State<AccountSecurityPreview> {
               const Text(
                 'No SMS authentication, extra OTPanda password or manual backup-code burden is required by this design. Real account setup and device management are still being built.',
                 style: TextStyle(color: Color(0xff657e70)),
+              ),
+              TextButton.icon(
+                onPressed: () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BrowserAccountPage()),
+                ),
+                icon: const Icon(Icons.cloud_outlined),
+                label: const Text('Real account connection'),
               ),
               const SizedBox(height: 24),
             ],
