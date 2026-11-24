@@ -20,6 +20,7 @@ write('web/social-preview.png',base64.b64decode(SOCIAL))
 manifest=dict(id='/app/',name='OTPanda',short_name='OTPanda',description=description,start_url='/app/',scope='/app/',display='standalone',background_color='#f5f8f7',theme_color='#0a7955',lang='en',prefer_related_applications=False,icons=[dict(src=f'icons/Icon-{"maskable-" if mask else ""}{size}.png',sizes=f'{size}x{size}',type='image/png',purpose='maskable' if mask else 'any') for mask in (False,True) for size in (192,512)])
 Path('web/manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 Path('web/session-bootstrap.js').write_text(Path('tool/session-bootstrap.js').read_text())
+Path('web/recovery-bridge.js').write_text(Path('tool/recovery-bridge.js').read_text())
 Path('web/index.html').write_text(f'''<!DOCTYPE html>
 <html lang="en"><head>
 <base href="$FLUTTER_BASE_HREF">
@@ -51,7 +52,7 @@ Path('web/index.html').write_text(f'''<!DOCTYPE html>
 <meta name="twitter:description" content="{description}">
 <meta name="twitter:image" content="https://otpanda.github.io/app/social-preview.png">
 <meta name="twitter:image:alt" content="Otty the panda beside OTPanda. Development preview.">
-</head><body><script src="session-bootstrap.js"></script><script src="flutter_bootstrap.js" async></script></body></html>
+</head><body><script src="recovery-bridge.js"></script><script src="session-bootstrap.js"></script><script src="flutter_bootstrap.js" async></script></body></html>
 ''')
 p=Path('android/app/src/main/AndroidManifest.xml');s=p.read_text().replace('android:label="otpanda_client"','android:label="OTPanda" android:description="@string/app_description"');p.write_text(s)
 write('android/app/src/main/res/values/otpanda.xml',b'<resources><string name="app_description">OTPanda development preview. Real sign-in and sources are not connected yet.</string><color name="launcher_background">#F5F8F7</color></resources>')
