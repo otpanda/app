@@ -5,7 +5,9 @@ import 'models.dart';
 import 'branding.dart';
 import 'source_preview.dart';
 import 'access_preview.dart';
-import 'account_preview.dart';
+import 'browser_account_page.dart';
+import 'browser_session.dart';
+import 'browser_session_contract.dart';
 import 'fictional_totp_dialog.dart';
 import 'public_service_catalog.dart';
 
@@ -39,8 +41,52 @@ class OTPandaApp extends StatelessWidget {
         ),
       ),
     ),
-    home: const ClientHome(fictionalCatalog: true),
+    home: const AccountEntryRouter(),
   );
+}
+
+/// Resume only the bounded account flow after a first-party API callback.
+/// The fictional workspace remains separate from authenticated account data.
+class AccountEntryRouter extends StatefulWidget {
+  final BrowserSessionBridge? bridge;
+  const AccountEntryRouter({super.key, this.bridge});
+  @override
+  State<AccountEntryRouter> createState() => _AccountEntryRouterState();
+}
+
+class _AccountEntryRouterState extends State<AccountEntryRouter> {
+  late final BrowserSessionBridge bridge;
+  @override
+  void initState() {
+    super.initState();
+    bridge = widget.bridge ?? createBrowserSession();
+    resume();
+  }
+
+  Future<void> resume() async {
+    try {
+      await bridge.ready;
+    } catch (_) {
+      return;
+    }
+    if (!mounted || ['idle', 'unsupported'].contains(bridge.status)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => BrowserAccountPage(
+            bridge: bridge,
+            loginEnabled: true,
+            accountOnly: true,
+          ),
+        ),
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      const ClientHome(fictionalCatalog: true);
 }
 
 class ClientHome extends StatefulWidget {
@@ -692,7 +738,7 @@ class _ClientHomeState extends State<ClientHome> {
                 ),
                 color: const Color(0xfffff6df),
                 child: const Text(
-                  'DEVELOPMENT PREVIEW · Fictional accounts and codes · Nothing connected',
+                  'DEVELOPMENT PREVIEW · Fictional workspace accounts and codes',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 10, color: Color(0xff7a6029)),
                 ),
@@ -726,7 +772,10 @@ class _ClientHomeState extends State<ClientHome> {
                       tooltip: 'Account & security',
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
-                          builder: (context) => const AccountSecurityPreview(),
+                          builder: (context) => const BrowserAccountPage(
+                            loginEnabled: true,
+                            accountOnly: true,
+                          ),
                         ),
                       ),
                       icon: const Icon(Icons.person_outline),
