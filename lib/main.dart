@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 
 import 'models.dart';
@@ -10,6 +11,7 @@ import 'access_preview.dart';
 import 'browser_account_page.dart';
 import 'browser_session_contract.dart';
 import 'fictional_totp_dialog.dart';
+import 'native_browser_fallback.dart';
 import 'public_service_catalog.dart';
 
 const ink = Color(0xff12281f), green = Color(0xff0a7955);
@@ -33,7 +35,10 @@ Color avatarTint(String name) {
   return tints[h % tints.length];
 }
 
-void main() => runApp(const OTPandaApp());
+// Web hosts the real account flow. Other platforms have no native sign-in yet
+// and show an honest page that opens the web app in the system browser.
+void main() =>
+    runApp(kIsWeb ? const OTPandaApp() : const NativeBrowserFallbackApp());
 
 ThemeData otpandaTheme() => ThemeData(
   navigationBarTheme: NavigationBarThemeData(
