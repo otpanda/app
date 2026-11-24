@@ -16,6 +16,8 @@ import 'package:material_ui/material_ui.dart';
 
 import 'browser_session.dart';
 import 'browser_session_contract.dart';
+import 'recovery_contract.dart';
+import 'recovery_panel.dart';
 import 'session_contract.dart';
 
 class _ReadTransport implements SessionTransport {
@@ -225,7 +227,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
+  bool get clientApprovalAvailable =>
+      bridge is RecoveryBridge &&
+      (bridge as RecoveryBridge).enrolledClientApprovalAvailable;
+
   Future<void> changeSecurity(bool enabled, bool otherClient) async {
+    if (otherClient && !clientApprovalAvailable) return;
     final accepted = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -236,8 +243,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         ),
         content: Text(
           enabled
-              ? 'On new devices, Google alone will no longer be enough. You will need your passkey or explicit approval from another signed-in device. Losing your passkey, signing out of every other device, or letting those sessions expire can lock you out. Remembered devices do not need this extra step.'
-              : 'Google alone will be enough on new devices again. Verify this change with your passkey or another signed-in device.',
+              ? 'On new devices, Google alone will no longer be enough. You will need a passkey. Losing every passkey can lock you out. Approval from another enrolled device is not available yet. Remembered devices do not need this extra step.'
+              : 'Google alone will be enough on new devices again. Verify this change with your passkey.',
         ),
         actions: [
           TextButton(
@@ -747,7 +754,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       title: const Text('Extra verification on new devices'),
                       subtitle: Text(
                         securityInfo!['enabled'] == true
-                            ? 'New devices need a passkey or approval from another signed-in device.'
+                            ? 'New devices need a passkey. Approval from another enrolled device is not available yet.'
                             : 'Google sign-in alone is enough. Turn this on for another check on new devices.',
                       ),
                       value: securityInfo!['enabled'] as bool,
@@ -755,18 +762,19 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                           ? null
                           : (enabled) => changeSecurity(enabled, false),
                     ),
-                    TextButton(
-                      onPressed: busy
-                          ? null
-                          : () => changeSecurity(
-                              !(securityInfo!['enabled'] as bool),
-                              true,
-                            ),
-                      child: const Text(
-                        'Verify change with another signed-in device',
+                    if (clientApprovalAvailable)
+                      TextButton(
+                        onPressed: busy
+                            ? null
+                            : () => changeSecurity(
+                                !(securityInfo!['enabled'] as bool),
+                                true,
+                              ),
+                        child: const Text(
+                          'Verify change with another signed-in device',
+                        ),
                       ),
-                    ),
-                    if (settingChange != null)
+                    if (clientApprovalAvailable && settingChange != null)
                       OutlinedButton(
                         onPressed: busy
                             ? null
@@ -797,25 +805,28 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                                   'Requested at ${DateTime.fromMillisecondsSinceEpoch(raw['createdAt'] as int).toLocal()}',
                                 ),
                                 const Text(
-                                  'Approve only if you just started this sign-in on your other device.',
+                                  'Approve with a passkey on the device where you started this sign-in. Approval here from an enrolled device is not available yet.',
                                 ),
                                 Wrap(
                                   spacing: 12,
                                   children: [
-                                    TextButton(
-                                      onPressed: busy
-                                          ? null
-                                          : () => run(() async {
-                                              await (bridge as AuthEntryBridge)
-                                                  .security(
-                                                    'approve',
-                                                    false,
-                                                    raw['pendingId'] as String,
-                                                  );
-                                              await loadSecurity();
-                                            }),
-                                      child: const Text('Approve sign-in'),
-                                    ),
+                                    if (clientApprovalAvailable)
+                                      TextButton(
+                                        onPressed: busy
+                                            ? null
+                                            : () => run(() async {
+                                                await (bridge
+                                                        as AuthEntryBridge)
+                                                    .security(
+                                                      'approve',
+                                                      false,
+                                                      raw['pendingId']
+                                                          as String,
+                                                    );
+                                                await loadSecurity();
+                                              }),
+                                        child: const Text('Approve sign-in'),
+                                      ),
                                     TextButton(
                                       onPressed: busy
                                           ? null
@@ -836,45 +847,54 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                             ),
                           ),
                         ),
-                    for (final raw in securityInfo!['changes'] as List)
-                      if (raw is Map && raw['changeId'] is String)
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  raw['enabled'] == true
-                                      ? 'Turn extra verification ON?'
-                                      : 'Turn extra verification OFF?',
-                                ),
-                                const Text(
-                                  'Approve only if you requested this exact change on your other device.',
-                                ),
-                                TextButton(
-                                  onPressed: busy
-                                      ? null
-                                      : () => run(() async {
-                                          await (bridge as AuthEntryBridge)
-                                              .security(
-                                                'approve-change',
-                                                false,
-                                                raw['changeId'] as String,
-                                              );
-                                          await loadSecurity();
-                                        }),
-                                  child: const Text('Approve security change'),
-                                ),
-                              ],
+                    if (clientApprovalAvailable)
+                      for (final raw in securityInfo!['changes'] as List)
+                        if (raw is Map && raw['changeId'] is String)
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    raw['enabled'] == true
+                                        ? 'Turn extra verification ON?'
+                                        : 'Turn extra verification OFF?',
+                                  ),
+                                  const Text(
+                                    'Approve only if you requested this exact change on your other device.',
+                                  ),
+                                  TextButton(
+                                    onPressed: busy
+                                        ? null
+                                        : () => run(() async {
+                                            await (bridge as AuthEntryBridge)
+                                                .security(
+                                                  'approve-change',
+                                                  false,
+                                                  raw['changeId'] as String,
+                                                );
+                                            await loadSecurity();
+                                          }),
+                                    child: const Text(
+                                      'Approve security change',
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
                     TextButton(
                       onPressed: busy ? null : () => run(loadSecurity),
                       child: const Text('Check for sign-in requests'),
                     ),
                   ],
+                ],
+                if (bridge case final RecoveryBridge r
+                    when r.recoveryAvailable) ...[
+                  const Divider(height: 32),
+                  RecoveryPanel(bridge: r),
+                  const SizedBox(height: 16),
                 ],
                 ExpansionTile(
                   title: const Text('Temporary diagnostics'),
