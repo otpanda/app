@@ -101,7 +101,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     if (!accountOpen && widget.workspaceEnabled) {
       accountOpen = true;
       if (!direct) {
-        workspace.suspend();
+        workspace.suspend(preserve: true);
         rememberView(4);
         unawaited(refresh());
       }
@@ -120,7 +120,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
 
   void navigated(String id) => widget.onNavigate?.call(id);
   void openSettings() {
-    workspace.suspend();
+    workspace.suspend(preserve: true);
     rememberView(4);
     setState(() {
       accountOpen = true;
@@ -169,6 +169,13 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     try {
       await (bridge as SessionContinuityBridge).maintain();
       if (!mounted) return;
+      if (bridge.status == 'sign-in-required') {
+        workspace.clear();
+        store.clear();
+        clearOrganization();
+        setState(() => status = 'sign-in-required');
+        return;
+      }
       final expiry = (bridge as SessionContinuityBridge).accessExpiresAt;
       store.updateSessionExpiry(expiry, now());
       if (accountExpiresAt != null && expiry > now()) accountExpiresAt = expiry;
@@ -185,6 +192,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
+  int automaticTicks = 0;
   Timer? expiryTick;
   int now() => widget.clock?.call() ?? DateTime.now().millisecondsSinceEpoch;
   @override
@@ -200,6 +208,13 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         setState(() => status = bridge.status);
       }
       if (mounted) unawaited(maintainSession());
+      if (mounted && status == 'restored' && !busy && ++automaticTicks >= 30) {
+        automaticTicks = 0;
+        if (!widget.workspaceEnabled ||
+            (accountOpen && !organizationReady && !organizationBusy)) {
+          unawaited(refresh());
+        }
+      }
       if (mounted && status == 'restored') {
         if (widget.workspaceEnabled) workspace.tick();
         if (bridge is! SessionContinuityBridge &&
@@ -230,7 +245,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         productTab = view < 4 ? view : 0;
         accountOpen = view >= 4;
         applyRoute(widget.navigation, direct: true);
-        if (accountOpen) workspace.suspend();
+        if (accountOpen) workspace.suspend(preserve: true);
         await refresh();
         if (view == 5 && mounted && bridge.status == 'restored') {
           await loadSecurity();
@@ -439,6 +454,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       return;
     }
     if (response.status == 401) {
+      workspace.clear();
+      bridge.clear();
       clearOrganization();
       store.clear();
       status = 'sign-in-required';
@@ -480,12 +497,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         }),
       );
       if (!mounted || epoch != organizationEpoch) return;
-      if (response.status != 200) message = 'Organization was not saved. Refresh to check current cloud choices.';
+      if (response.status != 200) message = 'Organization was not saved. Checking your saved choices automatically.';
       await loadOrganization();
     } catch (_) {
       if (!mounted || epoch != organizationEpoch) return;
       organizationReady = false;
-      message = 'Could not confirm organization changes. Refresh before editing again.';
+      message = 'Could not confirm changes. Checking your saved choices automatically.';
     } finally {
       if (mounted && epoch == organizationEpoch) {
         setState(() => organizationBusy = false);
@@ -1039,10 +1056,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                             const Text(
                               'Organization could not load. Your saved choices have not changed.',
                             ),
-                            OutlinedButton(
-                              onPressed: busy ? null : refresh,
-                              child: const Text('Try again'),
-                            ),
                           ]),
                   },
                 ),
@@ -1306,10 +1319,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       },
                     ),
                 ],
-                FilledButton(
-                  onPressed: busy ? null : refresh,
-                  child: const Text('Refresh real codes'),
-                ),
+
                 if (!busy && codes.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(16),
