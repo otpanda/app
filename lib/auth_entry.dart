@@ -11,6 +11,7 @@ class AuthEntry extends StatefulWidget {
   final BrowserSessionBridge bridge;
   final String status, message;
   final bool busy;
+  final VoidCallback? onLostAccess;
   final Future<void> Function(Future<void> Function()) run;
   const AuthEntry({
     super.key,
@@ -18,6 +19,7 @@ class AuthEntry extends StatefulWidget {
     required this.status,
     required this.message,
     required this.busy,
+    this.onLostAccess,
     required this.run,
   });
   @override
@@ -387,11 +389,12 @@ class _AuthEntryState extends State<AuthEntry> {
                 child: TextButton(
                   onPressed: widget.busy
                       ? null
-                      : () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => LostAccessPage(bridge: r),
-                          ),
-                        ),
+                      : widget.onLostAccess ??
+                            () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => LostAccessPage(bridge: r),
+                              ),
+                            ),
                   child: const Text('Lost access to everything?'),
                 ),
               ),
