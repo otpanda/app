@@ -71,6 +71,15 @@ class _ProductShellState extends State<ProductShell> {
     widget.controller.addListener(changed);
   }
 
+  @override
+  void didUpdateWidget(covariant ProductShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTab != widget.initialTab) {
+      tab = widget.initialTab.clamp(0, 3);
+      query = '';
+    }
+  }
+
   void changed() {
     if (mounted) setState(() {});
   }
