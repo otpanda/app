@@ -86,8 +86,12 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     const credential=await navigator.credentials.get({publicKey:{rpId:'otpanda.github.io',challenge:decode(o.challenge),userVerification:'required',timeout:Math.min(120000,c.expiresAt-Date.now()),allowCredentials:o.allowCredentials.map(v=>({type:'public-key',id:decode(v.id)}))}});if(!credential)throw Error('Passkey verification cancelled');
     return{id:credential.id,rawId:encode(new Uint8Array(credential.rawId)),type:credential.type,clientExtensionResults:credential.getClientExtensionResults(),response:{clientDataJSON:encode(new Uint8Array(credential.response.clientDataJSON)),authenticatorData:encode(new Uint8Array(credential.response.authenticatorData)),signature:encode(new Uint8Array(credential.response.signature)),userHandle:credential.response.userHandle?encode(new Uint8Array(credential.response.userHandle)):null}};
   };
+  // Optional recovery bridge, loaded before this file. It gets narrow capabilities
+  // only; the access token stays in this closure and is never handed to Flutter.
+  const recovery=typeof globalThis.OTPandaRecoveryFactory==='function'?Object.freeze(globalThis.OTPandaRecoveryFactory({api:API,access:()=>Date.now()<expires?access:undefined,generation:()=>generation,readBounded,encode,decode:v=>Uint8Array.from(atob(v.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0)),random,fetchImpl:(...args)=>fetch(...args),credentials:{get:o=>navigator.credentials.get(o),create:o=>navigator.credentials.create(o)},storage:sessionStorage})):undefined;
   Object.defineProperty(globalThis,'OTPandaSession',{value:Object.freeze({
     ready,
+    recovery,
     assignmentPrepare:async target=>{if(!assignment)throw Error('Assignment unavailable');return JSON.stringify(await assignment.prepare(JSON.parse(target)));},
     assignmentConfirm:async()=>{if(!assignment)throw Error('Assignment unavailable');return assignment.confirm();},
     assignmentReconcile:async()=>{if(!assignment)throw Error('Assignment unavailable');return assignment.reconcile();},
