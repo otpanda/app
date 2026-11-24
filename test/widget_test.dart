@@ -16,6 +16,8 @@ void main() {
     'assignment dialog closes without mutation and assigns owned entry explicitly',
     (tester) async {
       await tester.pumpWidget(const OTPandaApp());
+      await tester.tap(find.text('Temporary demo'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Choose account'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
@@ -34,6 +36,8 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const OTPandaApp());
+    await tester.tap(find.text('Temporary demo'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'orchard');
     await tester.pump();
     expect(find.text('Orchard'), findsOneWidget);

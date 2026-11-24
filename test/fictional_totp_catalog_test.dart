@@ -7,6 +7,8 @@ void main() {
     'fictional catalog opens selected entry and discards code on close',
     (t) async {
       await t.pumpWidget(const OTPandaApp());
+      await t.tap(find.text('Temporary demo'));
+      await t.pumpAndSettle();
       await t.enterText(find.byType(TextField), 'orchard');
       await t.pump();
       await t.ensureVisible(find.text('Preview fictional generated code'));
@@ -47,6 +49,8 @@ void main() {
       await t.pumpWidget(const MaterialApp(home: ClientHome()));
       expect(find.text('Preview fictional generated code'), findsNothing);
       await t.pumpWidget(const OTPandaApp());
+      await t.tap(find.text('Temporary demo'));
+      await t.pumpAndSettle();
       await t.enterText(find.byType(TextField), 'harbor');
       await t.pump();
       expect(find.text('Harbor'), findsOneWidget);
@@ -68,6 +72,8 @@ void main() {
     t.view.physicalSize = const Size(320, 700);
     t.view.devicePixelRatio = 1;
     await t.pumpWidget(const OTPandaApp());
+    await t.tap(find.text('Temporary demo'));
+    await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), 'orchard');
     await t.pump();
     await t.ensureVisible(find.text('Preview fictional generated code'));

@@ -58,25 +58,25 @@ void main() {
       expect(page.bridge, same(bridge));
       expect(page.loginEnabled && page.accountOnly, isTrue);
       expect(page.assignmentEnabled, isFalse);
-      await tester.pageBack();
+      await tester.tap(find.text('Temporary demo'));
       await tester.pumpAndSettle();
-      expect(find.byType(BrowserAccountPage), findsNothing);
       expect(find.text('Your codes'), findsOneWidget);
     });
   }
   for (final status in ['idle', 'unsupported']) {
-    testWidgets('ordinary $status visit keeps fictional workspace', (
-      tester,
-    ) async {
-      final bridge = RouterBridge(status);
-      await tester.pumpWidget(
-        MaterialApp(home: AccountEntryRouter(bridge: bridge)),
-      );
-      bridge.gate.complete();
-      await tester.pumpAndSettle();
-      expect(find.byType(BrowserAccountPage), findsNothing);
-      expect(find.text('Your codes'), findsOneWidget);
-    });
+    testWidgets(
+      'ordinary $status visit shows account entry with separate demo',
+      (tester) async {
+        final bridge = RouterBridge(status);
+        await tester.pumpWidget(
+          MaterialApp(home: AccountEntryRouter(bridge: bridge)),
+        );
+        bridge.gate.complete();
+        await tester.pumpAndSettle();
+        expect(find.byType(BrowserAccountPage), findsOneWidget);
+        expect(find.text('Temporary demo'), findsOneWidget);
+      },
+    );
   }
   testWidgets('disposed router never opens account route', (tester) async {
     final bridge = RouterBridge('signup-ready');
@@ -93,9 +93,11 @@ void main() {
     'account action opens enabled auth-only account page, not preview setup',
     (tester) async {
       await tester.pumpWidget(const OTPandaApp());
+      await tester.tap(find.text('Temporary demo'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Account & security'));
       await tester.pumpAndSettle();
-      expect(find.text('Your account'), findsOneWidget);
+      expect(find.text('Welcome to OTPanda.'), findsOneWidget);
       final page = tester.widget<BrowserAccountPage>(
         find.byType(BrowserAccountPage),
       );

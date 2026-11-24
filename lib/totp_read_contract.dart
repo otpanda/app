@@ -171,4 +171,4 @@ final class TotpReadStore {
       throw const ClientFailure();
     }
   }
-                                    }
+}

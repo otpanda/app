@@ -14,6 +14,20 @@ extension type _Session(JSObject _) implements JSObject {
   external void assignmentDismiss();
   external JSPromise<JSAny?> get ready;
   external JSString status();
+  external JSString email();
+  external JSString pendingLabel();
+  external JSPromise<JSString> protectionContinue(JSString action);
+  external JSPromise<JSString> security(
+    JSString action,
+    JSBoolean enabled,
+    JSString pendingId,
+  );
+  external JSPromise<JSAny?> googleContinue(JSString action, JSString proof);
+  external JSPromise<JSAny?> googleStart(JSBoolean remember);
+  external JSBoolean firstPasskeyAvailable();
+  external JSPromise<JSAny?> firstPasskey();
+  external JSPromise<JSAny?> addPasskey();
+  external JSPromise<JSAny?> signupEmail(JSString email, JSString proof);
   external JSPromise<JSAny?> start(JSString mode);
   external JSPromise<JSAny?> passkey();
   external void clear();
@@ -33,7 +47,57 @@ extension type _ReadResponse(JSObject _) implements JSObject {
 
 BrowserSessionBridge createBrowserSession() => _Browser();
 
-class _Browser implements BrowserSessionBridge, AssignmentBridge {
+class _Browser
+    implements
+        BrowserSessionBridge,
+        AssignmentBridge,
+        AuthEntryBridge,
+        FirstPasskeyBridge,
+        AdditionalPasskeyBridge {
+  @override
+  Future<void> addPasskey() async {
+    await _session.addPasskey().toDart;
+  }
+
+  @override
+  bool get firstPasskeyAvailable => _session.firstPasskeyAvailable().toDart;
+  @override
+  Future<void> firstPasskey() async {
+    await _session.firstPasskey().toDart;
+  }
+
+  @override
+  Future<void> googleContinue(String action, [String proof = '']) async {
+    await _session.googleContinue(action.toJS, proof.toJS).toDart;
+  }
+
+  @override
+  Future<void> googleStart(bool remember) async {
+    await _session.googleStart(remember.toJS).toDart;
+  }
+
+  @override
+  Future<String> protectionContinue(String action) async =>
+      (await _session.protectionContinue(action.toJS).toDart).toDart;
+  @override
+  Future<String> security(
+    String action, [
+    bool enabled = false,
+    String pendingId = '',
+  ]) async =>
+      (await _session
+              .security(action.toJS, enabled.toJS, pendingId.toJS)
+              .toDart)
+          .toDart;
+  @override
+  String get pendingLabel => _session.pendingLabel().toDart;
+  @override
+  String get email => _session.email().toDart;
+  @override
+  Future<void> signupEmail(String email, [String proof = '']) async {
+    await _session.signupEmail(email.toJS, proof.toJS).toDart;
+  }
+
   @override
   Future<String> assignmentPrepare(String target) async =>
       (await _session.assignmentPrepare(target.toJS).toDart).toDart;

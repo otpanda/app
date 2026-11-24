@@ -109,4 +109,4 @@ class _FictionalTransport implements SessionTransport {
 
   @override
   Future<void> close() async {}
-                                    }
+}
