@@ -1,3 +1,5 @@
+import 'browser_session_contract.dart';
+import 'totp_enrollment.dart';
 import 'read_workspace_controller.dart';
 
 import 'package:material_ui/material_ui.dart';
@@ -269,7 +271,7 @@ class _ProductShellState extends State<ProductShell> {
         if (store.entries.isEmpty && store.visibleUnassigned(now).isEmpty) {
           return empty(
             'No codes yet',
-            'Your connected sources and entries will appear here. Source setup is not available in this read-only release.',
+            'Add an authenticator to generate codes, or connect a source.',
           );
         }
         final withCode = entries.where((e) => codes.containsKey(e.id));
@@ -290,7 +292,19 @@ class _ProductShellState extends State<ProductShell> {
             for (final e in rest)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: codeTile(e.service, e.account, null),
+                child: InkWell(
+                  onTap:
+                      e.totp && widget.controller.bridge is TotpManagementBridge
+                      ? () => showDialog<void>(
+                          context: context,
+                          builder: (_) => TotpEntryDialog(
+                            bridge: widget.controller.bridge,
+                            entryId: e.id,
+                          ),
+                        )
+                      : null,
+                  child: codeTile(e.service, e.account, null),
+                ),
               ),
             if (entries.isEmpty) const Text('Nothing matches your search.'),
           ],
@@ -441,6 +455,36 @@ class _ProductShellState extends State<ProductShell> {
                       ),
                     ),
                     const Spacer(),
+                    if (widget.controller.bridge is TotpManagementBridge)
+                      IconButton(
+                        tooltip: 'Add authenticator',
+                        icon: const Icon(Icons.add),
+                        onPressed: () async {
+                          if (!await totpPrerequisite(
+                                context,
+                                widget.controller.bridge,
+                                widget.onOpenAccount,
+                              ) ||
+                              !context.mounted) {
+                            return;
+                          }
+                          final id = await addTotpDialog(
+                            context,
+                            widget.controller.bridge as TotpManagementBridge,
+                          );
+                          if (id != null && context.mounted) {
+                            await showDialog<void>(
+                              context: context,
+                              builder: (_) => TotpEntryDialog(
+                                bridge: widget.controller.bridge,
+                                entryId: id,
+                              ),
+                            );
+                            widget.controller.resume();
+                            await widget.controller.refresh();
+                          }
+                        },
+                      ),
                     IconButton(
                       tooltip: 'Account & security',
                       onPressed: widget.onOpenAccount,

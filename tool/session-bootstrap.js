@@ -307,6 +307,19 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       }
       await post('verify',value);if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({...g.saved,created:Date.now()}));googlePending=undefined;location.assign(API+'/auth/google/continue/complete#'+new URLSearchParams({token:g.token}));
     },
+    addTotp:async(label,account,secret)=>{
+      if(typeof label!=='string'||!label.trim()||label.length>120||typeof account!=='string'||account.length>120||typeof secret!=='string'||secret.length>2048)throw Error('Invalid authenticator details');
+      if(!await maintainSession(true))throw Error('Sign in again');
+      const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)throw Error('Sign in again');
+      const post=async(suffix,value)=>{const r=await fetch(API+'/v1/manage/totp'+suffix,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,24576));if(!r.ok||attempt!==generation)throw Error('Authenticator setup did not finish. Check details and verify with a passkey.');return v;};
+      const value={label,account,secret};try{const c=await post('/begin',value),response=await assertion(c);if(attempt!==generation)throw Error('Cancelled');const result=await post('',{...value,token:c.token,response});if(typeof result.entryId!=='string'||result.entryId.length>256)throw Error('Invalid result');return result.entryId;}finally{value.secret='';secret='';}
+    },
+    totpCode:async entryId=>{
+      if(typeof entryId!=='string'||!entryId||entryId.length>256)throw Error('Entry required');
+      if(!await maintainSession(true))return {status:401,body:'{}'};
+      const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)return {status:401,body:'{}'};
+      const result=await boundedRead(API+'/v1/manage/totp-code?'+new URLSearchParams({entry:entryId}),{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},4096);if(attempt!==generation)return {status:401,body:'{}'};return {status:result.response.status,body:result.body};
+    },
     addPasskey:async()=>{
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)throw Error('Sign in again.');
       const post=async(step,value,grant)=>{const r=await fetch(API+'/v1/manage/passkey/add/'+step,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',...(grant?{'X-OTPanda-Enrollment':grant}:{})},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,24576));if(!r.ok||attempt!==generation)throw Error('Passkey setup could not finish. Start again.');return v;};

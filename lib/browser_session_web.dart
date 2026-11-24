@@ -53,6 +53,12 @@ extension type _Session(JSObject _) implements JSObject {
   external JSPromise<JSAny?> passkey();
   external void clear();
   external void logout();
+  external JSPromise<JSString> addTotp(
+    JSString label,
+    JSString account,
+    JSString secret,
+  );
+  external JSPromise<_ReadResponse> totpCode(JSString entryId);
   external JSPromise<_ReadResponse> read(JSString path);
   external JSPromise<_ReadResponse> organize(JSString method, JSString body);
   external JSPromise<_ReadResponse> copied(
@@ -77,7 +83,18 @@ class _Browser
         AuthEntryBridge,
         FirstPasskeyBridge,
         AdditionalPasskeyBridge,
-        RecoveryBridge {
+        RecoveryBridge,
+        TotpManagementBridge {
+  @override
+  Future<String> addTotp(String label, String account, String secret) async =>
+      (await _session.addTotp(label.toJS, account.toJS, secret.toJS).toDart)
+          .toDart;
+  @override
+  Future<SessionResponse> totpCode(String entryId) async {
+    final r = await _session.totpCode(entryId.toJS).toDart;
+    return SessionResponse(r.status.toDartInt, r.body.toDart);
+  }
+
   @override
   Future<void> maintain() async {
     await _session.maintain().toDart;
