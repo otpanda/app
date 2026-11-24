@@ -268,7 +268,9 @@ void main() {
     t,
   ) async {
     final b = Bridge()..status = 'signup-ready';
-    await t.pumpWidget(MaterialApp(home: BrowserAccountPage(bridge: b)));
+    await t.pumpWidget(
+      MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+    );
     await t.pumpAndSettle();
     expect(find.text('Create passkey'), findsOneWidget);
     expect(b.prompts, 0);
@@ -323,19 +325,22 @@ void main() {
     );
   });
   testWidgets(
-    'restored session loads once, refreshes once and clears honestly',
+    'restored session loads once, refreshes automatically and signs out',
     (t) async {
       final b = Bridge()..status = 'restored';
-      await t.pumpWidget(MaterialApp(home: BrowserAccountPage(bridge: b)));
+      await t.pumpWidget(
+        MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+      );
       await t.pumpAndSettle();
       expect(b.reads, 5);
       expect(find.text('Refresh real codes'), findsNothing);
       await t.pump(const Duration(seconds: 31));
       await t.pumpAndSettle();
       expect(b.reads, 10);
-      await t.tap(find.text('Clear local access'));
+      await t.tap(find.text('Sign out'));
       await t.pumpAndSettle();
-      expect(find.textContaining('does not revoke'), findsOneWidget);
+      expect(b.logouts, 1);
+      expect(find.text('Clear local access'), findsNothing);
       expect(find.text('Browser session available.'), findsNothing);
     },
   );
@@ -343,7 +348,9 @@ void main() {
     t,
   ) async {
     final b = Bridge()..status = 'passkey-ready';
-    await t.pumpWidget(MaterialApp(home: BrowserAccountPage(bridge: b)));
+    await t.pumpWidget(
+      MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+    );
     await t.pumpAndSettle();
     await t.tap(find.text('Use passkey'));
     await t.pumpAndSettle();
@@ -355,26 +362,25 @@ void main() {
     final b = Bridge()
       ..status = 'restored'
       ..denied = true;
-    await t.pumpWidget(MaterialApp(home: BrowserAccountPage(bridge: b)));
+    await t.pumpWidget(
+      MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+    );
     await t.pumpAndSettle();
     expect(b.reads, 1);
     expect(find.text('Browser session available.'), findsNothing);
   });
-  testWidgets(
-    'server signout distinct from local clear and disabled until enabled',
-    (t) async {
-      final b = Bridge()..status = 'restored';
-      await t.pumpWidget(
-        MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
-      );
-      await t.pumpAndSettle();
-      await t.tap(find.text('Sign out of this browser'));
-      await t.pumpAndSettle();
-      expect(b.logouts, 1);
-      expect(b.status, 'idle');
-      expect(find.text('Browser session available.'), findsNothing);
-    },
-  );
+  testWidgets('server signout is the only visible exit action', (t) async {
+    final b = Bridge()..status = 'restored';
+    await t.pumpWidget(
+      MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+    );
+    await t.pumpAndSettle();
+    await t.tap(find.text('Sign out'));
+    await t.pumpAndSettle();
+    expect(b.logouts, 1);
+    expect(b.status, 'idle');
+    expect(find.text('Browser session available.'), findsNothing);
+  });
   Bridge privateBridge(int now) => Bridge()
     ..status = 'restored'
     ..clockNow = now
@@ -413,54 +419,39 @@ void main() {
       expect(t.takeException(), isNull);
     },
   );
-  testWidgets(
-    'focus retains valid codes; local clear and signout remove them',
-    (t) async {
-      await t.binding.setSurfaceSize(const Size(800, 1100));
-      addTearDown(() => t.binding.setSurfaceSize(null));
-      for (final action in ['background', 'clear', 'signout']) {
-        final b = privateBridge(100000);
-        await t.pumpWidget(
-          MaterialApp(
-            home: BrowserAccountPage(
-              key: UniqueKey(),
-              bridge: b,
-              clock: () => 100000,
-              loginEnabled: true,
-            ),
+  testWidgets('focus retains valid codes and signout removes them', (t) async {
+    await t.binding.setSurfaceSize(const Size(800, 1100));
+    addTearDown(() => t.binding.setSurfaceSize(null));
+    for (final action in ['background', 'signout']) {
+      final b = privateBridge(100000);
+      await t.pumpWidget(
+        MaterialApp(
+          home: BrowserAccountPage(
+            key: UniqueKey(),
+            bridge: b,
+            clock: () => 100000,
+            loginEnabled: true,
           ),
-        );
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(find.text('654321'), findsOneWidget);
+      if (action == 'background') {
+        t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        await t.pump();
+        t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      } else {
+        await t.ensureVisible(find.text('Sign out'));
         await t.pumpAndSettle();
-        expect(find.text('654321'), findsOneWidget);
-        if (action == 'background') {
-          t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-          await t.pump();
-          t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-        } else {
-          await t.ensureVisible(
-            find.text(
-              action == 'clear'
-                  ? 'Clear local access'
-                  : 'Sign out of this browser',
-            ),
-          );
-          await t.pumpAndSettle();
-          await t.tap(
-            find.text(
-              action == 'clear'
-                  ? 'Clear local access'
-                  : 'Sign out of this browser',
-            ),
-          );
-        }
-        await t.pumpAndSettle();
-        expect(
-          find.text('654321'),
-          action == 'background' ? findsOneWidget : findsNothing,
-        );
+        await t.tap(find.text('Sign out'));
       }
-    },
-  );
+      await t.pumpAndSettle();
+      expect(
+        find.text('654321'),
+        action == 'background' ? findsOneWidget : findsNothing,
+      );
+    }
+  });
   testWidgets('copy rechecks expiry before clipboard write', (t) async {
     var clock = 100000;
     var copies = 0;
@@ -617,7 +608,11 @@ void main() {
         };
       await t.pumpWidget(
         MaterialApp(
-          home: BrowserAccountPage(bridge: b, clock: () => 100000),
+          home: BrowserAccountPage(
+            bridge: b,
+            clock: () => 100000,
+            loginEnabled: true,
+          ),
         ),
       );
       await t.pumpAndSettle();
@@ -636,7 +631,7 @@ void main() {
         t.getTopLeft(find.text('First')).dy,
         lessThan(t.getTopLeft(find.text('Second')).dy),
       );
-      await t.tap(find.text('Clear local access'));
+      await t.tap(find.text('Sign out'));
       await t.pumpAndSettle();
       expect(find.text('Work'), findsNothing);
     },
@@ -669,7 +664,11 @@ void main() {
     );
     await t.pumpWidget(
       MaterialApp(
-        home: BrowserAccountPage(bridge: b, clock: () => 100000),
+        home: BrowserAccountPage(
+          bridge: b,
+          clock: () => 100000,
+          loginEnabled: true,
+        ),
       ),
     );
     await t.pumpAndSettle();
@@ -722,7 +721,11 @@ void main() {
     addTearDown(() => t.binding.setSurfaceSize(null));
     await t.pumpWidget(
       MaterialApp(
-        home: BrowserAccountPage(bridge: b, clock: () => 100000),
+        home: BrowserAccountPage(
+          bridge: b,
+          clock: () => 100000,
+          loginEnabled: true,
+        ),
       ),
     );
     await t.pumpAndSettle();
@@ -735,7 +738,7 @@ void main() {
     button.onPressed!();
     await t.pump();
     expect(b.copyReceipts, 1);
-    await t.tap(find.text('Clear local access'));
+    await t.tap(find.text('Sign out'));
     await t.pumpAndSettle();
     pending.complete(const SessionResponse(200, '{"accepted":true}'));
     await t.pumpAndSettle();
@@ -746,7 +749,11 @@ void main() {
     final b = privateBridge(100000)..organizationDenied = true;
     await t.pumpWidget(
       MaterialApp(
-        home: BrowserAccountPage(bridge: b, clock: () => 100000),
+        home: BrowserAccountPage(
+          bridge: b,
+          clock: () => 100000,
+          loginEnabled: true,
+        ),
       ),
     );
     await t.pumpAndSettle();
@@ -779,7 +786,11 @@ void main() {
         };
       await t.pumpWidget(
         MaterialApp(
-          home: BrowserAccountPage(bridge: b, clock: () => 100000),
+          home: BrowserAccountPage(
+            bridge: b,
+            clock: () => 100000,
+            loginEnabled: true,
+          ),
         ),
       );
       await t.pumpAndSettle();
@@ -816,7 +827,11 @@ void main() {
       };
     await t.pumpWidget(
       MaterialApp(
-        home: BrowserAccountPage(bridge: b, clock: () => 100000),
+        home: BrowserAccountPage(
+          bridge: b,
+          clock: () => 100000,
+          loginEnabled: true,
+        ),
       ),
     );
     await t.pumpAndSettle();
