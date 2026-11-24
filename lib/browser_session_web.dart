@@ -7,6 +7,11 @@ import 'session_contract.dart';
 external _Session get _session;
 
 extension type _Session(JSObject _) implements JSObject {
+  external JSPromise<JSString> assignmentPrepare(JSString target);
+  external JSPromise<JSString> assignmentConfirm();
+  external JSPromise<JSString> assignmentReconcile();
+  external JSString assignmentState();
+  external void assignmentDismiss();
   external JSPromise<JSAny?> get ready;
   external JSString status();
   external JSPromise<JSAny?> start(JSString mode);
@@ -28,7 +33,20 @@ extension type _ReadResponse(JSObject _) implements JSObject {
 
 BrowserSessionBridge createBrowserSession() => _Browser();
 
-class _Browser implements BrowserSessionBridge {
+class _Browser implements BrowserSessionBridge, AssignmentBridge {
+  @override
+  Future<String> assignmentPrepare(String target) async =>
+      (await _session.assignmentPrepare(target.toJS).toDart).toDart;
+  @override
+  Future<String> assignmentConfirm() async =>
+      (await _session.assignmentConfirm().toDart).toDart;
+  @override
+  Future<String> assignmentReconcile() async =>
+      (await _session.assignmentReconcile().toDart).toDart;
+  @override
+  String get assignmentState => _session.assignmentState().toDart;
+  @override
+  void assignmentDismiss() => _session.assignmentDismiss();
   @override
   Future<void> get ready async {
     await _session.ready.toDart;

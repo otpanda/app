@@ -41,3 +41,36 @@ test('signup navigation uses top-level API start and no mailproof in app storage
 test('older authenticator API without getTransports still verifies with an empty optional list',async()=>{const e=signupEnv();await e.context.OTPandaSession.ready;const bytes=new Uint8Array([1]).buffer;e.context.navigator={credentials:{create:async()=>({id:'AQ',rawId:bytes,type:'public-key',getClientExtensionResults:()=>({}),response:{clientDataJSON:bytes,attestationObject:bytes}})}};e.context.fetch=async(url,o)=>{assert.deepEqual(JSON.parse(o.body).response.response.transports,[]);return{ok:true,text:async()=>JSON.stringify({handoff:token,expiresAt:NOW+60000})};};await e.context.OTPandaSession.passkey();assert.equal(e.context.OTPandaSession.status(),'completing');});
 test('signup cancellation exposes explicit retry status without keeping ceremony secret',async()=>{const e=signupEnv();await e.context.OTPandaSession.ready;e.context.navigator={credentials:{create:async()=>{throw Error('cancelled');}}};await e.context.OTPandaSession.passkey();assert.equal(e.context.OTPandaSession.status(),'signup-retry-required');assert.equal(e.stored,undefined);});
 test('clock skew exposes check-clock-or-restart instead of silently retrying enrollment',async()=>{const e=signupEnv({expiresAt:NOW+130000});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaSession.status(),'check-clock-or-restart');assert.equal(e.calls,0);});
+
+async function assignmentEnv(){
+ const {bundleAssignment}=await import('../tool/build-assignment-host.mjs');
+ const e=env();const context={...e.context,OTPandaSession:undefined};
+ context.location.hash='#code='+token+'&state='+state;
+ context.sessionStorage.getItem=()=>JSON.stringify({state,verifier:'v'.repeat(43),created:NOW});
+ vm.createContext(context);vm.runInContext(await bundleAssignment(),context);vm.runInContext(script,context);
+ await context.OTPandaSession.ready;return context;
+}
+const assignmentBegin=()=>({intentId:'intent',token:'ceremony-secret',action:JSON.stringify(['otpanda-assignment',1,'intent','owner','device',1,'source','event','entry',0,'hash',0,0,2,1,true]),expiresAt:NOW+120000,options:{rpId:'otpanda.github.io',challenge:'A'.repeat(43),timeout:120000,userVerification:'required',allowCredentials:[{type:'public-key',id:'AQID'}]},summary:{operation:'assign-code',entryId:'entry',label:'Fixture',accountName:null,serviceId:'fixture',activeRecipients:2,automationRecipients:1,irreversible:true}});
+test('opt-in host summary excludes ceremony, no prompt before confirm, one finish',async()=>{
+ const c=await assignmentEnv();let prompts=0,writes=0;c.navigator={credentials:{get:async()=>{prompts++;return credential();}}};
+ c.fetch=async(url,o)=>streaming(await (async()=>{assert.equal(o.headers.Authorization,'Bearer '+token);assert.equal(o.credentials,'omit');assert.equal(o.redirect,'error');if(url.endsWith('/begin'))return{status:200,text:async()=>JSON.stringify(assignmentBegin())};if(url.endsWith('/finish')){writes++;return{status:200,text:async()=>JSON.stringify({status:'assigned'})};}throw Error('Unexpected request');})());
+ const summary=JSON.parse(await c.OTPandaSession.assignmentPrepare(JSON.stringify({sourceId:'source',eventId:'event',entryId:'entry'})));
+ assert.equal(summary.activeRecipients,2);assert.equal(summary.token,undefined);assert.equal(prompts,0);assert.equal(writes,0);
+ assert.equal(await c.OTPandaSession.assignmentConfirm(),'assigned');assert.equal(prompts,1);assert.equal(writes,1);
+ c.OTPandaSession.clear();assert.equal(c.OTPandaSession.assignmentState(),'idle');
+});
+test('default host assignment unsupported and cannot initiate a request',async()=>{const e=env();assert.equal(e.context.OTPandaSession.assignmentState(),'unsupported');await assert.rejects(()=>e.context.OTPandaSession.assignmentPrepare('{}'));assert.equal(e.calls,0);});
+test('opt-in session logout during assignment proof prevents late finish',async()=>{
+ const c=await assignmentEnv();let release,writes=0;c.navigator={credentials:{get:()=>new Promise(r=>release=r)}};
+ c.fetch=async(url)=>streaming({status:200,text:async()=>{if(url.endsWith('/begin'))return JSON.stringify(assignmentBegin());writes++;return JSON.stringify({status:'assigned'});}});
+ await c.OTPandaSession.assignmentPrepare(JSON.stringify({sourceId:'source',eventId:'event',entryId:'entry'}));
+ const result=c.OTPandaSession.assignmentConfirm();c.OTPandaSession.logout();release(credential());await result;
+ assert.equal(writes,0);assert.equal(c.OTPandaSession.assignmentState(),'idle');assert.equal(c.OTPandaSession.access(),undefined);
+});
+test('opt-in session logout after submitted finish suppresses late outcome only',async()=>{
+ const c=await assignmentEnv();let release,writes=0;c.navigator={credentials:{get:async()=>credential()}};
+ c.fetch=async(url)=>{if(url.endsWith('/begin'))return streaming({status:200,text:async()=>JSON.stringify(assignmentBegin())});writes++;return new Promise(r=>release=()=>r(streaming({status:200,text:async()=>JSON.stringify({status:'assigned'})})));};
+ await c.OTPandaSession.assignmentPrepare(JSON.stringify({sourceId:'source',eventId:'event',entryId:'entry'}));
+ const result=c.OTPandaSession.assignmentConfirm();while(!release)await new Promise(r=>setImmediate(r));c.OTPandaSession.logout();release();await result;
+ assert.equal(writes,1);assert.equal(c.OTPandaSession.assignmentState(),'idle');
+});

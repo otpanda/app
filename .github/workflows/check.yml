@@ -32,6 +32,7 @@ jobs:
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
       - run: python3 tool/test_service_catalog.py
+      - run: node --test test/assignment*.mjs test/session_bootstrap_test.cjs
       - run: flutter analyze
       - run: flutter test
       - run: flutter build web --base-href /app/ --no-wasm-dry-run
