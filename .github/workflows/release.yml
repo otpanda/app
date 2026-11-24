@@ -104,7 +104,8 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          flutter build apk --release --build-name "${version%%-*}" --build-number "$GITHUB_RUN_NUMBER"
+          # Android versionName can carry the prerelease suffix, so alphas are identifiable.
+          flutter build apk --release --build-name "$version" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$version"
           apk=build/app/outputs/flutter-apk/app-release.apk
           bash .github/scripts/verify-apk-signature.sh "$apk"
           mkdir -p dist
@@ -145,7 +146,8 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          flutter build ${{ matrix.target }} --release --build-name "${version%%-*}" --build-number "$GITHUB_RUN_NUMBER"
+          # Windows needs a numeric build-name, so the full version goes in via the define.
+          flutter build ${{ matrix.target }} --release --build-name "${version%%-*}" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$version"
           mkdir -p dist
           name="otpanda-${{ matrix.target }}-${GITHUB_REF_NAME}"
           case "${{ matrix.target }}" in
