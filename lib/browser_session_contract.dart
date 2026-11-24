@@ -40,3 +40,7 @@ abstract interface class FirstPasskeyBridge {
   bool get firstPasskeyAvailable;
   Future<void> firstPasskey();
 }
+
+abstract interface class AdditionalPasskeyBridge {
+  Future<void> addPasskey();
+}
