@@ -7,6 +7,8 @@ void main() {
     'app revocation is confirmed, separate from people, and survives navigation',
     (tester) async {
       await tester.pumpWidget(const OTPandaApp());
+      await tester.tap(find.text('Temporary demo'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Access'));
       await tester.pumpAndSettle();
       expect(
@@ -44,6 +46,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(const OTPandaApp());
+    await tester.tap(find.text('Temporary demo'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Access'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Revoke app access'));
