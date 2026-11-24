@@ -123,7 +123,7 @@ void main() {
     await t.pumpAndSettle();
     expect(
       find.text(
-        'Account session verified. Sources and codes are unavailable in this stage.',
+        'Account session verified.',
       ),
       findsOneWidget,
     );
@@ -163,7 +163,7 @@ void main() {
       await t.pumpAndSettle();
       expect(
         find.text(
-          'Account session verified. Sources and codes are unavailable in this stage.',
+          'Account session verified.',
         ),
         findsNothing,
       );
@@ -188,7 +188,7 @@ void main() {
       await t.pumpAndSettle();
       expect(
         find.text(
-          'Account session verified. Sources and codes are unavailable in this stage.',
+          'Account session verified.',
         ),
         findsOneWidget,
       );
@@ -216,7 +216,7 @@ void main() {
     expect(b.organizationReads, 0);
     expect(
       find.text(
-        'Account session verified. Sources and codes are unavailable in this stage.',
+        'Account session verified.',
       ),
       findsOneWidget,
     );
@@ -249,7 +249,7 @@ void main() {
     expect(find.text('Browser access expired. Sign in again.'), findsOneWidget);
     expect(
       find.text(
-        'Account session verified. Sources and codes are unavailable in this stage.',
+        'Account session verified.',
       ),
       findsNothing,
     );
@@ -275,7 +275,7 @@ void main() {
       expect(b.organizationReads, 0);
       expect(
         find.text(
-          'Account session verified. Sources and codes are unavailable in this stage.',
+          'Account session verified.',
         ),
         findsNothing,
       );
@@ -328,7 +328,9 @@ void main() {
   ) async {
     await t.pumpWidget(MaterialApp(home: BrowserAccountPage(bridge: Bridge())));
     await t.pumpAndSettle();
-    expect(find.textContaining('not enabled'), findsOneWidget);
+    expect(find.textContaining('not enabled'), findsNothing);
+    expect(find.textContaining('not available in this stage'), findsNothing);
+    expect(find.text('Sign in with a passkey to access your account.'), findsOneWidget);
     expect(
       t
           .widget<FilledButton>(
