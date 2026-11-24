@@ -335,6 +335,18 @@ class _AuthEntryState extends State<AuthEntry> {
                   'Your account is ready. Use its passkey or linked Google account to sign in.',
                 ),
               ),
+            if (status == 'logout-incomplete') ...[
+              const Padding(
+                padding: EdgeInsets.only(top: 18),
+                child: Text(
+                  'Sign-out could not be confirmed. This browser may still have a server session. Try signing out again before leaving a shared device.',
+                ),
+              ),
+              TextButton(
+                onPressed: widget.busy ? null : widget.bridge.logout,
+                child: const Text('Try signing out again'),
+              ),
+            ],
             if (status == 'unsupported')
               const Text('Open OTPanda in your browser to continue.'),
             if ([
