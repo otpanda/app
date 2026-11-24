@@ -14,20 +14,29 @@ bool _entry(Object? id) =>
 /// Never convert this into a persisted delivered-code record.
 final class GeneratedTotp {
   final String entryId, value;
-  final int period, validFrom, validUntil;
+  final int period, validFrom, validUntil, serverNow;
   const GeneratedTotp._(
     this.entryId,
     this.value,
     this.period,
     this.validFrom,
     this.validUntil,
+    this.serverNow,
   );
   factory GeneratedTotp.fromJson(Map<String, dynamic> body) {
-    const fields = {'entryId', 'code', 'period', 'validFrom', 'validUntil'};
+    const fields = {
+      'entryId',
+      'code',
+      'period',
+      'validFrom',
+      'validUntil',
+      'serverNow',
+    };
     final id = body['entryId'], value = body['code'];
     final p = body['period'],
         start = body['validFrom'],
         end = body['validUntil'];
+    final serverNow = body['serverNow'];
     if (body.length != fields.length ||
         !body.keys.every(fields.contains) ||
         !_entry(id) ||
@@ -39,15 +48,15 @@ final class GeneratedTotp {
         !_integer(start) ||
         !_integer(end) ||
         end - start != p ||
-        start % p != 0) {
+        start % p != 0 ||
+        end > _safeInteger ~/ 1000 ||
+        !_integer(serverNow) ||
+        serverNow ~/ 1000 < start ||
+        serverNow ~/ 1000 >= end) {
       throw const FormatException('Invalid generated code');
     }
-    return GeneratedTotp._(id as String, value, p, start, end);
+    return GeneratedTotp._(id as String, value, p, start, end, serverNow);
   }
-  bool activeAtMilliseconds(int now) =>
-      _integer(now) && validFrom <= now ~/ 1000 && now ~/ 1000 < validUntil;
-  int remainingSeconds(int now) =>
-      activeAtMilliseconds(now) ? validUntil - now ~/ 1000 : 0;
   @override
   String toString() => 'GeneratedTotp(redacted)';
 }
@@ -56,20 +65,58 @@ final class GeneratedTotp {
 /// storage, seed import, clipboard or platform integration. Call clear on logout,
 /// account switch, backgrounding and entry permission/catalog changes.
 final class TotpReadStore {
+  /// Must fetch fresh authenticated HTTPS responses, with no cache, replay,
+  /// response memoization, service-worker response substitution or stale fallback.
+  /// serverNow is only trustworthy as time for this in-flight response under
+  /// that transport contract. Production adapters must be tested for this.
   final SessionTransport transport;
   int _generation = 0;
-  int? _sessionExpiresAt;
+  final int Function() monotonicMilliseconds;
+  int? _startedAt, _deadline, _lastTick;
   GeneratedTotp? _code;
-  TotpReadStore(this.transport);
-  GeneratedTotp? visible(int now) =>
-      _sessionExpiresAt != null &&
-          now < _sessionExpiresAt! &&
-          (_code?.activeAtMilliseconds(now) ?? false)
-      ? _code
-      : null;
+  TotpReadStore(this.transport, {required this.monotonicMilliseconds});
+  // clear intentionally keeps this high-water mark. A restarted/broken clock
+  // requires a new store with a continuing provider, never resetting an active
+  // store to revive old state. Invalid visibility ticks cancel pending loads.
+  int _tick() {
+    final tick = monotonicMilliseconds();
+    if (!_integer(tick) || (_lastTick != null && tick < _lastTick!)) {
+      throw const FormatException();
+    }
+    _lastTick = tick;
+    return tick;
+  }
+
+  GeneratedTotp? visible() {
+    try {
+      final now = _tick();
+      if (_startedAt != null &&
+          now >= _startedAt! &&
+          _deadline != null &&
+          now < _deadline!) {
+        return _code;
+      }
+    } catch (_) {
+      clear();
+    }
+    if (_code != null) clear();
+    return null;
+  }
+
+  int remainingSeconds() {
+    if (visible() == null) return 0;
+    try {
+      return ((_deadline! - _tick()) / 1000).ceil().clamp(0, 86400);
+    } catch (_) {
+      clear();
+      return 0;
+    }
+  }
+
   void clear() {
     _generation++;
-    _sessionExpiresAt = null;
+    _startedAt = null;
+    _deadline = null;
     _code = null;
   }
 
@@ -84,29 +131,38 @@ final class TotpReadStore {
     return value;
   }
 
-  Future<void> load(String entryId, int Function() clock) async {
+  Future<void> load(String entryId) async {
     clear();
     final generation = _generation;
     try {
-      if (!_entry(entryId) || !_integer(clock())) throw const FormatException();
+      if (!_entry(entryId)) throw const FormatException();
+      final began = _tick();
       final session = await _get('/v1/manage/session');
       if (generation != _generation) return;
-      final expires = session['expiresAt'];
-      if (!_entry(session['ownerId']) ||
-          !_integer(expires) ||
-          expires <= clock()) {
+      final expiresField = session['expiresAt'];
+      if (!_entry(session['ownerId']) || !_integer(expiresField)) {
         throw const ClientFailure(401);
       }
+      final expires = expiresField as int;
       final body = await _get(
         '/v1/manage/totp-code?${Uri(queryParameters: {'entry': entryId}).query}',
       );
       if (generation != _generation) return;
-      final code = GeneratedTotp.fromJson(body), now = clock();
-      if (expires <= now) throw const ClientFailure(401);
-      if (code.entryId != entryId || !code.activeAtMilliseconds(now)) {
+      final code = GeneratedTotp.fromJson(body), now = _tick();
+      final elapsed = now - began;
+      if (expires - code.serverNow <= elapsed) throw const ClientFailure(401);
+      final codeRemaining = code.validUntil * 1000 - code.serverNow - elapsed;
+      final sessionRemaining = expires - code.serverNow - elapsed;
+      final remaining = codeRemaining < sessionRemaining
+          ? codeRemaining
+          : sessionRemaining;
+      if (code.entryId != entryId ||
+          remaining <= 0 ||
+          now > _safeInteger - remaining) {
         throw const FormatException();
       }
-      _sessionExpiresAt = expires;
+      _startedAt = now;
+      _deadline = now + remaining;
       _code = code;
     } catch (error) {
       if (generation != _generation) return;
@@ -115,4 +171,4 @@ final class TotpReadStore {
       throw const ClientFailure();
     }
   }
-}
+                                    }

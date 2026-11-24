@@ -14,40 +14,39 @@ class Transport implements SessionTransport {
   Future<void> close() async {}
 }
 
-Map<String, dynamic> record([String entry = 'entry']) => {
-  'entryId': entry,
-  'code': '94287082',
+Map<String, dynamic> record([String id = 'entry']) => {
+  'entryId': id,
+  'code': '001234',
   'period': 30,
   'validFrom': 30,
   'validUntil': 60,
+  'serverNow': 59000,
 };
 SessionResponse ok(Object o) => SessionResponse(200, jsonEncode(o));
+SessionResponse session([int expires = 90000]) =>
+    ok({'ownerId': 'owner', 'expiresAt': expires});
 void main() {
-  test('seconds contract, exact rollover, leading zero and redaction', () {
-    final c = GeneratedTotp.fromJson({...record(), 'code': '001234'});
+  test('server timestamp contract and strict malformed response rejection', () {
+    final c = GeneratedTotp.fromJson(record());
     expect(c.value, '001234');
-    expect(c.activeAtMilliseconds(29999), false);
-    expect(c.activeAtMilliseconds(30000), true);
-    expect(c.remainingSeconds(59000), 1);
-    expect(c.remainingSeconds(59999), 1);
-    expect(c.activeAtMilliseconds(60000), false);
-    expect(c.remainingSeconds(60000), 0);
-    expect(c.activeAtMilliseconds(-1), false);
+    expect(c.serverNow, 59000);
     expect(c.toString(), 'GeneratedTotp(redacted)');
-  });
-  test('strict allowlist and bounded epoch/interval/code validation', () {
     for (final change in <Map<String, dynamic>>[
       {'entryId': ''},
       {'entryId': 'bad id'},
       {'code': '1234567'},
-      {'code': '12345a'},
+      {'code': null},
+      {'period': '30'},
+      {'period': 30.5},
       {'period': 0},
       {'period': 86401},
       {'validFrom': 31},
       {'validUntil': 61},
-      {'period': 30.5},
-      {'validFrom': -30},
       {'validUntil': 9007199254740992},
+      {'serverNow': 29999},
+      {'serverNow': 60000},
+      {'serverNow': -1},
+      {'serverNow': null},
       {'seed': 'synthetic'},
     ]) {
       expect(
@@ -56,191 +55,275 @@ void main() {
       );
     }
   });
-  test('selected entry encoded, millisecond session expiry, clear', () async {
+  test('time anchoring ignores wall clock and conservatively subtracts full elapsed request', () async {
+    var tick = 100;
     final paths = <String>[];
     final store = TotpReadStore(
-      Transport((path) async {
-        paths.add(path);
-        return path.endsWith('/session')
-            ? ok({'ownerId': 'owner', 'expiresAt': 59950})
-            : ok(record('a&b'));
+      Transport((p) async {
+        paths.add(p);
+        tick += 100;
+        return p.endsWith('/session') ? session() : ok(record('a&b'));
       }),
+      monotonicMilliseconds: () => tick,
     );
-    await store.load('a&b', () => 59000);
+    await store.load('a&b');
     expect(paths, ['/v1/manage/session', '/v1/manage/totp-code?entry=a%26b']);
-    expect(store.visible(59949)?.value, '94287082');
-    expect(store.visible(59950), null);
-    store.clear();
-    expect(store.visible(59000), null);
-  });
-  test('clear while pending never restores code', () async {
-    final pending = Completer<SessionResponse>();
-    final store = TotpReadStore(
-      Transport(
-        (p) async => p.endsWith('/session')
-            ? ok({'ownerId': 'owner', 'expiresAt': 90000})
-            : pending.future,
-      ),
-    );
-    final load = store.load('entry', () => 59000);
-    await Future<void>.delayed(Duration.zero);
-    store.clear();
-    pending.complete(ok(record()));
-    await load;
-    expect(store.visible(59000), null);
+    expect(store.visible()?.value, '001234');
+    expect(store.remainingSeconds(), 1);
+    tick = 1099;
+    expect(store.visible(), isNotNull);
+    tick = 1100;
+    expect(store.visible(), null);
+    expect(store.remainingSeconds(), 0);
   });
   test(
-    'wrong entry, stale, oversized, malformed and errors clear without retry',
+    'session lifetime clamps server code lifetime and exact boundary expires',
     () async {
-      for (final response in [
-        ok(record('other')),
-        ok({...record(), 'validFrom': 0, 'validUntil': 30}),
-        const SessionResponse(200, 'bad'),
-        SessionResponse(200, ' ' * 4097),
-        const SessionResponse(401, 'private'),
-        const SessionResponse(403, 'private'),
-        const SessionResponse(429, 'private'),
-        const SessionResponse(503, 'private'),
-      ]) {
-        var requests = 0;
-        final store = TotpReadStore(
-          Transport((path) async {
-            requests++;
-            return path.endsWith('/session')
-                ? ok({'ownerId': 'owner', 'expiresAt': 90000})
-                : response;
-          }),
-        );
-        await expectLater(
-          store.load('entry', () => 59000),
-          throwsA(isA<ClientFailure>()),
-        );
-        expect(requests, 2);
-        expect(store.visible(59000), null);
-      }
+      var tick = 0;
+      final store = TotpReadStore(
+        Transport(
+          (p) async => p.endsWith('/session') ? session(59500) : ok(record()),
+        ),
+        monotonicMilliseconds: () => tick,
+      );
+      await store.load('entry');
+      tick = 499;
+      expect(store.visible(), isNotNull);
+      tick = 500;
+      expect(store.visible(), null);
     },
   );
-  test('newer selection wins when older reply completes later', () async {
-    final old = Completer<SessionResponse>();
-    final store = TotpReadStore(
-      Transport((p) async {
-        if (p.endsWith('/session')) {
-          return ok({'ownerId': 'owner', 'expiresAt': 90000});
-        }
-        return p.endsWith('entry=old') ? old.future : ok(record('new'));
-      }),
-    );
-    final first = store.load('old', () => 59000);
-    await Future<void>.delayed(Duration.zero);
-    await store.load('new', () => 59000);
-    old.complete(ok(record('old')));
-    await first;
-    expect(store.visible(59000)?.entryId, 'new');
-  });
   test(
-    'rollover or session expiry while loading never releases code',
+    'overslow request, expiry, clock rollback and invalid ticks fail closed',
     () async {
-      for (final expiry in [60000, 90000]) {
-        var now = 59000;
+      for (final elapsed in [1000, 2000]) {
+        var tick = 0;
         final store = TotpReadStore(
           Transport((p) async {
             if (p.endsWith('/session')) {
-              return ok({'ownerId': 'owner', 'expiresAt': expiry});
+              return session();
             }
-            now = 60000;
+            tick = elapsed;
             return ok(record());
           }),
+          monotonicMilliseconds: () => tick,
         );
-        await expectLater(
-          store.load('entry', () => now),
-          throwsA(isA<ClientFailure>()),
+        await expectLater(store.load('entry'), throwsA(isA<ClientFailure>()));
+        expect(store.visible(), null);
+      }
+      var tick = 100;
+      final store = TotpReadStore(
+        Transport(
+          (p) async => p.endsWith('/session') ? session() : ok(record()),
+        ),
+        monotonicMilliseconds: () => tick,
+      );
+      await store.load('entry');
+      tick = 99;
+      expect(store.visible(), null);
+      tick = 100;
+      expect(store.visible(), null);
+    },
+  );
+  test(
+    'clear during either await discards completion and stops further work',
+    () async {
+      for (final stage in ['session', 'code']) {
+        final pending = Completer<SessionResponse>();
+        var calls = 0;
+        final store = TotpReadStore(
+          Transport((p) async {
+            calls++;
+            return (p.endsWith('/session') && stage == 'session') ||
+                    (!p.endsWith('/session') && stage == 'code')
+                ? pending.future
+                : session();
+          }),
+          monotonicMilliseconds: () => 0,
         );
-        expect(store.visible(now), null);
+        final load = store.load('entry');
+        await Future<void>.delayed(Duration.zero);
+        store.clear();
+        pending.complete(stage == 'session' ? session() : ok(record()));
+        await load;
+        expect(calls, stage == 'session' ? 1 : 2);
+        expect(store.visible(), null);
       }
     },
   );
-  test('older failure cannot clear newer same-entry result', () async {
-    final old = Completer<SessionResponse>();
-    var reads = 0;
-    final store = TotpReadStore(
-      Transport((p) async {
-        if (p.endsWith('/session')) {
-          return ok({'ownerId': 'owner', 'expiresAt': 90000});
+  test(
+    'older success and failure cannot overwrite newer same-entry load',
+    () async {
+      for (final fail in [false, true]) {
+        final old = Completer<SessionResponse>();
+        var reads = 0;
+        final store = TotpReadStore(
+          Transport((p) async {
+            if (p.endsWith('/session')) {
+              return session();
+            }
+            return ++reads == 1 ? old.future : ok(record());
+          }),
+          monotonicMilliseconds: () => 0,
+        );
+        final first = store.load('entry');
+        await Future<void>.delayed(Duration.zero);
+        await store.load('entry');
+        if (fail) {
+          old.completeError(StateError('synthetic private'));
+        } else {
+          old.complete(ok(record('other')));
         }
-        return ++reads == 1 ? old.future : ok(record());
-      }),
-    );
-    final first = store.load('entry', () => 59000);
-    await Future<void>.delayed(Duration.zero);
-    await store.load('entry', () => 59000);
-    old.completeError(StateError('synthetic private failure'));
-    await first;
-    expect(store.visible(59000)?.entryId, 'entry');
-  });
-  test('clear during session await prevents further requests', () async {
-    final pending = Completer<SessionResponse>();
-    var requests = 0;
-    final store = TotpReadStore(
-      Transport((p) {
-        requests++;
-        return pending.future;
-      }),
-    );
-    final load = store.load('entry', () => 59000);
-    store.clear();
-    pending.complete(ok({'ownerId': 'owner', 'expiresAt': 90000}));
-    await load;
-    expect(requests, 1);
-    expect(store.visible(59000), null);
-  });
-  test('malformed or expired session rejected before code request', () async {
+        await first;
+        expect(store.visible()?.entryId, 'entry');
+      }
+    },
+  );
+  test('bad session, wrong entry, malformed/oversized and HTTP failures clear without retry', () async {
     for (final body in <Object>[
       {},
       {'expiresAt': 90000},
       {'ownerId': 'owner'},
-      {'ownerId': 'owner', 'expiresAt': 59000},
       {'ownerId': 'owner', 'expiresAt': '90000'},
     ]) {
-      var requests = 0;
+      var calls = 0;
       final store = TotpReadStore(
         Transport((p) async {
-          requests++;
+          calls++;
           return ok(body);
         }),
+        monotonicMilliseconds: () => 0,
       );
-      await expectLater(
-        store.load('entry', () => 59000),
-        throwsA(isA<ClientFailure>()),
+      await expectLater(store.load('entry'), throwsA(isA<ClientFailure>()));
+      expect(calls, 1);
+      expect(store.visible(), null);
+    }
+    for (final r in [
+      ok(record('other')),
+      const SessionResponse(200, 'private'),
+      SessionResponse(200, ' ' * 4097),
+      const SessionResponse(401, 'private'),
+      const SessionResponse(429, 'private'),
+      const SessionResponse(503, 'private'),
+    ]) {
+      var calls = 0;
+      final store = TotpReadStore(
+        Transport((p) async {
+          calls++;
+          return p.endsWith('/session') ? session() : r;
+        }),
+        monotonicMilliseconds: () => 0,
       );
-      expect(requests, 1);
-      expect(store.visible(59000), null);
+      await expectLater(store.load('entry'), throwsA(isA<ClientFailure>()));
+      expect(calls, 2);
+      expect(store.visible(), null);
     }
   });
-  test(
-    'wrong field types rejected and fixed string representations redacted',
-    () async {
-      for (final change in <Map<String, dynamic>>[
-        {'period': '30'},
-        {'code': null},
-      ]) {
-        final store = TotpReadStore(
-          Transport(
-            (p) async => p.endsWith('/session')
-                ? ok({'ownerId': 'owner', 'expiresAt': 90000})
-                : ok({...record(), ...change}),
-          ),
-        );
-        await expectLater(
-          store.load('entry', () => 59000),
-          throwsA(isA<ClientFailure>()),
-        );
-        expect(store.visible(59000), null);
-      }
-      expect(
-        const SessionResponse(200, 'private-code').toString(),
-        isNot(contains('private-code')),
+  test('invalid tick or expired session fails and empty visible does not cancel load', () async {
+    for (final expiry in [59000, 58999]) {
+      final store = TotpReadStore(
+        Transport(
+          (p) async => p.endsWith('/session') ? session(expiry) : ok(record()),
+        ),
+        monotonicMilliseconds: () => 0,
       );
-      expect(const ClientFailure().toString(), isNot(contains('private-code')));
+      await expectLater(store.load('entry'), throwsA(isA<ClientFailure>()));
+      expect(store.visible(), null);
+    }
+    final pending = Completer<SessionResponse>();
+    var tick = 0;
+    final store = TotpReadStore(
+      Transport(
+        (p) async => p.endsWith('/session') ? session() : pending.future,
+      ),
+      monotonicMilliseconds: () => tick,
+    );
+    final load = store.load('entry');
+    await Future<void>.delayed(Duration.zero);
+    expect(store.visible(), null);
+    pending.complete(ok(record()));
+    await load;
+    expect(store.visible(), isNotNull);
+    tick = -1;
+    expect(store.visible(), null);
+  });
+  test('negative start rejected before transport and rebuilt store recovers restarted clock', () async {
+    var tick = -1, calls = 0;
+    final transport = Transport((p) async {
+      calls++;
+      return p.endsWith('/session') ? session() : ok(record());
+    });
+    final store = TotpReadStore(transport, monotonicMilliseconds: () => tick);
+    await expectLater(store.load('entry'), throwsA(isA<ClientFailure>()));
+    expect(calls, 0);
+    tick = 100;
+    await store.load('entry');
+    expect(store.visible(), isNotNull);
+    tick = 50;
+    calls = 0;
+    await expectLater(store.load('entry'), throwsA(isA<ClientFailure>()));
+    expect(calls, 0);
+    final rebuilt = TotpReadStore(transport, monotonicMilliseconds: () => tick);
+    await rebuilt.load('entry');
+    expect(rebuilt.visible(), isNotNull);
+  });
+  test(
+    'backward tick during response rejects instead of extending deadline',
+    () async {
+      var tick = 100;
+      final store = TotpReadStore(
+        Transport((p) async {
+          if (p.endsWith('/session')) {
+            return session();
+          }
+          tick = 99;
+          return ok(record());
+        }),
+        monotonicMilliseconds: () => tick,
+      );
+      await expectLater(store.load('entry'), throwsA(isA<ClientFailure>()));
+      expect(store.visible(), null);
     },
   );
+  test(
+    'negative in-flight tick rejects and slow session consumes validity budget',
+    () async {
+      for (final delay in [-1, 1000]) {
+        var tick = 0;
+        var requests = 0;
+        final store = TotpReadStore(
+          Transport((p) async {
+            requests++;
+            if (p.endsWith('/session')) {
+              tick = delay;
+              return session();
+            }
+            return ok(record());
+          }),
+          monotonicMilliseconds: () => tick,
+        );
+        await expectLater(store.load('entry'), throwsA(isA<ClientFailure>()));
+        expect(requests, 2);
+        expect(store.visible(), null);
+      }
+    },
+  );
+  test('invalid visibility tick cancels a pending newer load', () async {
+    final pending = Completer<SessionResponse>();
+    var tick = 0;
+    final store = TotpReadStore(
+      Transport(
+        (p) async => p.endsWith('/session') ? session() : pending.future,
+      ),
+      monotonicMilliseconds: () => tick,
+    );
+    final load = store.load('entry');
+    await Future<void>.delayed(Duration.zero);
+    tick = -1;
+    expect(store.visible(), null);
+    tick = 0;
+    pending.complete(ok(record()));
+    await load;
+    expect(store.visible(), null);
+  });
 }
