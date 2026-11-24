@@ -102,7 +102,7 @@ class _AuthEntryState extends State<AuthEntry> {
             const SizedBox(height: 12),
             Text(
               protected
-                  ? 'Extra verification is on for your account. Use a passkey or approve this request from another signed-in device.'
+                  ? 'Use a passkey, or open Security on your other signed-in device and tap Check for sign-in requests. Compare the match code before approving.'
                   : google
                   ? (status == 'google-email'
                         ? 'One more check: verify ${email.text} to finish signing in with Google.'
@@ -222,8 +222,8 @@ class _AuthEntryState extends State<AuthEntry> {
                 if (googleCodeSent) ...[
                   TextField(
                     controller: proof,
-                    onSubmitted: (_) => widget.run(() async {
-                      final value = proof.text.trim();
+                    onSubmitted: (submitted) => widget.run(() async {
+                      final value = submitted.trim();
                       proof.clear();
                       await (widget.bridge as AuthEntryBridge).googleContinue(
                         'verify-email',
@@ -287,7 +287,7 @@ class _AuthEntryState extends State<AuthEntry> {
             ],
             if (protected && widget.bridge is AuthEntryBridge) ...[
               Text(
-                'Request: ${(widget.bridge as AuthEntryBridge).pendingLabel}',
+                'Match code: ${(widget.bridge as AuthEntryBridge).pendingLabel}',
               ),
               const SizedBox(height: 12),
               FilledButton(
