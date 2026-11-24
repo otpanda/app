@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Generate disposable pinned-SDK desktop hosts without mobile toolchain setup."""
 import pathlib, shutil, subprocess, tempfile
+flutter = shutil.which('flutter')
+if flutter is None:
+    raise SystemExit('Flutter executable is not on PATH')
 root = pathlib.Path(__file__).resolve().parents[2]
 platforms = ('linux', 'windows', 'macos')
 if any((root / name).exists() for name in platforms):
     raise SystemExit('Use a fresh checkout: generated desktop host already exists')
 with tempfile.TemporaryDirectory() as temp:
     host = pathlib.Path(temp) / 'host'
-    subprocess.run(['flutter', 'create', '--platforms=linux,windows,macos',
+    subprocess.run([flutter, 'create', '--platforms=linux,windows,macos',
                     '--org', 'org.otpanda.development', '--project-name',
                     'otpanda_client', str(host)], check=True)
     for platform in platforms:
         destination = root / platform
         shutil.copytree(host / platform, destination)
-subprocess.run(['flutter', 'pub', 'get', '--enforce-lockfile'], cwd=root, check=True)
+subprocess.run([flutter, 'pub', 'get', '--enforce-lockfile'], cwd=root, check=True)
