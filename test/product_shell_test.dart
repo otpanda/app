@@ -57,7 +57,13 @@ Map<String, SessionResponse> routes({
   '/v1/manage/unassigned': ok({'records': []}),
 };
 
-Future<void> pump(WidgetTester t, FakeTransport tr, {bool out = false}) async {
+Future<void> pump(
+  WidgetTester t,
+  FakeTransport tr, {
+  bool out = false,
+  int initialTab = 0,
+  ValueChanged<int>? onTabChanged,
+}) async {
   t.view.physicalSize = const Size(360, 800);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.resetPhysicalSize);
@@ -70,6 +76,8 @@ Future<void> pump(WidgetTester t, FakeTransport tr, {bool out = false}) async {
       theme: otpandaTheme(),
       home: ProductShell(
         controller: controller,
+        initialTab: initialTab,
+        onTabChanged: onTabChanged,
         onCopyAssigned: (_) async {},
         onCopyPrivate: (_) async {},
         clock: () => now,
@@ -81,6 +89,24 @@ Future<void> pump(WidgetTester t, FakeTransport tr, {bool out = false}) async {
 }
 
 void main() {
+  testWidgets(
+    'restored product tab is bounded and navigation emits only an enum',
+    (t) async {
+      int? selected;
+      await pump(
+        t,
+        FakeTransport(routes()),
+        initialTab: 3,
+        onTabChanged: (tab) => selected = tab,
+      );
+      expect(t.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 3);
+      await t.tap(find.text('Sources').last);
+      await t.pumpAndSettle();
+      expect(selected, 1);
+      expect(t.takeException(), isNull);
+    },
+  );
+
   testWidgets('genuine empty account shows empty state, no demo data', (
     t,
   ) async {
