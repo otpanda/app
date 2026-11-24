@@ -11,6 +11,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(const OTPandaApp());
+    await tester.tap(find.text('Temporary demo'));
+    await tester.pumpAndSettle();
     await tester.pumpAndSettle();
     expect(find.byType(NavigationBar), findsNothing);
     expect(find.byType(ListTile), findsNWidgets(5));
@@ -30,6 +32,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(const OTPandaApp());
+    await tester.tap(find.text('Temporary demo'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Unassigned'));
     await tester.pumpAndSettle();
     await Scrollable.ensureVisible(
