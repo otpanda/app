@@ -2,10 +2,8 @@ name: Desktop compile verification
 # Keep fork PRs read-only. Never use pull_request_target here.
 on:
   pull_request:
-    paths: ['lib/**', 'pubspec.*', 'tool/desktop/**', '.github/workflows/desktop-check.yml']
   push:
     branches: [main]
-    paths: ['lib/**', 'pubspec.*', 'tool/desktop/**', '.github/workflows/desktop-check.yml']
   workflow_dispatch:
 permissions:
   contents: read
