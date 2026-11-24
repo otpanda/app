@@ -20,6 +20,8 @@ class ProductShell extends StatefulWidget {
   final int Function() clock;
   final VoidCallback onSignedOut;
   final VoidCallback? onOpenAccount;
+  final int initialTab;
+  final ValueChanged<int>? onTabChanged;
 
   /// Pull-down action on the web: reload the whole page. Null on native
   /// clients, which refresh their data in place instead.
@@ -32,6 +34,8 @@ class ProductShell extends StatefulWidget {
     required this.clock,
     required this.onSignedOut,
     this.onOpenAccount,
+    this.initialTab = 0,
+    this.onTabChanged,
     this.pageReload = platform.pageReload,
   });
   @override
@@ -59,7 +63,7 @@ class _ProductShellState extends State<ProductShell> {
       : widget.controller.hasLoaded
       ? _Phase.loaded
       : _Phase.cleared;
-  int tab = 0;
+  late int tab = widget.initialTab.clamp(0, 3);
   String query = '';
   @override
   void initState() {
@@ -485,6 +489,7 @@ class _ProductShellState extends State<ProductShell> {
                                             title: Text(names[i]),
                                             onTap: () => setState(() {
                                               tab = i;
+                                              widget.onTabChanged?.call(i);
                                               query = '';
                                             }),
                                           ),
@@ -510,6 +515,7 @@ class _ProductShellState extends State<ProductShell> {
                 selectedIndex: tab,
                 onDestinationSelected: (i) => setState(() {
                   tab = i;
+                  widget.onTabChanged?.call(i);
                   query = '';
                 }),
                 destinations: [
