@@ -3,6 +3,8 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * *'
 permissions:
   contents: read
 jobs:
@@ -10,13 +12,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
         with:
           flutter-version: '3.50.1'
           channel: stable
           cache: true
+      - name: Refresh public catalog metadata (keep bundled fallback on failure)
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        run: python3 tool/refresh_service_catalog.py
+      - name: Preserve exact public catalog snapshot and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-service-catalog
+          path: |
+            assets/service-catalog.json
+            assets/2fa-directory-LICENSE.txt
+          retention-days: 30
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
+      - run: python3 tool/test_service_catalog.py
       - run: flutter analyze
       - run: flutter test
       - run: flutter build web --base-href /app/ --no-wasm-dry-run
@@ -39,7 +54,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
         with:
           flutter-version: '3.50.1'
           channel: stable
