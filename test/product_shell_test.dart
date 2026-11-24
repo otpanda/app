@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -36,10 +37,12 @@ class FakeTransport implements BrowserSessionBridge {
       const SessionResponse(404, '{}');
   final Map<String, SessionResponse> routes;
   int calls = 0;
+  Future<SessionResponse> Function(String)? handler;
   FakeTransport(this.routes);
   @override
   Future<SessionResponse> read(String path) async {
     calls++;
+    if (handler != null) return handler!(path);
     return routes[path] ?? const SessionResponse(500, '{}');
   }
 }
@@ -90,6 +93,59 @@ Future<void> pump(
 
 void main() {
   testWidgets(
+    'background poll never removes a visible code, even on transient failure',
+    (t) async {
+      var time = now;
+      final tr = FakeTransport(
+        routes(
+          entries: [
+            {
+              'entry_id': 'e',
+              'service_name': 'Example',
+              'capabilities': {'manage': true},
+            },
+          ],
+          codes: [
+            {
+              'entryId': 'e',
+              'code': '123456',
+              'receivedAt': now,
+              'expiresAt': now + 300000,
+            },
+          ],
+        ),
+      );
+      final c = ReadWorkspaceController(bridge: tr, clock: () => time);
+      await c.refresh();
+      await t.pumpWidget(
+        MaterialApp(
+          home: ProductShell(
+            controller: c,
+            clock: () => time,
+            onSignedOut: () {},
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+          ),
+        ),
+      );
+      expect(find.byTooltip('Copy code'), findsOneWidget);
+      time += 30000;
+      final pending = Completer<SessionResponse>();
+      tr.handler = (_) => pending.future;
+      final poll = c.refresh();
+      await t.pump();
+      expect(find.byTooltip('Copy code'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      pending.complete(const SessionResponse(503, '{}'));
+      await poll;
+      await t.pump();
+      expect(find.byTooltip('Copy code'), findsOneWidget);
+      expect(find.textContaining('Connection interrupted'), findsOneWidget);
+      c.dispose();
+    },
+  );
+
+  testWidgets(
     'restored product tab is bounded and navigation emits only an enum',
     (t) async {
       int? selected;
@@ -99,7 +155,10 @@ void main() {
         initialTab: 3,
         onTabChanged: (tab) => selected = tab,
       );
-      expect(t.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 3);
+      expect(
+        t.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        3,
+      );
       await t.tap(find.text('Sources').last);
       await t.pumpAndSettle();
       expect(selected, 1);
@@ -148,7 +207,8 @@ void main() {
     await pump(t, FakeTransport({}));
     expect(find.text('Could not load your codes'), findsOneWidget);
     expect(find.text('No codes yet'), findsNothing);
-    expect(find.text('Try again'), findsOneWidget);
+    expect(find.text('Try again'), findsNothing);
+    expect(find.textContaining('retry automatically'), findsWidgets);
   });
 
   testWidgets('429 offers manual retry without auto-retrying', (t) async {
@@ -199,7 +259,7 @@ void main() {
       ),
     );
     await t.pumpAndSettle();
-    expect(find.text('Refresh to load your codes'), findsOneWidget);
+    expect(find.text('Updating your codes automatically'), findsOneWidget);
     expect(find.text('No codes yet'), findsNothing);
     expect(bridge.calls, 5);
   });
