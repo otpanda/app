@@ -1,0 +1,21 @@
+# Public service picker
+
+The Add entry form can search a bundled public name/domain catalog. Selection fills the label and retains the selected domain ID on the local fictional entry. Any subsequent label edit clears that public identity; an unchanged label preserves it. Users can still enter a custom label. Selection does not connect a source, prove current OTP support, or recognize a sender. Duplicate account entries remain possible.
+
+The current preview resets entries on restart. This is not an authenticated account-write path. No account, inbox, phone number, secret or source connection is transmitted to the directory. Searching runs locally and typing never produces network queries.
+
+## Refresh and fallback
+
+The web workflow refreshes from https://api.2fa.directory/v3/all.json on non-PR builds, including a daily 03:23 UTC scheduled main build. Pages deploys only after web and Android checks pass. Scheduled runs are best-effort, not a freshness guarantee. GitHub can disable scheduled workflows after 60 days of repository inactivity. Build-time metadata updates deploy automatically without per-change review; artifacts provide after-the-fact audit, not an approval gate. Native and extension builds use the checked-in snapshot until it is updated in source. No background runtime updater is installed.
+
+The fetch has a 20-second socket-operation timeout (not a total elapsed deadline), refuses redirects and accepts at most 4 MiB and 5,000 source rows. Conversion copies only names and validated domains, rejects conflicting duplicate identities, sorts deterministically and records source, fetch time and raw-source SHA-256. A feed with fewer than 80% of the previous snapshot's services is rejected. Names share frozen conservative control/format/separator ranges in Python and Dart, including Cc/Cf/Zl/Zp through Unicode 15.1 with reserved Egyptian formatting characters also excluded. Both count the 120-name limit in UTF-16 units. Converted UTF-8 output including its newline must fit 1 MiB before replacement. Replacement is atomic. Fetch, parse, validation and replacement failures leave the existing snapshot unchanged and do not stop the web build. A refresh failure emits a GitHub warning. The run summary records refresh/fallback status, source fetch timestamp, service count, raw-source SHA-256 and exact snapshot SHA-256. A dedicated 30-day workflow artifact preserves the exact snapshot and license, including the PR snapshot. The normal web artifact also contains the shipped snapshot. Thus a deployed asset can differ from the source commit after refresh, but its exact bytes and provenance are retained with that run. A bad bundled asset instead gives a custom-label fallback in the picker.
+
+The UI shows the snapshot date and attribution. An older valid snapshot may still be displayed. A SHA-256 digest records provenance, not publisher authentication. Upstream signatures are not verified; `signatureVerified` is explicitly false. Do not use this metadata for routing, autofill, sender recognition, connection decisions or any trust decision. A hostile or incorrect directory name remains untrusted even after structural validation. It is displayed only for explicit local selection. Refresh remains automatic; cosmetic metadata does not require a new approval gate.
+
+Data sourced from 2FA Directory by 2factorauth. Upstream API documentation: https://2fa.directory/api . The upstream MIT license and copyright notice are bundled as `assets/2fa-directory-LICENSE.txt`. Source and metadata are in `assets/service-catalog.json`.
+
+## Checks
+
+`python3 tool/test_service_catalog.py` tests conversion, duplicate handling, malformed data, redirect refusal, fetch failure, shrink rejection and atomic replacement failure. `flutter test` covers parsing, local searching, explicit selection, retained public identity, creation label edits clearing identity on create and edit, unchanged edits retaining identity, and compact no-match layout. The release JS browser flow also exercises the actual shipped assets. Chrome widget tests currently stall in the test harness's bundled-asset load; they are not recorded as passing.
+
+Automatic global sender association, real persistence, authentication and real generated-code activation are separate work. None is enabled by this picker.
