@@ -20,3 +20,23 @@ abstract interface class AssignmentBridge {
   String get assignmentState;
   void assignmentDismiss();
 }
+
+/// App-owned email entry, separate from access/session authority.
+abstract interface class AuthEntryBridge {
+  String get email;
+  Future<void> googleContinue(String action, [String proof = '']);
+  Future<void> googleStart(bool remember);
+  String get pendingLabel;
+  Future<String> protectionContinue(String action);
+  Future<String> security(
+    String action, [
+    bool enabled = false,
+    String pendingId = '',
+  ]);
+  Future<void> signupEmail(String email, [String proof = '']);
+}
+
+abstract interface class FirstPasskeyBridge {
+  bool get firstPasskeyAvailable;
+  Future<void> firstPasskey();
+}
