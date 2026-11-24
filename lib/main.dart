@@ -707,7 +707,7 @@ class _ClientHomeState extends State<ClientHome> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 SizedBox(
-                                  width: 170,
+                                  width: 210,
                                   child: Padding(
                                     padding: const EdgeInsets.only(
                                       top: 22,
@@ -721,6 +721,12 @@ class _ClientHomeState extends State<ClientHome> {
                                             bottom: 8,
                                           ),
                                           child: ListTile(
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                                  horizontal: 12,
+                                                ),
+                                            minLeadingWidth: 18,
+                                            horizontalTitleGap: 10,
                                             dense: true,
                                             shape: RoundedRectangleBorder(
                                               borderRadius:
