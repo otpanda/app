@@ -397,21 +397,17 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
             padding: const EdgeInsets.all(24),
             children: [
               const Text(
-                'Real account connection',
+                'Your account',
                 style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 12),
-              Text(
-                !widget.loginEnabled
-                    ? 'This is separate from the fictional development preview. Real authentication is not enabled in the current deployment.'
-                    : widget.accountOnly
-                    ? 'Account access only. Sources, real codes, sharing and account recovery are not available in this stage.'
-                    : 'This is separate from the fictional development preview.',
+              const Text(
+                'Sign in with a passkey to access your account.',
               ),
               const SizedBox(height: 20),
               Text(
                 status == 'unsupported'
-                    ? 'Native sign-in is not connected yet.'
+                    ? 'Use a browser to sign in on this device.'
                     : status == 'signup-ready'
                     ? 'Create a passkey for your verified account email.'
                     : status == 'signup-retry-required'
@@ -467,16 +463,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 const Text(
                   'After opening an email, return to the browser where signup started. Reloading this page clears a pending passkey request. Return to the same signup form to retry, or sign in if the passkey was already created.',
                 ),
-                if (!widget.loginEnabled)
-                  const Text(
-                    'Sign-in will be available after the complete flow is enabled and checked.',
-                  ),
               ],
               if (status == 'restored' && widget.accountOnly) ...[
                 Text(
                   accountExpiresAt == null
                       ? 'Session could not be verified. Retry the session check.'
-                      : 'Account session verified. Sources and codes are unavailable in this stage.',
+                      : 'Account session verified.',
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton(
