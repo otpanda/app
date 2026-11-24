@@ -67,6 +67,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     bridge = widget.bridge ?? createBrowserSession();
     store = CodeStore(_ReadTransport(bridge));
     expiryTick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && status == 'authenticating' && bridge.status != status) {
+        setState(() => status = bridge.status);
+      }
       if (mounted && status == 'restored') {
         if ((widget.accountOnly &&
                 accountExpiresAt != null &&

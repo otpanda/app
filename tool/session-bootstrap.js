@@ -64,7 +64,10 @@
         }else{
 const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','userVerification','allowCredentials','extensions'].includes(k))||o.rpId!=='otpanda.github.io'||o.userVerification!=='required'||!/^[A-Za-z0-9_-]{43}$/.test(o.challenge)||o.timeout!==120000||(o.allowCredentials!==undefined&&(!Array.isArray(o.allowCredentials)||o.allowCredentials.length))||(o.extensions!==undefined&&Object.keys(o.extensions).length))throw Error();
         }
-        loginPending={ceremony:c,saved:p,registration};status=registration?'signup-ready':'passkey-ready';return;
+        loginPending={ceremony:c,saved:p,registration};status=registration?'signup-ready':'passkey-ready';
+        // A valid login callback can prompt immediately at the app RP. Keep a
+        // deliberate retry only if the browser requires a new user gesture.
+        if(!registration&&globalThis.navigator?.credentials?.get){Promise.resolve().then(()=>globalThis.OTPandaSession.passkey(true));}return;
       }
       if (!['code,state','code,enrollment,state'].includes([...values.keys()].sort().join(','))) throw Error();
       const code=values.get('code');if(!/^otpda_[A-Za-z0-9_-]{55}$/.test(code))throw Error();
@@ -174,21 +177,21 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const response={id:credential.id,rawId:encode(new Uint8Array(credential.rawId)),type:credential.type,clientExtensionResults:credential.getClientExtensionResults(),response:{clientDataJSON:encode(new Uint8Array(credential.response.clientDataJSON)),attestationObject:encode(new Uint8Array(credential.response.attestationObject)),transports:credential.response.getTransports?.()??[]}};
       enrollment=undefined;await post('finish',{token:c.token,response});
     },
-    passkey:async()=>{
+    passkey:async(automatic=false)=>{
       const pending=loginPending;if(!pending||!['passkey-ready','signup-ready'].includes(status))throw Error('Start sign-in again');
-      loginPending=undefined;const attempt=++generation;status='authenticating';
+      loginPending=undefined;const attempt=++generation;let credentialReceived=false;status='authenticating';
       try{
         if(pending.ceremony.expiresAt<=Date.now()||Date.now()-pending.saved.created>(pending.registration?900000:300000))throw Error();
         const decode=v=>Uint8Array.from(atob(v.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0));
         const o=pending.ceremony.options,c=pending.registration?await navigator.credentials.create({publicKey:{rp:o.rp,user:{...o.user,id:decode(o.user.id)},challenge:decode(o.challenge),pubKeyCredParams:o.pubKeyCredParams,timeout:Math.min(120000,pending.ceremony.expiresAt-Date.now()),attestation:'none',authenticatorSelection:{residentKey:'required',userVerification:'required'},excludeCredentials:[],extensions:{credProps:true}}}):await navigator.credentials.get({publicKey:{rpId:'otpanda.github.io',challenge:decode(o.challenge),timeout:Math.min(120000,pending.ceremony.expiresAt-Date.now()),userVerification:'required'}});
         if(attempt!==generation)return;
-        if(!c||c.type!=='public-key')throw Error();
+        if(!c||c.type!=='public-key')throw Error();credentialReceived=true;
         const response={id:c.id,rawId:encode(new Uint8Array(c.rawId)),type:c.type,clientExtensionResults:c.getClientExtensionResults(),response:pending.registration?{clientDataJSON:encode(new Uint8Array(c.response.clientDataJSON)),attestationObject:encode(new Uint8Array(c.response.attestationObject)),transports:typeof c.response.getTransports==='function'?c.response.getTransports():[]}:{clientDataJSON:encode(new Uint8Array(c.response.clientDataJSON)),authenticatorData:encode(new Uint8Array(c.response.authenticatorData)),signature:encode(new Uint8Array(c.response.signature)),userHandle:c.response.userHandle?encode(new Uint8Array(c.response.userHandle)):null}};
         const r=await fetch(API+(pending.registration?'/auth/signup/verify':'/auth/login/verify'),{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:pending.ceremony.token,response})});if(!r.ok)throw Error();const text=await readBounded(r,2048);const result=JSON.parse(text);
         if(Object.keys(result).sort().join(',')!=='expiresAt,handoff'||!/^otpda_[A-Za-z0-9_-]{55}$/.test(result.handoff)||!Number.isSafeInteger(result.expiresAt)||result.expiresAt<=Date.now()||result.expiresAt>Date.now()+60000)throw Error();
         if(attempt!==generation)return;
         sessionStorage.setItem(KEY,JSON.stringify({...pending.saved,created:Date.now()}));status='completing';location.assign(API+'/auth/login/complete#'+new URLSearchParams({handoff:result.handoff}));
-      }catch{if(attempt===generation){clear();status=pending.registration?'signup-retry-required':'sign-in-required';}}
+      }catch{if(attempt===generation){if(automatic&&!credentialReceived&&!pending.registration&&pending.ceremony.expiresAt>Date.now()){loginPending=pending;status='passkey-ready';}else{clear();status=pending.registration?'signup-retry-required':'sign-in-required';}}}
     },
     start:async(mode='restore',remember=true)=>{
       if(location.origin+location.pathname!==REDIRECT||location.search)throw Error('Canonical app URL required');
