@@ -175,6 +175,11 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     })().catch(()=>{if(attempt===generation){status='session-paused';restoring=undefined;}return false;});
     return restoring;
   }
+  async function boundedRead(url,options,limit){
+    const abort=new AbortController();let timer;
+    const pending=(async()=>{const response=await fetch(url,{...options,signal:abort.signal});return {response,body:response.status===429?'':await readBounded(response,limit)};})();
+    try{return await Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject(Error('Request timeout'));},15000);})]);}finally{clearTimeout(timer);}
+  }
   async function maintainSession(userRequest=false) {
     if(!access||!['restored','session-paused','restoring'].includes(status))return false;
     if(restoring)return restoring;
@@ -193,10 +198,10 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
         const message=new TextEncoder().encode(['otpanda-renew-v1','POST /auth/renew',oldRenewal.lineageId,oldRenewal.handleId,String(expiresAt)].join('\n'));
         const signature=encode(new Uint8Array(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},key,message)));
         if(attempt!==generation)return false;
-        const response=await fetch(API+'/auth/renew',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+oldAccess},body:JSON.stringify({lineage_id:oldRenewal.lineageId,expires_at:expiresAt,signature})});
+        const renewalRead=await boundedRead(API+'/auth/renew',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+oldAccess},body:JSON.stringify({lineage_id:oldRenewal.lineageId,expires_at:expiresAt,signature})},4096);const response=renewalRead.response;
         if(response.status===429){renewalRetryAt=Date.now()+60000;return serverNow()<expires;}
         if(!response.ok)throw Error('Renewal refused');
-        const result=JSON.parse(await readBounded(response,4096));const nextOffset=validateAccess(result);
+        const result=JSON.parse(renewalRead.body);const nextOffset=validateAccess(result);
         if(!result.renewal||result.renewal.lineageId!==oldRenewal.lineageId||result.renewal.handleId===oldRenewal.handleId||(result.renewal.firstPartyExpiresAt===undefined||result.renewal.firstPartyExpiresAt<oldRenewal.firstPartyExpiresAt))throw Error('Invalid successor');
         if(attempt!==generation||oldAccess!==access)return false;
         serverOffset=nextOffset;access=result.access;expires=result.accessExpiresAt;renewal=result.renewal;status='restored';return true;
@@ -251,7 +256,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       if(!['/v1/manage/account','/v1/manage/session','/v1/manage/entries','/v1/manage/active-codes','/v1/manage/sources','/v1/manage/unassigned'].includes(path))throw Error('Read path required');
       if(!await maintainSession(true))return {status:access||status==='restoring'||status==='session-paused'?503:401,body:'{}'};
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)return {status:401,body:'{}'};
-      const r=await fetch(API+path,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}});const body=await readBounded(r,524288);
+      const result=await boundedRead(API+path,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},524288);const r=result.response,body=result.body;
       if(attempt!==generation)return {status:401,body:'{}'};
       if(r.status===401){await restoreAfterUnauthorized();return {status:503,body:'{}'};}
       return {status:r.status,body};
