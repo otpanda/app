@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
 import 'models.dart';
+import 'app_navigation_stub.dart'
+    if (dart.library.js_interop) 'app_navigation_web.dart';
 import 'branding.dart';
 import 'source_preview.dart';
 import 'access_preview.dart';
@@ -80,7 +82,12 @@ class OTPandaApp extends StatelessWidget {
     title: 'OTPanda',
     debugShowCheckedModeBanner: false,
     theme: otpandaTheme(),
-    home: const AccountEntryRouter(),
+    // The host owns browser history. Flutter must not overwrite #/ URLs.
+    builder: (context, child) => Navigator(
+      reportsRouteUpdateToEngine: false,
+      onGenerateRoute: (_) =>
+          MaterialPageRoute<void>(builder: (_) => const AccountEntryRouter()),
+    ),
   );
 }
 
@@ -93,14 +100,40 @@ class AccountEntryRouter extends StatefulWidget {
   State<AccountEntryRouter> createState() => _AccountEntryRouterState();
 }
 
-class _AccountEntryRouterState extends State<AccountEntryRouter> {
+class _AccountEntryRouterState extends State<AccountEntryRouter>
+    with WidgetsBindingObserver {
+  late final AppNavigation navigation;
   @override
-  Widget build(BuildContext context) => BrowserAccountPage(
-    bridge: widget.bridge,
-    loginEnabled: true,
-    accountOnly: true,
-    workspaceEnabled: true,
-  );
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    navigation = AppNavigation();
+    navigation.onChange = () {
+      if (mounted) setState(() {});
+    };
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    navigation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Future<bool> didPopRoute() => Navigator.of(context).maybePop();
+
+  @override
+  Widget build(BuildContext context) => navigation.current == 'demo'
+      ? ClientHome(fictionalCatalog: true, onExit: () => navigation.go('codes'))
+      : BrowserAccountPage(
+          bridge: widget.bridge,
+          navigation: navigation.current,
+          onNavigate: navigation.go,
+          loginEnabled: true,
+          accountOnly: true,
+          workspaceEnabled: true,
+        );
 }
 
 class ClientHome extends StatefulWidget {
@@ -109,11 +142,13 @@ class ClientHome extends StatefulWidget {
   final int initialTab;
   // Test/preview fixture: start with no entries or codes, never for real data.
   final bool emptyFixture;
+  final VoidCallback? onExit;
   const ClientHome({
     super.key,
     this.fictionalCatalog = false,
     this.initialTab = 0,
     this.emptyFixture = false,
+    this.onExit,
   });
   @override
   State<ClientHome> createState() => _ClientHomeState();
@@ -871,14 +906,16 @@ class _ClientHomeState extends State<ClientHome> {
                     if (desktop) const SizedBox(width: 6),
                     IconButton(
                       tooltip: 'Account & security',
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (context) => const BrowserAccountPage(
-                            loginEnabled: true,
-                            accountOnly: true,
+                      onPressed:
+                          widget.onExit ??
+                          () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (context) => const BrowserAccountPage(
+                                loginEnabled: true,
+                                accountOnly: true,
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
                       icon: const Icon(Icons.account_circle_outlined, size: 26),
                     ),
                   ],

@@ -358,4 +358,42 @@ void main() {
     await t.pump();
     expect(find.text('Send code'), findsOneWidget);
   });
+
+  testWidgets('sections show only their part', (t) async {
+    Future<void> only(Set<RecoverySection> sections) async {
+      t.view.physicalSize = const Size(400, 1800);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.resetPhysicalSize);
+      addTearDown(t.view.resetDevicePixelRatio);
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: RecoveryPanel(
+                key: UniqueKey(),
+                bridge: FakeRecovery(st()),
+                sections: sections,
+                beforeEmailRecovery:
+                    sections.contains(RecoverySection.emailRecovery)
+                    ? const Text('Protection lead')
+                    : null,
+              ),
+            ),
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+    }
+
+    await only({RecoverySection.devices});
+    expect(find.text('Signed-in devices'), findsOneWidget);
+    expect(find.text('Recovery'), findsNothing);
+    expect(find.text('Passkeys'), findsNothing);
+    expect(find.text('Email-only recovery'), findsNothing);
+    await only({RecoverySection.passkeys, RecoverySection.emailRecovery});
+    expect(find.text('Passkeys'), findsOneWidget);
+    expect(find.text('Signed-in devices'), findsNothing);
+    expect(find.text('Email-only recovery'), findsOneWidget);
+    expect(find.text('Protection lead'), findsOneWidget);
+  });
 }

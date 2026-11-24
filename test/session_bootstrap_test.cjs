@@ -1,7 +1,7 @@
 function streaming(r){if(r&&typeof r.text==='function'&&!r.body){r.body={getReader(){let sent=false;return {async read(){if(sent)return {done:true};sent=true;return {done:false,value:new TextEncoder().encode(await r.text())};},async cancel(){},releaseLock(){}};}};}return r;}
 const {test}=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');const fs=require('node:fs');const script=fs.readFileSync('tool/session-bootstrap.js','utf8');
 const NOW=1800000000000,token='otpda_'+'a'.repeat(55),state='s'.repeat(43);
-function env({hash='',saved,now=NOW,response={access:token,accessExpiresAt:NOW+300000},hint,navigator,fetchImpl,sessionValues=new Map()}={}){let stored=saved,cleaned=false,calls=0;const location={origin:'https://otpanda.github.io',pathname:'/app/',search:'',hash,assign(url){location.assigned=url;}};const hints=new Map(hint?[['otpanda-session-present','yes']]:[]);const context={localStorage:{getItem:k=>hints.get(k),setItem:(k,v)=>hints.set(k,v),removeItem:k=>hints.delete(k)},location,history:{replaceState(){cleaned=true;location.hash='';}},sessionStorage:{getItem(k){return k==='otpanda.restore.tab.v1'?stored:sessionValues.get(k)??null;},removeItem(k){if(k==='otpanda.restore.tab.v1')stored=undefined;else sessionValues.delete(k);},setItem(k,v){if(k==='otpanda.restore.tab.v1')stored=v;else sessionValues.set(k,v);}},fetch:async(url,options)=>{assert.ok(cleaned);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');calls++;return {ok:true,text:async()=>JSON.stringify(response)};},URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),crypto:require('node:crypto').webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Date:class extends Date{static now(){return now;}}};if(navigator)context.navigator=navigator;if(fetchImpl)context.fetch=fetchImpl;let fetchValue=context.fetch;Object.defineProperty(context,'fetch',{get(){return async(...args)=>streaming(await fetchValue(...args));},set(v){fetchValue=v;},enumerable:true,configurable:true});vm.createContext(context);vm.runInContext(script,context);return {context,get cleaned(){return cleaned;},get stored(){return stored;},get calls(){return calls;}};}
+function env({hash='',saved,now=NOW,response={access:token,accessExpiresAt:NOW+300000},hint,navigator,fetchImpl,sessionValues=new Map()}={}){let stored=saved,cleaned=false,calls=0;const location={origin:'https://otpanda.github.io',pathname:'/app/',search:'',hash,assign(url){location.assigned=url;}};const hints=new Map(hint?[['otpanda-session-present','yes']]:[]);const context={AbortController,setTimeout,clearTimeout,localStorage:{getItem:k=>hints.get(k),setItem:(k,v)=>hints.set(k,v),removeItem:k=>hints.delete(k)},location,history:{replaceState(){cleaned=true;location.hash='';}},sessionStorage:{getItem(k){return k==='otpanda.restore.tab.v1'?stored:sessionValues.get(k)??null;},removeItem(k){if(k==='otpanda.restore.tab.v1')stored=undefined;else sessionValues.delete(k);},setItem(k,v){if(k==='otpanda.restore.tab.v1')stored=v;else sessionValues.set(k,v);}},fetch:async(url,options)=>{assert.ok(cleaned);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');calls++;return {ok:true,text:async()=>JSON.stringify(response)};},URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),crypto:require('node:crypto').webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Date:class extends Date{static now(){return now;}}};if(navigator)context.navigator=navigator;if(fetchImpl)context.fetch=fetchImpl;let fetchValue=context.fetch;Object.defineProperty(context,'fetch',{get(){return async(...args)=>streaming(await fetchValue(...args));},set(v){fetchValue=v;},enumerable:true,configurable:true});vm.createContext(context);vm.runInContext(script,context);return {context,get cleaned(){return cleaned;},get stored(){return stored;},get calls(){return calls;}};}
 test('callback cleans synchronously before exchange; state consumed and memory access returned',async()=>{const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(e.calls,1);assert.equal(e.stored,undefined);assert.equal(e.context.OTPandaSession.status(),'restored');assert.equal(e.context.OTPandaSession.access(),token);e.context.OTPandaSession.clear();assert.equal(e.context.OTPandaSession.access(),undefined);});
 test('wrong state duplicates missing pending and future/expired state never exchange',async()=>{for(const change of [{saved:undefined},{hash:'#code='+token+'&state=wrong'},{hash:'#code='+token+'&state='+state+'&state='+state},{now:NOW+300001},{now:NOW-1}]){const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),...change});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');}});
 test('invalid response never becomes access; secrets absent from storage',async()=>{const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),response:{access:token,refresh:'bad',accessExpiresAt:NOW+300000}});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaSession.access(),undefined);assert.equal(e.stored,undefined);});
@@ -231,3 +231,62 @@ test('401 cooldown storage unavailable fails closed and explicit clear resets gu
 test('read401 guard permits another bounded attempt after window without erasing cookie capability',async()=>{
  const sessionValues=new Map([['otpanda.read.restore.v1',String(NOW-60001)]]),e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues});await e.context.OTPandaSession.ready;e.context.fetch=async()=>({status:401,text:async()=>'{}'});await e.context.OTPandaSession.read('/v1/manage/session');assert.ok(e.context.location.assigned.includes('/auth/restore?'));assert.equal(sessionValues.get('otpanda.read.restore.v1'),String(NOW));
 });
+
+test('page hash is not an auth callback and never consumes a pending ceremony',async()=>{
+ const saved=JSON.stringify({state,verifier:'v'.repeat(43),created:NOW});
+ const e=env({hash:'#/settings/devices',saved});await e.context.OTPandaSession.ready;
+ assert.equal(e.cleaned,false);assert.equal(e.stored,saved);assert.equal(e.calls,0);
+ assert.equal(e.context.OTPandaSession.status(),'idle');assert.equal(e.context.OTPandaNavigation.current(),'settings/devices');
+});
+test('page destination survives canonical login and only identifiers are stored',async()=>{
+ const e=env({hash:'#/settings/organization'});await e.context.OTPandaSession.start('login');
+ const record=JSON.parse(e.stored);assert.equal(record.route,'settings/organization');
+ assert.equal(new URL(e.context.location.assigned).searchParams.get('redirect_uri'),'https://otpanda.github.io/app/');
+ assert.ok(!e.context.location.assigned.includes('settings'));
+});
+test('successful callback restores intended route after proof has been removed',async()=>{
+ const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW,route:'settings/devices'})});
+ assert.ok(e.cleaned);await e.context.OTPandaSession.ready;
+ assert.equal(e.context.OTPandaNavigation.current(),'settings/devices');assert.equal(e.context.OTPandaSession.status(),'restored');
+});
+test('unknown or parameter-bearing page links cannot become commands or destinations',async()=>{
+ for(const hash of ['#/settings/devices?signout=all','#/https://evil.test','#/settings/recovery/complete','#/%2e%2e','#/settings/devices#code=secret']){
+  const e=env({hash});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaNavigation.current(),'codes');assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'idle');
+ }
+ const e=env();assert.throws(()=>e.context.OTPandaNavigation.go('https://evil.test'));
+});
+test('untrusted stored callback route is rejected before exchange',async()=>{
+ const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW,route:'https://evil.test'})});await e.context.OTPandaSession.ready;assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');
+});
+test('page navigation uses history entries and back listeners without action fetches',async()=>{
+ const e=env({hash:'#/codes'});const writes=[];
+ e.context.history.pushState=(_s,_t,url)=>{writes.push(url);e.context.location.hash=url.slice(url.indexOf('#'));};
+ let changed=0;e.context.OTPandaNavigation.listen(()=>changed++);
+ e.context.OTPandaNavigation.go('sources');e.context.OTPandaNavigation.go('entries');
+ assert.deepEqual(writes,['/app/#/sources','/app/#/entries']);assert.equal(changed,2);assert.equal(e.calls,0);
+});
+test('recovery deep links open a view without restoring, sending mail or security effects',async()=>{
+ for(const hash of ['#/recovery','#/recovery/start','#/recovery/finish']){
+  const e=env({hash,hint:true});await e.context.OTPandaSession.ready;
+  assert.equal(e.context.location.assigned,undefined);assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'idle');
+ }
+});
+test('real history events select page and sanitize unknown destinations without fetching',async()=>{
+ const e=env({hash:'#/codes'}),handlers={};
+ e.context.addEventListener=(name,f)=>{handlers[name]=f;};
+ e.context.history.pushState=(_s,_t,url)=>{e.context.location.hash=url.slice(url.indexOf('#'));};
+ e.context.history.replaceState=(_s,_t,url)=>{e.context.location.hash=url.slice(url.indexOf('#'));};
+ const c=vm.createContext({...e.context,OTPandaSession:undefined,OTPandaNavigation:undefined});vm.runInContext(script,c);await c.OTPandaSession.ready;
+ c.location.hash='#/settings/devices';handlers.popstate();assert.equal(c.OTPandaNavigation.current(),'settings/devices');
+ c.location.hash='#/settings/account-security';handlers.hashchange();assert.equal(c.OTPandaNavigation.current(),'settings/account-security');
+ c.location.hash='#/settings/devices?revoke=true';handlers.hashchange();assert.equal(c.OTPandaNavigation.current(),'codes');assert.equal(c.location.hash,'#/codes');assert.equal(e.calls,0);
+});
+test('public route exit restores existing cookie hint and public routes are not persisted',async()=>{
+ const values=new Map([['otpanda.route.tab.v1','recovery/finish']]);
+ const cold=env({sessionValues:values});await cold.context.OTPandaSession.ready;assert.equal(cold.context.OTPandaNavigation.current(),'codes');
+ const e=env({hash:'#/recovery',hint:true});e.context.history.pushState=()=>{};await e.context.OTPandaSession.ready;e.context.OTPandaNavigation.go('codes');for(let n=0;n<50&&!e.context.location.assigned;n++)await new Promise(r=>setTimeout(r,2));assert.ok(e.context.location.assigned.includes('/auth/restore?'));
+});
+
+test('hung management read and body abort and permit the next read automatically',async()=>{for(const bodyHung of [false,true]){const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});await e.context.OTPandaSession.ready;let timer,aborted;e.context.setTimeout=f=>(timer=f,1);e.context.clearTimeout=()=>{};e.context.fetch=async(u,o)=>{aborted=o.signal;return bodyHung?{status:200,body:{getReader:()=>({read:()=>new Promise(()=>{}),cancel(){},releaseLock(){}})}}:await new Promise(()=>{});};const pending=e.context.OTPandaSession.read('/v1/manage/entries');await new Promise(r=>setImmediate(r));timer();await assert.rejects(pending);assert.equal(aborted.aborted,true);e.context.fetch=async()=>({status:200,text:async()=>'{}'});assert.equal((await e.context.OTPandaSession.read('/v1/manage/entries')).status,200);}});
+
+test('hung signed renewal is bounded and valid access remains usable',async()=>{const e=await renewingEnv();e.setClock(NOW+250000);let timer,signal;e.context.setTimeout=f=>(timer=f,1);e.context.clearTimeout=()=>{};e.context.fetch=async(u,o)=>{signal=o.signal;return await new Promise(()=>{});};const pending=e.context.OTPandaSession.read('/v1/manage/entries');await new Promise(r=>setTimeout(r,20));timer();await new Promise(r=>setTimeout(r,20));timer();await assert.rejects(pending);assert.equal(signal.aborted,true);assert.equal(e.context.OTPandaSession.status(),'restored');});

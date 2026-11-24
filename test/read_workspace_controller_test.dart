@@ -132,6 +132,92 @@ void main() {
       c.dispose();
     },
   );
+  test('settings return reloads automatically after existing gate without a control', () async {
+    var now = 100;
+    final bridge = Bridge();
+    final c = ReadWorkspaceController(bridge: bridge, clock: () => now);
+    await c.refresh();
+    c.suspend();
+    c.resume();
+    c.tick();
+    expect(bridge.paths.length, 5);
+    now += 15000;
+    c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.paths.length, 10);
+    expect(c.hasLoaded, true);
+    now += 30000;
+    c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.paths.length, 15);
+    c.dispose();
+  });
+  test('automatic retry respects server rate cooldown', () async {
+    var now = 100;
+    final bridge = Bridge()
+      ..handler = (_) async => const SessionResponse(429, '{}');
+    final c = ReadWorkspaceController(bridge: bridge, clock: () => now);
+    await c.refresh();
+    now += 59000;
+    c.tick();
+    expect(bridge.paths.length, 1);
+    now += 1000;
+    c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.paths.length, 2);
+    c.dispose();
+  });
+  test(
+    'silent poll retains snapshot during request and transient failure',
+    () async {
+      var now = 100;
+      final bridge = Bridge();
+      final c = ReadWorkspaceController(bridge: bridge, clock: () => now);
+      await c.refresh();
+      final previous = c.store;
+      now += 30000;
+      final pending = Completer<SessionResponse>();
+      bridge.handler = (_) => pending.future;
+      final loading = c.refresh();
+      expect(c.store, same(previous));
+      expect(c.store.entries, isNotEmpty);
+      c.suspend(preserve: true);
+      c.resume();
+      expect(c.store.entries, isNotEmpty);
+      pending.complete(const SessionResponse(503, '{}'));
+      await loading;
+      expect(c.store, same(previous));
+      now += 30000;
+      bridge.handler = (_) async => const SessionResponse(503, '{}');
+      await c.refresh();
+      expect(c.store.entries, isNotEmpty);
+      expect(c.hasLoaded, true);
+      now += 30000;
+      bridge.handler = (_) async => const SessionResponse(401, '{}');
+      await c.refresh();
+      expect(c.store.entries, isEmpty);
+      expect(c.signedIn, false);
+      c.dispose();
+    },
+  );
+  test(
+    '401 while returning from preserved settings clears retained codes',
+    () async {
+      var now = 100;
+      final bridge = Bridge();
+      final c = ReadWorkspaceController(bridge: bridge, clock: () => now);
+      await c.refresh();
+      c.suspend(preserve: true);
+      expect(c.store.entries, isNotEmpty);
+      c.resume();
+      now += 30000;
+      bridge.handler = (_) async => const SessionResponse(401, '{}');
+      await c.refresh();
+      expect(c.store.entries, isEmpty);
+      expect(c.signedIn, false);
+      c.dispose();
+    },
+  );
   test('session expiry clears entry metadata on the next clock tick', () async {
     var now = 100;
     final bridge = Bridge();

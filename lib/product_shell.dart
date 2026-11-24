@@ -54,14 +54,14 @@ class _ProductShellState extends State<ProductShell> {
   ];
   static const ink = Color(0xff12281f), muted = Color(0xff5d746a);
   static const line = Color(0xffe0e8e3);
-  _Phase get phase => widget.controller.loading
-      ? _Phase.loading
-      : !widget.controller.signedIn
+  _Phase get phase => !widget.controller.signedIn
       ? _Phase.signedOut
-      : widget.controller.message.isNotEmpty
-      ? (widget.controller.rateLimited ? _Phase.rateLimited : _Phase.failed)
       : widget.controller.hasLoaded
       ? _Phase.loaded
+      : widget.controller.loading
+      ? _Phase.loading
+      : widget.controller.message.isNotEmpty
+      ? (widget.controller.rateLimited ? _Phase.rateLimited : _Phase.failed)
       : _Phase.cleared;
   late int tab = widget.initialTab.clamp(0, 3);
   String query = '';
@@ -69,6 +69,15 @@ class _ProductShellState extends State<ProductShell> {
   void initState() {
     super.initState();
     widget.controller.addListener(changed);
+  }
+
+  @override
+  void didUpdateWidget(covariant ProductShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTab != widget.initialTab) {
+      tab = widget.initialTab.clamp(0, 3);
+      query = '';
+    }
   }
 
   void changed() {
@@ -83,7 +92,7 @@ class _ProductShellState extends State<ProductShell> {
 
   Future<void> refresh() => widget.controller.refresh();
 
-  /// Pull-down gesture. Honors the same refresh gate as the Refresh button
+  /// Pull-down gesture. Honors the same gate as automatic updates
   /// (signed in, not loading, 15s gap, 429 cooldown), so it can never add
   /// requests or reloads beyond what the button allows.
   Future<void> pull() async {
@@ -206,7 +215,7 @@ class _ProductShellState extends State<ProductShell> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Refresh to load your codes',
+                'Updating your codes automatically',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 6),
@@ -214,10 +223,6 @@ class _ProductShellState extends State<ProductShell> {
                 'Codes were cleared from this view. Your account data has not been deleted.',
               ),
               const SizedBox(height: 14),
-              FilledButton(
-                onPressed: widget.controller.canRefresh ? refresh : null,
-                child: const Text('Refresh'),
-              ),
             ],
           ),
         ),
@@ -242,13 +247,11 @@ class _ProductShellState extends State<ProductShell> {
               ),
               const SizedBox(height: 6),
               Text(
-                phase == _Phase.rateLimited ? 'Wait a moment, then try again.' : 'We were unable to load your codes. Check your connection and try again.',
+                phase == _Phase.rateLimited
+                    ? 'Updates will retry automatically in a moment.'
+                    : 'Waiting for your connection. Updates will retry automatically.',
               ),
               const SizedBox(height: 14),
-              FilledButton(
-                onPressed: widget.controller.canRefresh ? refresh : null,
-                child: const Text('Try again'),
-              ),
             ],
           ),
         ),
@@ -381,11 +384,6 @@ class _ProductShellState extends State<ProductShell> {
                   ),
                 ),
               ),
-              IconButton(
-                tooltip: 'Refresh',
-                onPressed: widget.controller.canRefresh ? refresh : null,
-                icon: const Icon(Icons.refresh),
-              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -409,8 +407,10 @@ class _ProductShellState extends State<ProductShell> {
           ],
           body(),
           const SizedBox(height: 20),
-          const Text(
-            'Recent records only. Refresh to check for updates.',
+          Text(
+            widget.controller.message.isNotEmpty
+                ? 'Connection interrupted. Updates will retry automatically.'
+                : 'Updates arrive automatically.',
             style: TextStyle(fontSize: 12, color: muted),
           ),
         ],

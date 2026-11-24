@@ -249,17 +249,6 @@ class _OrganizationPanelState extends State<OrganizationPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: const Color(0xfffff6df),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Text(
-            'Private cloud organization. Recent successful copies help order your unpinned entries automatically.',
-          ),
-        ),
-        const SizedBox(height: 20),
         const Text(
           'Organize your entries',
           style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
