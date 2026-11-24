@@ -231,3 +231,58 @@ test('401 cooldown storage unavailable fails closed and explicit clear resets gu
 test('read401 guard permits another bounded attempt after window without erasing cookie capability',async()=>{
  const sessionValues=new Map([['otpanda.read.restore.v1',String(NOW-60001)]]),e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues});await e.context.OTPandaSession.ready;e.context.fetch=async()=>({status:401,text:async()=>'{}'});await e.context.OTPandaSession.read('/v1/manage/session');assert.ok(e.context.location.assigned.includes('/auth/restore?'));assert.equal(sessionValues.get('otpanda.read.restore.v1'),String(NOW));
 });
+
+test('page hash is not an auth callback and never consumes a pending ceremony',async()=>{
+ const saved=JSON.stringify({state,verifier:'v'.repeat(43),created:NOW});
+ const e=env({hash:'#/settings/devices',saved});await e.context.OTPandaSession.ready;
+ assert.equal(e.cleaned,false);assert.equal(e.stored,saved);assert.equal(e.calls,0);
+ assert.equal(e.context.OTPandaSession.status(),'idle');assert.equal(e.context.OTPandaNavigation.current(),'settings/devices');
+});
+test('page destination survives canonical login and only identifiers are stored',async()=>{
+ const e=env({hash:'#/settings/organization'});await e.context.OTPandaSession.start('login');
+ const record=JSON.parse(e.stored);assert.equal(record.route,'settings/organization');
+ assert.equal(new URL(e.context.location.assigned).searchParams.get('redirect_uri'),'https://otpanda.github.io/app/');
+ assert.ok(!e.context.location.assigned.includes('settings'));
+});
+test('successful callback restores intended route after proof has been removed',async()=>{
+ const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW,route:'settings/devices'})});
+ assert.ok(e.cleaned);await e.context.OTPandaSession.ready;
+ assert.equal(e.context.OTPandaNavigation.current(),'settings/devices');assert.equal(e.context.OTPandaSession.status(),'restored');
+});
+test('unknown or parameter-bearing page links cannot become commands or destinations',async()=>{
+ for(const hash of ['#/settings/devices?signout=all','#/https://evil.test','#/settings/recovery/complete','#/%2e%2e','#/settings/devices#code=secret']){
+  const e=env({hash});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaNavigation.current(),'codes');assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'idle');
+ }
+ const e=env();assert.throws(()=>e.context.OTPandaNavigation.go('https://evil.test'));
+});
+test('untrusted stored callback route is rejected before exchange',async()=>{
+ const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW,route:'https://evil.test'})});await e.context.OTPandaSession.ready;assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');
+});
+test('page navigation uses history entries and back listeners without action fetches',async()=>{
+ const e=env({hash:'#/codes'});const writes=[];
+ e.context.history.pushState=(_s,_t,url)=>{writes.push(url);e.context.location.hash=url.slice(url.indexOf('#'));};
+ let changed=0;e.context.OTPandaNavigation.listen(()=>changed++);
+ e.context.OTPandaNavigation.go('sources');e.context.OTPandaNavigation.go('entries');
+ assert.deepEqual(writes,['/app/#/sources','/app/#/entries']);assert.equal(changed,2);assert.equal(e.calls,0);
+});
+test('recovery deep links open a view without restoring, sending mail or security effects',async()=>{
+ for(const hash of ['#/recovery','#/recovery/start','#/recovery/finish']){
+  const e=env({hash,hint:true});await e.context.OTPandaSession.ready;
+  assert.equal(e.context.location.assigned,undefined);assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'idle');
+ }
+});
+test('real history events select page and sanitize unknown destinations without fetching',async()=>{
+ const e=env({hash:'#/codes'}),handlers={};
+ e.context.addEventListener=(name,f)=>{handlers[name]=f;};
+ e.context.history.pushState=(_s,_t,url)=>{e.context.location.hash=url.slice(url.indexOf('#'));};
+ e.context.history.replaceState=(_s,_t,url)=>{e.context.location.hash=url.slice(url.indexOf('#'));};
+ const c=vm.createContext({...e.context,OTPandaSession:undefined,OTPandaNavigation:undefined});vm.runInContext(script,c);await c.OTPandaSession.ready;
+ c.location.hash='#/settings/devices';handlers.popstate();assert.equal(c.OTPandaNavigation.current(),'settings/devices');
+ c.location.hash='#/settings/account-security';handlers.hashchange();assert.equal(c.OTPandaNavigation.current(),'settings/account-security');
+ c.location.hash='#/settings/devices?revoke=true';handlers.hashchange();assert.equal(c.OTPandaNavigation.current(),'codes');assert.equal(c.location.hash,'#/codes');assert.equal(e.calls,0);
+});
+test('public route exit restores existing cookie hint and public routes are not persisted',async()=>{
+ const values=new Map([['otpanda.route.tab.v1','recovery/finish']]);
+ const cold=env({sessionValues:values});await cold.context.OTPandaSession.ready;assert.equal(cold.context.OTPandaNavigation.current(),'codes');
+ const e=env({hash:'#/recovery',hint:true});e.context.history.pushState=()=>{};await e.context.OTPandaSession.ready;e.context.OTPandaNavigation.go('codes');for(let n=0;n<50&&!e.context.location.assigned;n++)await new Promise(r=>setTimeout(r,2));assert.ok(e.context.location.assigned.includes('/auth/restore?'));
+});
