@@ -140,6 +140,4 @@ class _Browser
   @override
   Future<SessionResponse> read(String path) async {
     final response = await _session.read(path.toJS).toDart;
-    return SessionResponse(response.status.toDartInt, response.body.toDart);
-  }
-        }
+    return SessionResponse(response.status.toDartInt, response.body.toDart);}
