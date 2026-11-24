@@ -25,6 +25,7 @@ class ReadWorkspaceController extends ChangeNotifier {
   bool loading = false, suspended = false, _disposed = false;
   String message = '';
   bool rateLimited = false, sessionEnded = false, hasLoaded = false;
+  int publishedRevision = 0;
   int _epoch = 0, _nextRefreshAt = 0, _nextAutomaticAt = 0;
   ReadWorkspaceController({required this.bridge, int Function()? clock})
     : clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -64,6 +65,7 @@ class ReadWorkspaceController extends ChangeNotifier {
           );
         }
         store = staged;
+        publishedRevision++;
         hasLoaded = true;
       }
     } on ClientFailure catch (error) {
