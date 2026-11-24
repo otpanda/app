@@ -3,6 +3,8 @@ import 'google_button.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'browser_session_contract.dart';
+import 'lost_access_page.dart';
+import 'recovery_contract.dart';
 
 /// Intended account entry, never a technical session/debug panel.
 class AuthEntry extends StatefulWidget {
@@ -370,6 +372,24 @@ class _AuthEntryState extends State<AuthEntry> {
                 child: const Text('Try signing out again'),
               ),
             ],
+            if (widget.bridge case final RecoveryBridge r
+                when r.recoveryAvailable &&
+                    !authenticating &&
+                    !passkey &&
+                    !code)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: widget.busy
+                      ? null
+                      : () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => LostAccessPage(bridge: r),
+                          ),
+                        ),
+                  child: const Text('Lost access to everything?'),
+                ),
+              ),
             if (status == 'unsupported')
               const Text('Open OTPanda in your browser to continue.'),
             if ([
