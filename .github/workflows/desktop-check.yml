@@ -1,0 +1,70 @@
+name: Desktop compile verification
+# Keep fork PRs read-only. Never use pull_request_target here.
+on:
+  pull_request:
+    paths: ['lib/**', 'pubspec.*', 'tool/desktop/**', '.github/workflows/desktop-check.yml']
+  push:
+    branches: [main]
+    paths: ['lib/**', 'pubspec.*', 'tool/desktop/**', '.github/workflows/desktop-check.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: windows
+          - os: macos-latest
+            target: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
+        with:
+          flutter-version: '3.50.1'
+          channel: stable
+          cache: false
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -y && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev xvfb xdotool imagemagick
+      - run: flutter --disable-analytics
+      - run: python tool/desktop/bootstrap.py
+      - run: flutter analyze
+      - run: flutter test
+      - name: Compile fictional development app
+        run: flutter build ${{ matrix.target }} --debug
+      - name: Linux native smoke and coordinate typing attempt
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          xvfb-run -a bash -euo pipefail <<'SCRIPT'
+          build/linux/x64/debug/bundle/otpanda_client > build/native-linux.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          window=$(timeout 30s xdotool search --sync --onlyvisible --name 'otpanda_client' | head -1)
+          [ -n "$window" ]
+          xdotool windowsize "$window" 1100 800
+          sleep 3
+          kill -0 "$pid"
+          import -window root build/native-linux-initial.png
+          xdotool mousemove --window "$window" 440 220 click 1
+          xdotool type --clearmodifiers 'orchard'
+          sleep 1
+          import -window root build/native-linux-keyboard.png
+          kill -0 "$pid"
+          SCRIPT
+      - name: Small native evidence only, no release binaries
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-native-smoke-evidence
+          path: |
+            build/native-linux*.png
+            build/native-linux.log
+          retention-days: 1
