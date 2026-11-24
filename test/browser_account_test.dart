@@ -329,7 +329,8 @@ void main() {
       await t.pumpWidget(MaterialApp(home: BrowserAccountPage(bridge: b)));
       await t.pumpAndSettle();
       expect(b.reads, 5);
-      await t.tap(find.text('Refresh real codes'));
+      expect(find.text('Refresh real codes'), findsNothing);
+      await t.pump(const Duration(seconds: 31));
       await t.pumpAndSettle();
       expect(b.reads, 10);
       await t.tap(find.text('Clear local access'));
