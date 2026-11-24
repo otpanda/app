@@ -63,6 +63,19 @@ void main() {
       expect(find.text('Your codes'), findsOneWidget);
     });
   }
+  testWidgets('workspace 401 cannot be overwritten by a stale bridge status', (
+    tester,
+  ) async {
+    final bridge = RouterBridge('restored');
+    await tester.pumpWidget(
+      MaterialApp(home: AccountEntryRouter(bridge: bridge)),
+    );
+    bridge.gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Welcome to OTPanda.'), findsOneWidget);
+    expect(find.text('Temporary demo'), findsOneWidget);
+    expect(find.text('No codes yet'), findsNothing);
+  });
   for (final status in ['idle', 'unsupported']) {
     testWidgets(
       'ordinary $status visit shows account entry with separate demo',
