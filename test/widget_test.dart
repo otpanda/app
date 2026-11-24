@@ -32,7 +32,7 @@ void main() {
       expect(find.byType(AlertDialog), findsNothing);
     },
   );
-  testWidgets('search and navigation preserve clear preview limits', (
+  testWidgets('search and navigation keep sources copy', (
     tester,
   ) async {
     await tester.pumpWidget(const OTPandaApp());
@@ -44,6 +44,6 @@ void main() {
     expect(find.text('Northstar'), findsNothing);
     await tester.tap(find.text('Sources'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('not connected'), findsOneWidget);
+    expect(find.textContaining('send codes to your account'), findsOneWidget);
   });
 }
