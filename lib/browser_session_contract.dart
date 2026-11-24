@@ -56,3 +56,9 @@ abstract interface class SessionContinuityBridge {
   Future<void> maintain();
   int get accessExpiresAt;
 }
+
+/// New TOTP creation never exposes stored seed material.
+abstract interface class TotpManagementBridge {
+  Future<String> addTotp(String label, String account, String secret);
+  Future<SessionResponse> totpCode(String entryId);
+}
