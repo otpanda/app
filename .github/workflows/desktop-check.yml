@@ -1,4 +1,5 @@
 name: Desktop compile verification
+# Keep fork PRs read-only. Never use pull_request_target here.
 on:
   pull_request:
     paths: ['lib/**', 'pubspec.*', 'tool/desktop/**', '.github/workflows/desktop-check.yml']
@@ -24,7 +25,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
         with:
           flutter-version: '3.50.1'
           channel: stable
@@ -38,15 +39,16 @@ jobs:
       - run: flutter test
       - name: Compile fictional development app
         run: flutter build ${{ matrix.target }} --debug
-      - name: Linux native smoke and keyboard capture
+      - name: Linux native smoke and coordinate typing attempt
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          xvfb-run -a bash -e <<'SCRIPT'
+          xvfb-run -a bash -euo pipefail <<'SCRIPT'
           build/linux/x64/debug/bundle/otpanda_client > build/native-linux.log 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           window=$(timeout 30s xdotool search --sync --onlyvisible --name 'otpanda_client' | head -1)
+          [ -n "$window" ]
           xdotool windowsize "$window" 1100 800
           sleep 3
           kill -0 "$pid"
