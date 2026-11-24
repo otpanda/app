@@ -1,0 +1,32 @@
+name: Optional extension development preview
+on:
+  push:
+    paths: ['lib/**', 'web/**', 'tool/**', 'pubspec.*', '.github/workflows/extension-preview.yml']
+  pull_request:
+    paths: ['lib/**', 'web/**', 'tool/**', 'pubspec.*', '.github/workflows/extension-preview.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tool/extension/package.test.mjs
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.1'
+          channel: stable
+          cache: true
+      - run: flutter --disable-analytics
+      - run: bash tool/bootstrap.sh
+      - run: flutter build web --csp --no-web-resources-cdn --base-href / --no-wasm-dry-run
+      - run: node tool/extension/package.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: optional-fictional-extension-preview
+          path: build/extension-preview
+          retention-days: 7
