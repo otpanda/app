@@ -7,6 +7,7 @@ import 'source_preview.dart';
 import 'access_preview.dart';
 import 'account_preview.dart';
 import 'fictional_totp_dialog.dart';
+import 'public_service_catalog.dart';
 
 const ink = Color(0xff17332a), green = Color(0xff0a7955);
 const line = Color(0xffdfe8e2), pale = Color(0xffe7f8ee);
@@ -159,6 +160,8 @@ class _ClientHomeState extends State<ClientHome> {
     final service = TextEditingController(text: entry?.service ?? '');
     final account = TextEditingController(text: entry?.account ?? '');
     final form = GlobalKey<FormState>();
+    String? retainedId = entry?.serviceId, retainedHost = entry?.websiteHost;
+    String retainedLabel = entry?.service ?? '';
     final result = await showDialog<AccountEntry>(
       context: context,
       builder: (context) => AlertDialog(
@@ -174,8 +177,31 @@ class _ClientHomeState extends State<ClientHome> {
                   'Fictional preview only. This does not create a real account, connect a source or add an authenticator key.',
                 ),
                 const SizedBox(height: 14),
+                if (entry == null)
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.search),
+                    label: const Text('Find a service'),
+                    onPressed: () async {
+                      final selected = await showDialog<PublicService>(
+                        context: context,
+                        builder: (_) => const PublicServicePicker(),
+                      );
+                      if (selected != null && context.mounted) {
+                        service.text = selected.name;
+                        retainedLabel = selected.name;
+                        retainedId = selected.id;
+                        retainedHost = selected.host;
+                      }
+                    },
+                  ),
                 TextFormField(
                   controller: service,
+                  onChanged: (value) {
+                    if (value != retainedLabel) {
+                      retainedId = null;
+                      retainedHost = null;
+                    }
+                  },
                   maxLength: 120,
                   decoration: const InputDecoration(
                     labelText: 'Service or entry label',
@@ -210,6 +236,8 @@ class _ClientHomeState extends State<ClientHome> {
                     service.text.trim(),
                     account.text.trim(),
                     true,
+                    serviceId: retainedId,
+                    websiteHost: retainedHost,
                   ),
                 );
               }

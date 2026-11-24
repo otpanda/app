@@ -1,7 +1,15 @@
 class AccountEntry {
   final String id, service, account;
   final bool manage;
-  const AccountEntry(this.id, this.service, this.account, this.manage);
+  final String? serviceId, websiteHost;
+  const AccountEntry(
+    this.id,
+    this.service,
+    this.account,
+    this.manage, {
+    this.serviceId,
+    this.websiteHost,
+  });
   bool matches(String query) =>
       '$service $account'.toLowerCase().contains(query.trim().toLowerCase());
 }
