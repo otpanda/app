@@ -32,6 +32,7 @@
       if(remembered){const verifier=random(),state=random(),attempt=generation;status='restoring';const challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({verifier,state,created:Date.now()}));location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));}
       return;
     }
+    if(pending==='#auth=logout-incomplete&state='){try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='logout-incomplete';return;}
     status = 'restoring';const attempt=generation;
     try {
       if (location.origin + location.pathname !== REDIRECT || location.search || pending.length > 8192 || !saved) throw Error();
