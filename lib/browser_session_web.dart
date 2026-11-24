@@ -120,7 +120,7 @@ class _Browser
     );
   }
 
-  @override
+        }@override
   Future<void> recoveryCancelRequest(String requestId) async {
     _outcome((await _rec.cancelRequest(requestId.toJS).toDart).toDart);
   }
