@@ -45,8 +45,11 @@ Future<(FakeTransport, int Function(), void Function(int))> setup(
 }
 
 Future<void> pullDown(WidgetTester t) async {
-  await t.drag(find.text('Your codes'), const Offset(0, 400),
-      kind: PointerDeviceKind.touch);
+  await t.drag(
+    find.text('Your codes'),
+    const Offset(0, 400),
+    kind: PointerDeviceKind.touch,
+  );
   await t.pumpAndSettle();
 }
 
@@ -78,17 +81,9 @@ void main() {
     expect(tr.calls, before);
   });
 
-  testWidgets('visible Refresh button stays available and gated', (t) async {
-    final (tr, now, set) = await setup(t);
-    expect(find.byTooltip('Refresh'), findsOneWidget);
-    final before = tr.calls;
-    await t.tap(find.byTooltip('Refresh'));
-    await t.pumpAndSettle();
-    expect(tr.calls, before);
-    set(now() + 15000);
-    await t.pump();
-    await t.tap(find.byTooltip('Refresh'));
-    await t.pumpAndSettle();
-    expect(tr.calls, greaterThan(before));
+  testWidgets('manual Refresh control is absent', (t) async {
+    await setup(t);
+    expect(find.byTooltip('Refresh'), findsNothing);
+    expect(find.text('Refresh'), findsNothing);
   });
 }
