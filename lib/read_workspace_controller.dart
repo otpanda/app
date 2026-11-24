@@ -26,7 +26,9 @@ class ReadWorkspaceController extends ChangeNotifier {
   ReadWorkspaceController({required this.bridge, int Function()? clock})
     : clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
-  bool get signedIn => !sessionEnded && bridge.status == 'restored';
+  bool get signedIn =>
+      !sessionEnded &&
+      ['restored', 'session-paused', 'restoring'].contains(bridge.status);
   bool get canRefresh =>
       !loading && !suspended && signedIn && clock() >= _nextRefreshAt;
   int get refreshWaitMs => (_nextRefreshAt - clock()).clamp(0, 60000);
@@ -75,6 +77,18 @@ class ReadWorkspaceController extends ChangeNotifier {
 
   void tick() {
     if (_disposed || suspended) return;
+    if (bridge is SessionContinuityBridge) {
+      store.updateSessionExpiry(
+        (bridge as SessionContinuityBridge).accessExpiresAt,
+        clock(),
+      );
+      // Expired access hides records through CodeStore's clock, but is not
+      // proof that the separate refresh session has ended.
+      if (store.sessionExpired(clock())) {
+        _notify();
+        return;
+      }
+    }
     if (store.sessionExpired(clock())) {
       sessionEnded = true;
       bridge.clear();

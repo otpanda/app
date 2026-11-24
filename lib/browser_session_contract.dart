@@ -44,3 +44,15 @@ abstract interface class FirstPasskeyBridge {
 abstract interface class AdditionalPasskeyBridge {
   Future<void> addPasskey();
 }
+
+/// Navigation identifiers only. No records, search, forms or proof state.
+abstract interface class SessionViewBridge {
+  int get restoredView;
+  void setView(int view);
+}
+
+/// Renews only the current tab session; never supplies fresh security proof.
+abstract interface class SessionContinuityBridge {
+  Future<void> maintain();
+  int get accessExpiresAt;
+}

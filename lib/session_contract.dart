@@ -134,6 +134,12 @@ class CodeStore {
   final SessionTransport transport;
   int _generation = 0;
   int? _sessionExpiresAt;
+  void updateSessionExpiry(int expiresAt, int now) {
+    if (_sessionExpiresAt != null && expiresAt > now) {
+      _sessionExpiresAt = expiresAt;
+    }
+  }
+
   bool sessionExpired(int now) =>
       _sessionExpiresAt != null && now >= _sessionExpiresAt!;
   List<ManagedEntry> _entries = const [];
