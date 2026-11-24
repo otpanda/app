@@ -73,6 +73,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   int productTab = 0;
   SettingsCategory? settingsCategory;
   bool securityRequested = false;
+  bool securityLoading = false;
+  int securityTicks = 0;
   static const productRoutes = ['codes', 'sources', 'unassigned', 'entries'];
 
   /// Selects what [id] names without telling the router. Unknown ids do
@@ -208,6 +210,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         setState(() => status = bridge.status);
       }
       if (mounted) unawaited(maintainSession());
+      if (mounted &&
+          status == 'restored' &&
+          securityRequested &&
+          !busy &&
+          ++securityTicks >= 30) {
+        securityTicks = 0;
+        unawaited(refreshSecurity());
+      }
       if (mounted && status == 'restored' && !busy && ++automaticTicks >= 30) {
         automaticTicks = 0;
         if (!widget.workspaceEnabled ||
@@ -302,7 +312,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   }
 
   Future<void> refresh() => run(() async {
-    clearOrganization();
     await loadAccount(revision);
   }, loadAfter: false);
   Future<void> loadAccount(int attempt) async {
@@ -313,8 +322,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       }
       return;
     }
-    accountExpiresAt = null;
-    overview = null;
     if (widget.workspaceEnabled && !accountOpen) {
       await workspace.refresh();
       if (workspace.sessionEnded) status = 'sign-in-required';
@@ -364,25 +371,43 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
+  Future<void> refreshSecurity() async {
+    try {
+      await loadSecurity();
+    } catch (_) {
+      // Keep the last view; the next automatic check retries without changing
+      // account settings or approving a request.
+    }
+  }
+
   Future<void> loadSecurity() async {
-    if (bridge is! AuthEntryBridge) {
+    if (bridge is! AuthEntryBridge || securityLoading || status != 'restored') {
       return;
     }
-    final value = jsonDecode(
-      await (bridge as AuthEntryBridge).security('status'),
-    );
-    if (value is! Map<String, dynamic> ||
-        value['enabled'] is! bool ||
-        value['pending'] is! List ||
-        value['changes'] is! List) {
-      throw const FormatException('Invalid security state');
-    }
-    if (mounted) {
+    final epoch = organizationEpoch;
+    securityLoading = true;
+    try {
+      final value = jsonDecode(
+        await (bridge as AuthEntryBridge).security('status'),
+      );
+      if (!mounted ||
+          epoch != organizationEpoch ||
+          bridge.status != 'restored') {
+        return;
+      }
+      if (value is! Map<String, dynamic> ||
+          value['enabled'] is! bool ||
+          value['pending'] is! List ||
+          value['changes'] is! List) {
+        throw const FormatException('Invalid security state');
+      }
       setState(() {
         securityInfo = value;
         securityOpen = true;
         rememberView(5);
       });
+    } finally {
+      securityLoading = false;
     }
   }
 
@@ -510,19 +535,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
-  void clear() {
-    revision++;
-    workspace.clear();
-    bridge.clear();
-    clearOrganization();
-    store.clear();
-    setState(() {
-      busy = false;
-      status = 'idle';
-      message = 'Local access cleared. This does not revoke the saved browser session.';
-    });
-  }
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -531,6 +543,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         unawaited(workspace.refresh());
       }
       unawaited(maintainSession());
+      if (securityRequested && status == 'restored') {
+        unawaited(refreshSecurity());
+      }
     }
     // Focus changes do not end the session or discard valid records. Per-code
     // expiry is still enforced by the live clock and before copying.
@@ -703,9 +718,33 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     ),
   );
 
+  Widget stableSettingsCard(String title, List<Widget> children) {
+    final height = switch (title) {
+      'Protection' => 300.0,
+      'Sign-in methods' => 220.0,
+      _ => 170.0,
+    };
+    return settingsCard(title, [
+      SizedBox(
+        height: height,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: children,
+          ),
+        ),
+      ),
+    ]);
+  }
+
   Widget signInMethods() {
     final o = overview;
-    if (o == null) return const SizedBox.shrink();
+    if (o == null) {
+      return stableSettingsCard('Sign-in methods', const [
+        ListTile(title: Text('Passkeys'), subtitle: Text(' ')),
+        ListTile(title: Text('Google'), subtitle: Text(' ')),
+      ]);
+    }
     final first =
         o['passkeys'] == 0 &&
         bridge is FirstPasskeyBridge &&
@@ -715,18 +754,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (o['google'] == true && o['passkeys'] == 0) ...[
-          const Text(
-            'Welcome to OTPanda.',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Your account is ready. Google will keep working as your sign-in. You can also add a passkey now or later.',
-          ),
-          const SizedBox(height: 16),
-        ],
-        settingsCard('Sign-in methods', [
+        stableSettingsCard('Sign-in methods', [
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text(
@@ -790,15 +818,18 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         try {
           await loadSecurity();
         } catch (_) {
-          /* The button below retries. */
+          /* The automatic check retries. */
         }
       });
     }
     return [
       if (securityInfo == null)
-        TextButton(
-          onPressed: busy ? null : () => run(loadSecurity),
-          child: const Text('Load protection settings'),
+        const SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text('Extra verification on new devices'),
+          subtitle: Text('Checking automatically...'),
+          value: false,
+          onChanged: null,
         )
       else ...[
         SwitchListTile(
@@ -923,10 +954,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                   ),
                 ),
               ),
-        TextButton(
-          onPressed: busy ? null : () => run(loadSecurity),
-          child: const Text('Check for sign-in requests'),
-        ),
       ],
     ];
   }
@@ -951,10 +978,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
               RecoverySection.emailRecovery,
             },
             beforeEmailRecovery: items.isEmpty ? null : Column(children: items),
-            sectionCard: settingsCard,
+            sectionCard: stableSettingsCard,
           )
         else if (items.isNotEmpty)
-          settingsCard('Protection', items),
+          stableSettingsCard('Protection', items),
       ],
     );
   }
@@ -968,7 +995,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
           RecoveryPanel(
             bridge: r,
             sections: const {RecoverySection.devices},
-            sectionCard: settingsCard,
+            sectionCard: stableSettingsCard,
           ),
         settingsCard('This browser', [
           if (status != 'unsupported' && widget.loginEnabled)
@@ -976,15 +1003,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
               alignment: Alignment.centerLeft,
               child: OutlinedButton(
                 onPressed: busy ? null : signOutBrowser,
-                child: const Text('Sign out of this browser'),
-              ),
-            ),
-          if (status != 'unsupported')
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                onPressed: clear,
-                child: const Text('Clear local access'),
+                child: const Text('Sign out'),
               ),
             ),
         ]),
@@ -1345,13 +1364,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                   padding: const EdgeInsets.only(top: 12),
                   child: OutlinedButton(
                     onPressed: busy ? null : signOutBrowser,
-                    child: const Text('Sign out of this browser'),
+                    child: const Text('Sign out'),
                   ),
-                ),
-              if (status != 'unsupported' && !widget.accountOnly)
-                TextButton(
-                  onPressed: clear,
-                  child: const Text('Clear local access'),
                 ),
               if (status == 'restored' && organizationReady)
                 AbsorbPointer(

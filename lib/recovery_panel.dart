@@ -85,7 +85,6 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
     } catch (_) {
       if (!mounted || mine != epoch) return;
       setState(() {
-        status = null;
         failed = true;
       });
     } finally {
@@ -347,6 +346,33 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
     ];
   }
 
+  List<Widget> loadingGroups() {
+    final card = widget.sectionCard;
+    if (card == null) return const [];
+    return [
+      if (widget.sections.contains(RecoverySection.emailRecovery) ||
+          widget.beforeEmailRecovery != null)
+        card('Protection', [
+          ?widget.beforeEmailRecovery,
+          const SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('Email-only recovery'),
+            subtitle: Text('Checking automatically...'),
+            value: false,
+            onChanged: null,
+          ),
+        ]),
+      if (widget.sections.contains(RecoverySection.passkeys))
+        card('Passkeys', const [
+          ListTile(title: Text(' '), subtitle: Text(' ')),
+        ]),
+      if (widget.sections.contains(RecoverySection.devices))
+        card('Signed-in devices', const [
+          ListTile(title: Text(' '), subtitle: Text(' ')),
+        ]),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = status;
@@ -360,7 +386,9 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
           ),
           const SizedBox(height: 8),
         ],
-        if (busy && s == null) const LinearProgressIndicator(),
+        if (busy && s == null && widget.sectionCard == null)
+          const LinearProgressIndicator(),
+        if (s == null) ...loadingGroups(),
         if (failed)
           Row(
             children: [

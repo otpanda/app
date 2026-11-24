@@ -96,11 +96,11 @@ void main() {
     await t.pumpAndSettle();
     expect(log.last, 'settings/devices');
     expect(find.text('This browser'), findsOneWidget);
-    expect(
-      find.widgetWithText(OutlinedButton, 'Sign out of this browser'),
-      findsOneWidget,
-    );
-    expect(find.text('Clear local access'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Sign out'), findsOneWidget);
+    expect(find.text('Clear local access'), findsNothing);
+    await t.tap(find.text('Sign out'));
+    await t.pumpAndSettle();
+    expect(find.text('Devices & sessions'), findsNothing);
   });
 
   testWidgets('no scope labels, remember toggle or diagnostics anywhere', (
