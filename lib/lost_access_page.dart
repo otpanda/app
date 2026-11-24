@@ -151,7 +151,7 @@ class _LostAccessPageState extends State<LostAccessPage> {
       case LostAccessStage.choose:
         return [
           const Text(
-            'This only works if you turned on email-only recovery earlier. It always waits 7 days, and other devices of yours can cancel it.',
+            'This only works if you turned on email-only recovery earlier. It always waits 7 days, and you can cancel it from a signed-in passkey device.',
           ),
           const SizedBox(height: 16),
           FilledButton(
