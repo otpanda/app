@@ -30,7 +30,14 @@ class ClientFailure implements Exception {
 class ManagedEntry {
   final String id, service, account;
   final bool manage;
-  const ManagedEntry(this.id, this.service, this.account, this.manage);
+  final bool totp;
+  const ManagedEntry(
+    this.id,
+    this.service,
+    this.account,
+    this.manage, [
+    this.totp = false,
+  ]);
   factory ManagedEntry.fromJson(Map<String, dynamic> json) {
     final capabilities = json['capabilities'];
     if (capabilities is! Map<String, dynamic> ||
@@ -44,6 +51,7 @@ class ManagedEntry {
           ? ''
           : _text(json, 'account_name'),
       capabilities['manage'] == true,
+      json['service_id'] == 'custom-totp',
     );
   }
 }
