@@ -56,6 +56,13 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   late final CodeStore store;
   late final ReadWorkspaceController workspace;
   bool accountOpen = false;
+  int productTab = 0;
+  void rememberView(int view) {
+    if (bridge is SessionViewBridge) {
+      (bridge as SessionViewBridge).setView(view);
+    }
+  }
+
   bool busy = true;
   String status = 'loading', message = '';
   int revision = 0;
@@ -66,6 +73,34 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   final organization = OrganizationStore();
   bool organizationReady = false, organizationBusy = false;
   int organizationEpoch = 0, organizationSnapshot = 0, organizationRequest = 0;
+  bool maintaining = false;
+  Future<void> maintainSession() async {
+    if (maintaining ||
+        busy ||
+        bridge is! SessionContinuityBridge ||
+        !['restored', 'session-paused', 'restoring'].contains(status)) {
+      return;
+    }
+    maintaining = true;
+    try {
+      await (bridge as SessionContinuityBridge).maintain();
+      if (!mounted) return;
+      final expiry = (bridge as SessionContinuityBridge).accessExpiresAt;
+      store.updateSessionExpiry(expiry, now());
+      if (accountExpiresAt != null && expiry > now()) accountExpiresAt = expiry;
+      if (bridge.status == 'restored' && status == 'session-paused') {
+        status = 'restored';
+      }
+      if (['session-paused', 'restoring'].contains(bridge.status)) {
+        status = bridge.status;
+      }
+    } catch (_) {
+      /* The existing session remains authoritative. */
+    } finally {
+      maintaining = false;
+    }
+  }
+
   Timer? expiryTick;
   int now() => widget.clock?.call() ?? DateTime.now().millisecondsSinceEpoch;
   @override
@@ -80,12 +115,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       if (mounted && status == 'authenticating' && bridge.status != status) {
         setState(() => status = bridge.status);
       }
+      if (mounted) unawaited(maintainSession());
       if (mounted && status == 'restored') {
         if (widget.workspaceEnabled) workspace.tick();
-        if ((widget.accountOnly &&
-                accountExpiresAt != null &&
-                now() >= accountExpiresAt!) ||
-            store.sessionExpired(now())) {
+        if (bridge is! SessionContinuityBridge &&
+            ((widget.accountOnly &&
+                    accountExpiresAt != null &&
+                    now() >= accountExpiresAt!) ||
+                store.sessionExpired(now()))) {
           clearOrganization();
           store.clear();
           status = 'sign-in-required';
@@ -102,7 +139,17 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       await bridge.ready;
       if (!mounted) return;
       setState(() => status = bridge.status);
-      if (status == 'restored') await refresh();
+      if (status == 'restored') {
+        final view = bridge is SessionViewBridge
+            ? (bridge as SessionViewBridge).restoredView
+            : 0;
+        productTab = view < 4 ? view : 0;
+        accountOpen = view >= 4;
+        await refresh();
+        if (view == 5 && mounted && bridge.status == 'restored') {
+          await loadSecurity();
+        }
+      }
     } catch (_) {
       message = 'Could not check this browser session.';
     } finally {
@@ -223,6 +270,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       setState(() {
         securityInfo = value;
         securityOpen = true;
+        rememberView(5);
       });
     }
   }
@@ -357,17 +405,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (widget.workspaceEnabled) workspace.resume();
-    } else {
-      if (widget.workspaceEnabled) workspace.suspend();
-      if (widget.accountOnly) {
-        revision++;
-        busy = false;
+      if (widget.workspaceEnabled && !accountOpen) {
+        workspace.resume();
+        unawaited(workspace.refresh());
       }
-      clearOrganization();
-      store.clear();
-      if (mounted) setState(() {});
+      unawaited(maintainSession());
     }
+    // Focus changes do not end the session or discard valid records. Per-code
+    // expiry is still enforced by the live clock and before copying.
   }
 
   @override
@@ -515,9 +560,16 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   @override
   Widget build(BuildContext context) {
     final codes = store.visibleCodes(now());
-    if (widget.workspaceEnabled && status == 'restored' && !accountOpen) {
+    if (widget.workspaceEnabled &&
+        ['restored', 'session-paused', 'restoring'].contains(status) &&
+        !accountOpen) {
       return ProductShell(
         controller: workspace,
+        initialTab: productTab,
+        onTabChanged: (tab) {
+          productTab = tab;
+          rememberView(tab);
+        },
         clock: now,
         onSignedOut: () {
           bridge.clear();
@@ -525,6 +577,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         },
         onOpenAccount: () {
           workspace.suspend();
+          rememberView(4);
           setState(() => accountOpen = true);
           refresh();
         },
@@ -533,6 +586,31 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       );
     }
 
+    if (['session-paused', 'restoring'].contains(status)) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('OTPanda')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  status == 'restoring'
+                      ? 'Restoring your session...'
+                      : 'Your session is paused.',
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton(
+                  onPressed: () => run(() => bridge.start('restore')),
+                  child: const Text('Continue session'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     if (widget.accountOnly && status != 'restored') {
       return Scaffold(
         appBar: AppBar(
@@ -565,6 +643,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 icon: const Icon(Icons.arrow_back),
                 onPressed: () {
                   workspace.resume();
+                  rememberView(productTab);
                   setState(() => accountOpen = false);
                   workspace.refresh();
                 },
