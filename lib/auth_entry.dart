@@ -1,3 +1,5 @@
+import 'google_button.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import 'browser_session_contract.dart';
@@ -65,6 +67,7 @@ class _AuthEntryState extends State<AuthEntry> {
     final status = widget.status;
     final google = ['google-email', 'google-link'].contains(status);
     final protected = status == 'extra-verification';
+    final authenticating = status == 'authenticating';
     final passkey = ['passkey-ready', 'signup-ready'].contains(status);
     final signup = status == 'signup-ready';
     final form = emailOpen || code || status == 'email-invalid';
@@ -89,7 +92,9 @@ class _AuthEntryState extends State<AuthEntry> {
                         ? 'Verify your email.'
                         : 'Connect your account.')
                   : signup
-                  ? 'Make yourself at home.'
+                  ? 'Create your passkey.'
+                  : form
+                  ? 'Create your account.'
                   : code
                   ? 'Check your email.'
                   : 'Welcome to OTPanda.',
@@ -111,6 +116,8 @@ class _AuthEntryState extends State<AuthEntry> {
                   ? 'Create a passkey to sign in with your fingerprint, face or device PIN.'
                   : code
                   ? 'Enter the code we sent to ${email.text}. Keep using this browser.'
+                  : form
+                  ? 'Verify your email once, then create a passkey for future sign-in. Email codes are not a login method.'
                   : 'Your codes, wherever you need them. Sign in or get started below.',
               style: const TextStyle(
                 fontSize: 16,
@@ -119,7 +126,12 @@ class _AuthEntryState extends State<AuthEntry> {
               ),
             ),
             const SizedBox(height: 28),
-            if (widget.busy) const LinearProgressIndicator(),
+            if (widget.busy || authenticating) const LinearProgressIndicator(),
+            if (authenticating)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text('Complete the passkey prompt on your device.'),
+              ),
             if (passkey)
               FilledButton(
                 onPressed: widget.busy
@@ -132,9 +144,10 @@ class _AuthEntryState extends State<AuthEntry> {
             if (!passkey &&
                 !google &&
                 !protected &&
-                status != 'unsupported') ...[
+                status != 'unsupported' &&
+                !authenticating) ...[
               if (!form) ...[
-                FilledButton(
+                GoogleSignInButton(
                   onPressed: widget.busy
                       ? null
                       : () => widget.run(
@@ -144,21 +157,26 @@ class _AuthEntryState extends State<AuthEntry> {
                                 )
                               : widget.bridge.start('google'),
                         ),
-                  child: const Text('Continue with Google'),
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton(
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    shape: const StadiumBorder(),
+                    side: const BorderSide(color: Color(0xff747775)),
+                  ),
                   onPressed: widget.busy
                       ? null
                       : () => widget.run(() => widget.bridge.start('login')),
-                  child: const Text('Use a passkey'),
+                  icon: const Icon(Icons.key_outlined, size: 20),
+                  label: const Text('Use a passkey'),
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 12),
                 TextButton(
                   onPressed: widget.busy
                       ? null
                       : () => setState(() => emailOpen = true),
-                  child: const Text('Continue with email'),
+                  child: const Text('Create an account without Google'),
                 ),
               ] else ...[
                 TextField(
@@ -188,7 +206,11 @@ class _AuthEntryState extends State<AuthEntry> {
                 const SizedBox(height: 16),
                 FilledButton(
                   onPressed: widget.busy ? null : submit,
-                  child: Text(code ? 'Continue' : 'Email me a code'),
+                  child: Text(
+                    code
+                        ? 'Verify email and continue'
+                        : 'Send verification code',
+                  ),
                 ),
                 const SizedBox(height: 10),
                 TextButton(
@@ -207,13 +229,14 @@ class _AuthEntryState extends State<AuthEntry> {
                 !passkey &&
                 !google &&
                 !protected &&
-                status != 'unsupported')
+                status != 'unsupported' &&
+                !authenticating)
               CheckboxListTile(
                 value: remember,
                 onChanged: widget.busy
                     ? null
                     : (value) => setState(() => remember = value ?? true),
-                title: const Text('Remember this device for Google'),
+                title: const Text('Remember this device'),
                 controlAffinity: ListTileControlAffinity.leading,
                 contentPadding: EdgeInsets.zero,
               ),
