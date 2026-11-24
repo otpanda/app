@@ -30,3 +30,6 @@ cp kotlinc/lib/*.jar lib/
 cp kotlinc/lib/kotlin-stdlib.jar lib/kotlin-stdlib-2.0.20.jar
 export KOTLIN_LIB="$work/lib" ANDROID_JAR="$work/android-35/android.jar"
 bash "$root/check.sh"
+
+# Reuse the exact hash-pinned compiler for the isolated offline calculator.
+bash "$root/../offline-totp/check.sh"
