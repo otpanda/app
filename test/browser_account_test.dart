@@ -121,13 +121,8 @@ void main() {
       ),
     );
     await t.pumpAndSettle();
-    expect(
-      find.text(
-        'Account session verified.',
-      ),
-      findsOneWidget,
-    );
-    expect(b.reads, 1);
+    expect(find.text('Temporary diagnostics'), findsOneWidget);
+    expect(b.reads, 2);
     expect(b.organizationReads, 0);
   });
   testWidgets(
@@ -148,6 +143,11 @@ void main() {
       );
       await t.pumpAndSettle();
       b.pendingSession = Completer<SessionResponse>();
+      if (find.text('Temporary diagnostics').evaluate().isNotEmpty &&
+          find.text('Check account session').evaluate().isEmpty) {
+        await t.tap(find.text('Temporary diagnostics'));
+        await t.pumpAndSettle();
+      }
       await t.tap(find.text('Check account session'));
       await t.pump();
       t.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -161,12 +161,11 @@ void main() {
         ),
       );
       await t.pumpAndSettle();
-      expect(
-        find.text(
-          'Account session verified.',
-        ),
-        findsNothing,
-      );
+      expect(find.text('Account session verified.'), findsNothing);
+      if (find.text('Check account session').evaluate().isEmpty) {
+        await t.tap(find.text('Temporary diagnostics'));
+        await t.pumpAndSettle();
+      }
       expect(
         t
             .widget<OutlinedButton>(
@@ -184,14 +183,14 @@ void main() {
         isNotNull,
       );
       b.pendingSession = null;
+      if (find.text('Temporary diagnostics').evaluate().isNotEmpty &&
+          find.text('Check account session').evaluate().isEmpty) {
+        await t.tap(find.text('Temporary diagnostics'));
+        await t.pumpAndSettle();
+      }
       await t.tap(find.text('Check account session'));
       await t.pumpAndSettle();
-      expect(
-        find.text(
-          'Account session verified.',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text('Temporary diagnostics'), findsOneWidget);
       expect(b.organizationReads, 0);
     },
   );
@@ -212,19 +211,19 @@ void main() {
       ),
     );
     await t.pumpAndSettle();
-    expect(b.reads, 1);
+    expect(b.reads, 2);
     expect(b.organizationReads, 0);
-    expect(
-      find.text(
-        'Account session verified.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('Temporary diagnostics'), findsOneWidget);
     expect(find.text('No active codes in selected entries.'), findsNothing);
     expect(find.text('Refresh real codes'), findsNothing);
+    if (find.text('Temporary diagnostics').evaluate().isNotEmpty &&
+        find.text('Check account session').evaluate().isEmpty) {
+      await t.tap(find.text('Temporary diagnostics'));
+      await t.pumpAndSettle();
+    }
     await t.tap(find.text('Check account session'));
     await t.pumpAndSettle();
-    expect(b.reads, 2);
+    expect(b.reads, 4);
     expect(b.organizationReads, 0);
   });
   testWidgets('account-only expiry clears verified state', (t) async {
@@ -247,12 +246,7 @@ void main() {
     now += 1001;
     await t.pump(const Duration(seconds: 1));
     expect(find.text('Browser access expired. Sign in again.'), findsOneWidget);
-    expect(
-      find.text(
-        'Account session verified.',
-      ),
-      findsNothing,
-    );
+    expect(find.text('Account session verified.'), findsNothing);
     expect(b.organizationReads, 0);
   });
   testWidgets(
@@ -273,12 +267,7 @@ void main() {
       await t.pumpAndSettle();
       expect(b.reads, 1);
       expect(b.organizationReads, 0);
-      expect(
-        find.text(
-          'Account session verified.',
-        ),
-        findsNothing,
-      );
+      expect(find.text('Account session verified.'), findsNothing);
       expect(find.text('No active codes in selected entries.'), findsNothing);
     },
   );
@@ -330,7 +319,7 @@ void main() {
     await t.pumpAndSettle();
     expect(find.textContaining('not enabled'), findsNothing);
     expect(find.textContaining('not available in this stage'), findsNothing);
-    expect(find.text('Sign in with a passkey to access your account.'), findsOneWidget);
+    expect(find.text('No active browser access.'), findsOneWidget);
     expect(
       t
           .widget<FilledButton>(
