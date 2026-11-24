@@ -119,7 +119,8 @@ void main() {
       expect(page.assignmentEnabled, isFalse);
       expect(find.byType(AccountSecurityPreview), findsNothing);
       expect(find.byType(TextField), findsNothing);
-      await tester.pageBack();
+      // URL-driven navigation is owned by the host, not a pushed auth route.
+      await tester.tap(find.text('Temporary demo'));
       await tester.pumpAndSettle();
       expect(find.text('Your codes'), findsOneWidget);
     },
