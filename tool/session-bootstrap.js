@@ -30,7 +30,22 @@
   // Factories are loaded before this closure only in a separately enabled host.
   // No bearer or ceremony is persisted or passed to Flutter.
   const assignment=typeof globalThis.OTPandaAssignmentController==='function'&&typeof globalThis.OTPandaAssignmentTransport==='function'?new globalThis.OTPandaAssignmentController(globalThis.OTPandaAssignmentTransport({access:()=>serverNow()<expires?access:undefined,generation:()=>generation,fetchImpl:(...args)=>fetch(...args),credentials:{get:options=>globalThis.navigator.credentials.get(options)}})):null;
-  const pending = location.hash;
+  // Route identifiers contain no record ids, query, proof or free-form return URL.
+  const ROUTES=['codes','sources','unassigned','entries','settings','settings/account-security','settings/devices','settings/organization','recovery','recovery/start','recovery/finish','demo'];
+  const ROUTE_KEY='otpanda.route.tab.v1',validRoute=r=>ROUTES.includes(r);
+  let route;const routeListeners=new Set();
+  const persistentRoute=r=>validRoute(r)&&!r.startsWith('recovery')&&r!=='demo';
+  try{const r=sessionStorage.getItem(ROUTE_KEY);if(persistentRoute(r))route=r;}catch{}
+  const routeHash=location.hash.startsWith('#/');
+  if(routeHash)route=validRoute(location.hash.slice(2))?location.hash.slice(2):'codes';
+  const saveRoute=()=>{try{if(persistentRoute(route))sessionStorage.setItem(ROUTE_KEY,route);else sessionStorage.removeItem(ROUTE_KEY);}catch{}};
+  const routeChanged=()=>{saveRoute();for(const f of routeListeners)f();};
+  const showRoute=(r,replace=false)=>{if(!validRoute(r))throw Error('Known route required');route=r;const hash='#/'+r;if(location.hash!==hash)history[replace?'replaceState':'pushState'](null,'',location.pathname+location.search+hash);routeChanged();};
+  const receiveRoute=()=>{if(!location.hash.startsWith('#/'))return;const r=location.hash.slice(2),next=validRoute(r)?r:'codes';if(route!==next||location.hash!=='#/'+next){const wasPublic=route?.startsWith('recovery')||route==='demo';showRoute(next,true);if(wasPublic&&persistentRoute(next)&&status==='idle'){let hint=false;try{hint=localStorage.getItem('otpanda-session-present')==='yes';}catch{}if(hint)Promise.resolve().then(()=>globalThis.OTPandaSession.start('restore'));}}};
+  globalThis.addEventListener?.('popstate',receiveRoute);globalThis.addEventListener?.('hashchange',receiveRoute);
+  Object.defineProperty(globalThis,'OTPandaNavigation',{value:Object.freeze({current:()=>route??ROUTES[Math.min(view,4)],go:r=>{const wasPublic=route?.startsWith('recovery')||route==='demo';showRoute(r);if(wasPublic&&persistentRoute(r)&&status==='idle'){let hint=false;try{hint=localStorage.getItem('otpanda-session-present')==='yes';}catch{}if(hint)Promise.resolve().then(()=>globalThis.OTPandaSession.start('restore'));}},listen:f=>routeListeners.add(f),unlisten:f=>routeListeners.delete(f)}),writable:false,configurable:false});
+  if(routeHash)saveRoute();
+  const pending = routeHash?'':location.hash;
   // Callback fragment is always removed before a promise, fetch or Flutter load.
   if (pending) history.replaceState(null, '', location.pathname + location.search);
   let saved;
@@ -39,7 +54,7 @@
     if (!pending) {
       // This hint describes an active session, not remembered-device recognition.
       let sessionPresent=false;try{sessionPresent=localStorage.getItem('otpanda-session-present')==='yes';}catch{}
-      if(sessionPresent){const verifier=random(),state=random(),attempt=generation;status='restoring';const challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({verifier,state,created:Date.now()}));location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));}
+      if(sessionPresent&&!route?.startsWith('recovery')&&route!=='demo'){const verifier=random(),state=random(),attempt=generation;status='restoring';const challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now()}));location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));}
       return;
     }
     if(pending==='#auth=logout-incomplete&state='){try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='logout-incomplete';return;}
@@ -49,6 +64,8 @@
       const values = new URLSearchParams(pending.slice(1));
       const state=values.get('state'),p=JSON.parse(saved),now=Date.now();
       if(!/^[A-Za-z0-9_-]{43}$/.test(state)||state!==p.state||!/^[A-Za-z0-9_-]{43}$/.test(p.verifier)||!Number.isSafeInteger(p.created)||now<p.created||now-p.created>((values.has('signup')||values.has('auth'))?900000:300000))throw Error();
+      if(p.route!==undefined&&!validRoute(p.route))throw Error();
+      if(p.route!==undefined){route=p.route;saveRoute();}
       if([...values.keys()].sort().join(',')==='auth,state'){
         const value=values.get('auth');if(!['email-sent','email-invalid','code-invalid','restart','retry','existing-account','sign-in','legacy-account'].includes(value))throw Error();
         entryEmail=typeof p.email==='string'&&p.email.length<=254?p.email:'';
@@ -58,7 +75,7 @@
           if(attempt!==generation)return;
           const verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
           if(attempt!==generation)return;
-          sessionStorage.setItem(KEY,JSON.stringify({verifier,state,created:Date.now(),view,restoreRetried:true}));
+          sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),view,restoreRetried:true}));
           location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));return;
         }
         if(['restart','retry','sign-in'].includes(value))try{localStorage.removeItem('otpanda-session-present');}catch{}
@@ -149,7 +166,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
         }
         if(attempt!==generation)return false;
         try{localStorage.setItem(leaseKey,JSON.stringify({owner,until:Date.now()+3000}));}catch{}
-        sessionStorage.setItem(KEY,JSON.stringify({verifier,state,created:Date.now(),view}));
+        sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),view}));
         location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));
         if(typeof globalThis.setTimeout==='function')setTimeout(()=>{if(attempt===generation&&status==='restoring'){restoring=undefined;renewalRetryAt=Date.now()+10000;status=serverNow()<expires?'restored':access?'session-paused':'sign-in-required';}},8000);
         return false;
@@ -205,6 +222,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
   // Optional recovery bridge, loaded before this file. It gets narrow capabilities
   // only; the access token stays in this closure and is never handed to Flutter.
   const recovery=typeof globalThis.OTPandaRecoveryFactory==='function'?Object.freeze(globalThis.OTPandaRecoveryFactory({api:API,access:()=>serverNow()<expires?access:undefined,generation:()=>generation,readBounded,encode,decode:v=>Uint8Array.from(atob(v.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0)),random,fetchImpl:(...args)=>fetch(...args),credentials:{get:o=>navigator.credentials.get(o),create:o=>navigator.credentials.create(o)},storage:sessionStorage})):undefined;
+  ready.then(()=>{if(typeof history.pushState==='function'&&(status==='restored'||(!pending&&status==='idle')))showRoute(route??ROUTES[Math.min(view,4)],true);},()=>{});
   Object.defineProperty(globalThis,'OTPandaSession',{value:Object.freeze({
     ready,
     recovery,
@@ -223,12 +241,12 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     signupEmail:async(email,proof='')=>{
       if(location.origin+location.pathname!==REDIRECT||location.search||typeof email!=='string'||email.length>254||typeof proof!=='string'||(proof&&!/^otpda_[A-Za-z0-9_-]{55}$/.test(proof)&&! /^[A-HJ-NP-Z2-9]{8}$/i.test(proof.replaceAll(' ','').replaceAll('-',''))))throw Error('Valid signup details required');
       clear();const attempt=generation,verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;
-      sessionStorage.setItem(KEY,JSON.stringify({verifier,state,created:Date.now(),email}));
+      sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),email}));
       const u=new URL(API+'/auth/signup/app');u.search=new URLSearchParams({challenge,state,redirect_uri:REDIRECT});u.hash=new URLSearchParams({action:proof?'begin':'email',email,...(proof?{email_token:proof}:{})});location.assign(u.href);
     },
     access:()=>{if(access!==undefined&&serverNow()>=expires){status='session-paused';return undefined;}return access;},
-    clear:()=>{resetReadRestore();forgetView();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
-    logout:()=>{resetReadRestore();forgetView();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}location.assign(API+'/auth/device/logout');},
+    clear:()=>{showRoute('codes',true);resetReadRestore();forgetView();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
+    logout:()=>{showRoute('codes',true);resetReadRestore();forgetView();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}location.assign(API+'/auth/device/logout');},
     read:async path=>{
       if(!['/v1/manage/account','/v1/manage/session','/v1/manage/entries','/v1/manage/active-codes','/v1/manage/sources','/v1/manage/unassigned'].includes(path))throw Error('Read path required');
       if(!await maintainSession(true))return {status:access||status==='restoring'||status==='session-paused'?503:401,body:'{}'};
@@ -326,7 +344,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       if(mode!=='restore')forgetView();
       clear();const attempt=generation,verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
       if(attempt!==generation)return;
-      sessionStorage.setItem(KEY,JSON.stringify({verifier,state,created:Date.now(),...(mode==='restore'?{view}:{})}));
+      sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),...(mode==='restore'?{view}:{})}));
       const url=new URL(API+(mode==='google'?'/auth/google/start':mode==='signup'?'/auth/signup/start':mode==='login'?'/auth/login/start':'/auth/restore'));url.search=new URLSearchParams({challenge,state,redirect_uri:REDIRECT,...(mode==='google'?{remember:remember?'yes':'no'}:{})});location.assign(url.href);
     },
   }),writable:false,configurable:false});
