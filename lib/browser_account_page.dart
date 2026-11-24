@@ -1,3 +1,6 @@
+import 'auth_entry.dart';
+import 'main.dart' show ClientHome;
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -49,6 +52,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   String status = 'loading', message = '';
   int revision = 0;
   int? accountExpiresAt;
+  Map<String, dynamic>? overview, securityInfo;
+  String? settingChange;
+  bool securityOpen = false;
   final organization = OrganizationStore();
   bool organizationReady = false, organizationBusy = false;
   int organizationEpoch = 0, organizationSnapshot = 0, organizationRequest = 0;
@@ -133,6 +139,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       return;
     }
     accountExpiresAt = null;
+    overview = null;
     final response = await bridge.read('/v1/manage/session');
     if (!mounted || attempt != revision) return;
     if (response.status == 401) {
@@ -152,10 +159,86 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       throw const FormatException('Invalid session metadata');
     }
     accountExpiresAt = value['expiresAt'] as int;
+    final info = await bridge.read('/v1/manage/account');
+    if (!mounted || attempt != revision || status != 'restored') return;
+    if (info.status == 200) {
+      final v = jsonDecode(info.body);
+      if (v is Map<String, dynamic> &&
+          v['email'] is String &&
+          v['passkeys'] is int &&
+          v['google'] is bool &&
+          v['recoveryDevices'] is int) {
+        overview = v;
+      }
+    }
+  }
+
+  Future<void> loadSecurity() async {
+    if (bridge is! AuthEntryBridge) {
+      return;
+    }
+    final value = jsonDecode(
+      await (bridge as AuthEntryBridge).security('status'),
+    );
+    if (value is! Map<String, dynamic> ||
+        value['enabled'] is! bool ||
+        value['pending'] is! List ||
+        value['changes'] is! List) {
+      throw const FormatException('Invalid security state');
+    }
+    if (mounted) {
+      setState(() {
+        securityInfo = value;
+        securityOpen = true;
+      });
+    }
+  }
+
+  Future<void> changeSecurity(bool enabled, bool otherClient) async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          enabled
+              ? 'Require extra verification?'
+              : 'Turn off extra verification?',
+        ),
+        content: Text(
+          enabled
+              ? 'On new devices, Google alone will no longer be enough. You will need your passkey or explicit approval from another signed-in device. Losing your passkey, signing out of every other device, or letting those sessions expire can lock you out. Remembered devices do not need this extra step.'
+              : 'Google alone will be enough on new devices again. Verify this change with your passkey or another signed-in device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(enabled ? 'Continue' : 'Turn off'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    await run(() async {
+      final b = bridge as AuthEntryBridge;
+      if (otherClient) {
+        final value = jsonDecode(await b.security('request-change', enabled));
+        settingChange = value['changeId'] as String;
+        message = 'Open Security on your other device to approve this exact change, then check here.';
+      } else {
+        await b.security('toggle', enabled);
+      }
+      await loadSecurity();
+    });
   }
 
   void clearOrganization() {
     accountExpiresAt = null;
+    overview = null;
+    securityInfo = null;
+    settingChange = null;
     organizationEpoch++;
     organizationRequest++;
     organization.clear();
@@ -388,8 +471,44 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   @override
   Widget build(BuildContext context) {
     final codes = store.visibleCodes(now());
+    if (widget.accountOnly && status != 'restored') {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('OTPanda'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ClientHome(fictionalCatalog: true),
+                ),
+              ),
+              child: const Text('Temporary demo'),
+            ),
+          ],
+        ),
+        body: AuthEntry(
+          bridge: bridge,
+          status: status,
+          message: message,
+          busy: busy,
+          run: (action) => run(action),
+        ),
+      );
+    }
     return Scaffold(
-      appBar: AppBar(title: const Text('Browser account')),
+      appBar: AppBar(
+        title: const Text('Your account'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const ClientHome(fictionalCatalog: true),
+              ),
+            ),
+            child: const Text('Temporary demo'),
+          ),
+        ],
+      ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
@@ -401,25 +520,24 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 12),
-              const Text(
-                'Sign in with a passkey to access your account.',
-              ),
+              const Text('Your sign-in methods and security, in one place.'),
               const SizedBox(height: 20),
-              Text(
-                status == 'unsupported'
-                    ? 'Use a browser to sign in on this device.'
-                    : status == 'signup-ready'
-                    ? 'Create a passkey for your verified account email.'
-                    : status == 'signup-retry-required'
-                    ? 'Passkey setup did not finish. Return to the signup form in this same browser and retry using the email proof. If you already created the passkey, use ordinary sign-in.'
-                    : status == 'check-clock-or-restart'
-                    ? 'Check your device date and time, then restart signup or sign-in. The secure request may have expired.'
-                    : status == 'passkey-ready'
-                    ? 'Your browser is ready for its passkey prompt.'
-                    : status == 'restored'
-                    ? 'Browser session available.'
-                    : 'No active browser access.',
-              ),
+              if (status != 'restored')
+                Text(
+                  status == 'unsupported'
+                      ? 'Use a browser to sign in on this device.'
+                      : status == 'signup-ready'
+                      ? 'Create a passkey for your verified account email.'
+                      : status == 'signup-retry-required'
+                      ? 'Passkey setup did not finish. Return to the signup form in this same browser and retry using the email proof. If you already created the passkey, use ordinary sign-in.'
+                      : status == 'check-clock-or-restart'
+                      ? 'Check your device date and time, then restart signup or sign-in. The secure request may have expired.'
+                      : status == 'passkey-ready'
+                      ? 'Your browser is ready for its passkey prompt.'
+                      : status == 'restored'
+                      ? 'Browser session available.'
+                      : 'No active browser access.',
+                ),
               if (busy)
                 const Padding(
                   padding: EdgeInsets.all(16),
@@ -465,15 +583,237 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 ),
               ],
               if (status == 'restored' && widget.accountOnly) ...[
-                Text(
-                  accountExpiresAt == null
-                      ? 'Session could not be verified. Retry the session check.'
-                      : 'Account session verified.',
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: busy ? null : refresh,
-                  child: const Text('Check account session'),
+                if (overview != null) ...[
+                  if (overview!['google'] == true &&
+                      overview!['passkeys'] == 0) ...[
+                    const Text(
+                      'Welcome to OTPanda.',
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Your account is ready. Google will keep working as your sign-in. You can also add a passkey now or later.',
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  Text(
+                    overview!['email'] as String,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Sign-in methods',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  if (overview!['google'] == true)
+                    const ListTile(
+                      leading: Icon(Icons.account_circle_outlined),
+                      title: Text('Google'),
+                      subtitle: Text('Connected'),
+                    ),
+                  ListTile(
+                    leading: const Icon(Icons.key_outlined),
+                    title: const Text('Passkeys'),
+                    subtitle: Text('${overview!['passkeys']} registered'),
+                  ),
+                  if (overview!['passkeys'] == 0 &&
+                      bridge is FirstPasskeyBridge &&
+                      (bridge as FirstPasskeyBridge).firstPasskeyAvailable)
+                    FilledButton(
+                      onPressed: busy
+                          ? null
+                          : () => run(() async {
+                              await (bridge as FirstPasskeyBridge)
+                                  .firstPasskey();
+                              await loadAccount(revision);
+                            }),
+                      child: const Text('Add a passkey'),
+                    ),
+                  if (overview!['passkeys'] == 0 &&
+                      overview!['google'] == true &&
+                      (bridge is! FirstPasskeyBridge ||
+                          !(bridge as FirstPasskeyBridge)
+                              .firstPasskeyAvailable))
+                    TextButton(
+                      onPressed: busy
+                          ? null
+                          : () => run(() => bridge.start('google')),
+                      child: const Text(
+                        'Sign in with Google again to add a passkey',
+                      ),
+                    ),
+                  if (overview!['passkeys'] == 0)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        'Add a passkey as another way in. Your Google sign-in will keep working.',
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                ],
+                if (bridge is AuthEntryBridge) ...[
+                  const Divider(height: 32),
+                  TextButton(
+                    onPressed: busy ? null : () => run(loadSecurity),
+                    child: const Text('Security'),
+                  ),
+                  if (securityOpen && securityInfo != null) ...[
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Extra verification on new devices'),
+                      subtitle: Text(
+                        securityInfo!['enabled'] == true
+                            ? 'New devices need a passkey or approval from another signed-in device.'
+                            : 'Google sign-in alone is enough. Turn this on for another check on new devices.',
+                      ),
+                      value: securityInfo!['enabled'] as bool,
+                      onChanged: busy
+                          ? null
+                          : (enabled) => changeSecurity(enabled, false),
+                    ),
+                    TextButton(
+                      onPressed: busy
+                          ? null
+                          : () => changeSecurity(
+                              !(securityInfo!['enabled'] as bool),
+                              true,
+                            ),
+                      child: const Text(
+                        'Verify change with another signed-in device',
+                      ),
+                    ),
+                    if (settingChange != null)
+                      OutlinedButton(
+                        onPressed: busy
+                            ? null
+                            : () => run(() async {
+                                await (bridge as AuthEntryBridge).security(
+                                  'consume-change',
+                                  false,
+                                  settingChange!,
+                                );
+                                settingChange = null;
+                                await loadSecurity();
+                              }),
+                        child: const Text('Check approval for security change'),
+                      ),
+                    for (final raw in securityInfo!['pending'] as List)
+                      if (raw is Map && raw['pendingId'] is String)
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('New-device sign-in request'),
+                                Text('Request: ${raw['pendingId']}'),
+                                Text(
+                                  'Requested at ${DateTime.fromMillisecondsSinceEpoch(raw['createdAt'] as int).toLocal()}',
+                                ),
+                                const Text(
+                                  'Approve only if you just started this sign-in on your other device.',
+                                ),
+                                Wrap(
+                                  spacing: 12,
+                                  children: [
+                                    TextButton(
+                                      onPressed: busy
+                                          ? null
+                                          : () => run(() async {
+                                              await (bridge as AuthEntryBridge)
+                                                  .security(
+                                                    'approve',
+                                                    false,
+                                                    raw['pendingId'] as String,
+                                                  );
+                                              await loadSecurity();
+                                            }),
+                                      child: const Text('Approve sign-in'),
+                                    ),
+                                    TextButton(
+                                      onPressed: busy
+                                          ? null
+                                          : () => run(() async {
+                                              await (bridge as AuthEntryBridge)
+                                                  .security(
+                                                    'deny',
+                                                    false,
+                                                    raw['pendingId'] as String,
+                                                  );
+                                              await loadSecurity();
+                                            }),
+                                      child: const Text('Deny'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    for (final raw in securityInfo!['changes'] as List)
+                      if (raw is Map && raw['changeId'] is String)
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  raw['enabled'] == true
+                                      ? 'Turn extra verification ON?'
+                                      : 'Turn extra verification OFF?',
+                                ),
+                                const Text(
+                                  'Approve only if you requested this exact change on your other device.',
+                                ),
+                                TextButton(
+                                  onPressed: busy
+                                      ? null
+                                      : () => run(() async {
+                                          await (bridge as AuthEntryBridge)
+                                              .security(
+                                                'approve-change',
+                                                false,
+                                                raw['changeId'] as String,
+                                              );
+                                          await loadSecurity();
+                                        }),
+                                  child: const Text('Approve security change'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    TextButton(
+                      onPressed: busy ? null : () => run(loadSecurity),
+                      child: const Text('Check for sign-in requests'),
+                    ),
+                  ],
+                ],
+                ExpansionTile(
+                  title: const Text('Temporary diagnostics'),
+                  subtitle: const Text('Development controls, to be removed'),
+                  children: [
+                    Text(
+                      accountExpiresAt == null
+                          ? 'Session check unavailable.'
+                          : 'Account session verified.',
+                    ),
+                    OutlinedButton(
+                      onPressed: busy ? null : refresh,
+                      child: const Text('Check account session'),
+                    ),
+                    TextButton(
+                      onPressed: clear,
+                      child: const Text('Clear local access'),
+                    ),
+                  ],
                 ),
               ],
               if (status == 'restored' && !widget.accountOnly) ...[
@@ -573,7 +913,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                             store.clear();
                             try {
                               bridge.logout();
-                              message = 'Confirm signout on the API page. Until then the saved browser session is not revoked.';
+                              message = 'Signing out...';
                             } catch (_) {
                               message = 'Could not open signout. Local access is cleared but the saved browser session is not revoked.';
                             }
@@ -585,7 +925,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     child: const Text('Sign out of this browser'),
                   ),
                 ),
-              if (status != 'unsupported')
+              if (status != 'unsupported' && !widget.accountOnly)
                 TextButton(
                   onPressed: clear,
                   child: const Text('Clear local access'),
