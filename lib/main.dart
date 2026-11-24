@@ -6,6 +6,7 @@ import 'branding.dart';
 import 'source_preview.dart';
 import 'access_preview.dart';
 import 'account_preview.dart';
+import 'fictional_totp_dialog.dart';
 
 const ink = Color(0xff17332a), green = Color(0xff0a7955);
 const line = Color(0xffdfe8e2), pale = Color(0xffe7f8ee);
@@ -37,12 +38,14 @@ class OTPandaApp extends StatelessWidget {
         ),
       ),
     ),
-    home: const ClientHome(),
+    home: const ClientHome(fictionalCatalog: true),
   );
 }
 
 class ClientHome extends StatefulWidget {
-  const ClientHome({super.key});
+  // Opt-in only for the local fixture catalog, never inferred from permissions.
+  final bool fictionalCatalog;
+  const ClientHome({super.key, this.fictionalCatalog = false});
   @override
   State<ClientHome> createState() => _ClientHomeState();
 }
@@ -317,6 +320,18 @@ class _ClientHomeState extends State<ClientHome> {
     ],
   );
 
+  Future<void> previewGeneratedCode(AccountEntry entry) async {
+    if (!widget.fictionalCatalog) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => FictionalTotpDialog(
+        entryId: entry.id,
+        service: entry.service,
+        account: entry.account,
+      ),
+    );
+  }
+
   Future<void> copy(String value) async {
     await Clipboard.setData(ClipboardData(text: value));
     if (mounted) {
@@ -430,6 +445,11 @@ class _ClientHomeState extends State<ClientHome> {
                   : 'Shared · Read-only · Source hidden',
               style: const TextStyle(fontSize: 10, color: Color(0xff657e70)),
             ),
+            if (widget.fictionalCatalog)
+              TextButton(
+                onPressed: () => previewGeneratedCode(e),
+                child: const Text('Preview fictional generated code'),
+              ),
           ],
         ),
       ),
