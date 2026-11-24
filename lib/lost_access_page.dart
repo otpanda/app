@@ -23,9 +23,13 @@ enum LostAccessStage {
 class LostAccessPage extends StatefulWidget {
   final RecoveryBridge bridge;
   final LostAccessStage initialStage;
+  final ValueChanged<String>? onNavigate;
+  final VoidCallback? onExit;
   const LostAccessPage({
     super.key,
     required this.bridge,
+    this.onNavigate,
+    this.onExit,
     this.initialStage = LostAccessStage.choose,
   });
   @override
@@ -38,6 +42,16 @@ class _LostAccessPageState extends State<LostAccessPage> {
   bool busy = false;
   String? error;
   DateTime? availableAt;
+
+  @override
+  void didUpdateWidget(covariant LostAccessPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialStage != widget.initialStage) {
+      stage = widget.initialStage;
+      error = null;
+      code.clear();
+    }
+  }
 
   @override
   void dispose() {
@@ -65,11 +79,28 @@ class _LostAccessPageState extends State<LostAccessPage> {
     }
   }
 
-  void go(LostAccessStage s) => setState(() {
-    stage = s;
-    error = null;
-    code.clear();
-  });
+  void go(LostAccessStage s) {
+    if (widget.onNavigate != null &&
+        [
+          LostAccessStage.choose,
+          LostAccessStage.startEmail,
+          LostAccessStage.finishEmail,
+        ].contains(s)) {
+      widget.onNavigate!(
+        s == LostAccessStage.startEmail
+            ? 'recovery/start'
+            : s == LostAccessStage.finishEmail
+            ? 'recovery/finish'
+            : 'recovery',
+      );
+      return;
+    }
+    setState(() {
+      stage = s;
+      error = null;
+      code.clear();
+    });
+  }
 
   Future<void> sendStart() async {
     if (!_mail.hasMatch(address)) {
@@ -267,7 +298,16 @@ class _LostAccessPageState extends State<LostAccessPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Recover your account')),
+    appBar: AppBar(
+      title: const Text('Recover your account'),
+      leading: widget.onExit == null
+          ? null
+          : IconButton(
+              icon: const Icon(Icons.arrow_back),
+              tooltip: 'Back to sign in',
+              onPressed: busy ? null : widget.onExit,
+            ),
+    ),
     body: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 480),
