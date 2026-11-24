@@ -1,4 +1,6 @@
 import 'auth_entry.dart';
+import 'product_shell.dart';
+import 'read_workspace_controller.dart';
 import 'main.dart' show ClientHome;
 
 import 'dart:async';
@@ -31,6 +33,7 @@ class BrowserAccountPage extends StatefulWidget {
   final bool loginEnabled;
   final bool assignmentEnabled;
   final bool accountOnly;
+  final bool workspaceEnabled;
   final int Function()? clock;
   const BrowserAccountPage({
     super.key,
@@ -38,6 +41,7 @@ class BrowserAccountPage extends StatefulWidget {
     this.loginEnabled = false,
     this.assignmentEnabled = false,
     this.accountOnly = false,
+    this.workspaceEnabled = false,
     this.clock,
   });
   @override
@@ -48,6 +52,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     with WidgetsBindingObserver {
   late final BrowserSessionBridge bridge;
   late final CodeStore store;
+  late final ReadWorkspaceController workspace;
+  bool accountOpen = false;
   bool busy = true;
   String status = 'loading', message = '';
   int revision = 0;
@@ -66,11 +72,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     WidgetsBinding.instance.addObserver(this);
     bridge = widget.bridge ?? createBrowserSession();
     store = CodeStore(_ReadTransport(bridge));
+    workspace = ReadWorkspaceController(bridge: bridge, clock: now);
+    workspace.addListener(workspaceChanged);
     expiryTick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && status == 'authenticating' && bridge.status != status) {
         setState(() => status = bridge.status);
       }
       if (mounted && status == 'restored') {
+        if (widget.workspaceEnabled) workspace.tick();
         if ((widget.accountOnly &&
                 accountExpiresAt != null &&
                 now() >= accountExpiresAt!) ||
@@ -99,6 +108,16 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
+  void workspaceChanged() {
+    if (!mounted) return;
+    if (workspace.sessionEnded) {
+      status = 'sign-in-required';
+    } else if (!workspace.signedIn) {
+      status = bridge.status;
+    }
+    setState(() {});
+  }
+
   Future<void> run(
     Future<void> Function() action, {
     bool loadAfter = true,
@@ -111,7 +130,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     try {
       await action();
       if (!mounted || attempt != revision) return;
-      status = bridge.status;
+      if (loadAfter && bridge.status == 'restored' && workspace.sessionEnded) {
+        workspace.resetSession();
+      }
+      status = workspace.sessionEnded ? 'sign-in-required' : bridge.status;
       if (status == 'restored' && loadAfter) {
         await loadAccount(attempt);
       } else if (status == 'sign-in-required') {
@@ -143,6 +165,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
     accountExpiresAt = null;
     overview = null;
+    if (widget.workspaceEnabled && !accountOpen) {
+      await workspace.refresh();
+      if (workspace.sessionEnded) status = 'sign-in-required';
+      return;
+    }
+    if (!mounted || attempt != revision || bridge.status != 'restored') return;
     final response = await bridge.read('/v1/manage/session');
     if (!mounted || attempt != revision) return;
     if (response.status == 401) {
@@ -308,6 +336,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
 
   void clear() {
     revision++;
+    workspace.clear();
     bridge.clear();
     clearOrganization();
     store.clear();
@@ -320,7 +349,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed) {
+      if (widget.workspaceEnabled) workspace.resume();
+    } else {
+      if (widget.workspaceEnabled) workspace.suspend();
       if (widget.accountOnly) {
         revision++;
         busy = false;
@@ -334,6 +366,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   @override
   void dispose() {
     revision++;
+    workspace.removeListener(workspaceChanged);
+    workspace.dispose();
     expiryTick?.cancel();
     clearOrganization();
     store.clear();
@@ -474,6 +508,24 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   @override
   Widget build(BuildContext context) {
     final codes = store.visibleCodes(now());
+    if (widget.workspaceEnabled && status == 'restored' && !accountOpen) {
+      return ProductShell(
+        controller: workspace,
+        clock: now,
+        onSignedOut: () {
+          bridge.clear();
+          setState(() => status = bridge.status);
+        },
+        onOpenAccount: () {
+          workspace.suspend();
+          setState(() => accountOpen = true);
+          refresh();
+        },
+        onCopyAssigned: workspace.copyAssigned,
+        onCopyPrivate: workspace.copyPrivate,
+      );
+    }
+
     if (widget.accountOnly && status != 'restored') {
       return Scaffold(
         appBar: AppBar(
@@ -500,6 +552,17 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
     return Scaffold(
       appBar: AppBar(
+        leading: widget.workspaceEnabled
+            ? IconButton(
+                tooltip: 'Back to codes',
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () {
+                  workspace.resume();
+                  setState(() => accountOpen = false);
+                  workspace.refresh();
+                },
+              )
+            : null,
         title: const Text('Your account'),
         actions: [
           TextButton(
@@ -927,6 +990,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                         : () {
                             revision++;
                             clearOrganization();
+                            workspace.clear();
                             store.clear();
                             try {
                               bridge.logout();
