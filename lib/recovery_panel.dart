@@ -24,9 +24,32 @@ String recoveryDate(int ms) {
 
 /// Recovery controls for a signed-in account. Every change asks for a fresh
 /// passkey check through the bridge; nothing here approves from another device.
+enum RecoverySection { passkeys, devices, emailRecovery }
+
 class RecoveryPanel extends StatefulWidget {
   final RecoveryBridge bridge;
-  const RecoveryPanel({super.key, required this.bridge});
+
+  /// Which parts to show. The default shows everything under a "Recovery"
+  /// title, as the panel always did. The settings pages pick their parts.
+  final Set<RecoverySection> sections;
+
+  /// Shown with the email-only recovery switch, before it.
+  final Widget? beforeEmailRecovery;
+
+  /// When set, each part is drawn as a titled card the host styles.
+  final Widget Function(String title, List<Widget> children)? sectionCard;
+  const RecoveryPanel({
+    super.key,
+    required this.bridge,
+    this.sections = const {
+      RecoverySection.passkeys,
+      RecoverySection.devices,
+      RecoverySection.emailRecovery,
+    },
+    this.beforeEmailRecovery,
+    this.sectionCard,
+  });
+  bool get _all => sections.length == RecoverySection.values.length;
   @override
   State<RecoveryPanel> createState() => _RecoveryPanelState();
 }
@@ -215,17 +238,128 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
     'Recovery request canceled.',
   );
 
+  List<Widget> _groups(RecoveryStatus s) {
+    final card = widget.sectionCard;
+    final passkeyKids = <Widget>[
+      for (final p in s.passkeys)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: card == null ? const Icon(Icons.key) : null,
+          title: Text('Passkey added ${recoveryDate(p.createdAt)}'),
+          subtitle: Text(
+            p.lastUsedAt == null
+                ? 'Not used yet'
+                : 'Last used ${recoveryDate(p.lastUsedAt!)}',
+          ),
+          trailing: TextButton(
+            onPressed: busy || s.passkeys.length < 2
+                ? null
+                : () => removePasskey(p),
+            child: const Text('Remove'),
+          ),
+        ),
+      Text(
+        s.passkeys.isEmpty
+            ? 'Add a passkey before changing recovery settings or signing out another device.'
+            : s.passkeys.length < 2
+            ? 'Removing a passkey needs a different passkey of yours to confirm. Your only passkey cannot be removed here. Add another passkey first.'
+            : 'Removing a passkey needs a different passkey of yours to confirm.',
+        style: const TextStyle(fontSize: 12),
+      ),
+    ];
+    final deviceKids = <Widget>[
+      for (final d in s.sessions)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(
+            d.clientKind == 'android' ? Icons.phone_android : Icons.language,
+          ),
+          title: Text(
+            d.current
+                ? 'This device'
+                : 'Signed in ${recoveryDate(d.createdAt)}',
+          ),
+          subtitle: Text(
+            d.lastUsedAt == null
+                ? d.clientKind
+                : '${d.clientKind}, last used ${recoveryDate(d.lastUsedAt!)}',
+          ),
+          trailing: d.current
+              ? null
+              : TextButton(
+                  onPressed: busy ? null : () => signOutDevice(d),
+                  child: const Text('Sign out'),
+                ),
+        ),
+    ];
+    final emailKids = <Widget>[
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Email-only recovery'),
+        subtitle: Text(
+          s.escapeEnabled
+              ? 'On. If you lose every passkey and device, you can regain access with only your email after a ${s.delayDays}-day wait.'
+              : s.blockedByGoogleProtection
+              ? 'Turn off extra verification on new devices first. The two cannot be on together, and neither changes the other.'
+              : 'Off. Turn on only if you could lose every passkey and device. A ${s.delayDays}-day wait always applies.',
+        ),
+        value: s.escapeEnabled,
+        onChanged: busy || (!s.escapeEnabled && s.blockedByGoogleProtection)
+            ? null
+            : (on) => on ? enable() : disable(),
+      ),
+      if (!widget.bridge.enrolledClientApprovalAvailable)
+        const Padding(
+          padding: EdgeInsets.only(top: 4),
+          child: Text(
+            'Approving a change from another enrolled device is not available yet.',
+            style: TextStyle(fontSize: 12),
+          ),
+        ),
+    ];
+    final lead = widget.beforeEmailRecovery;
+    final hasP = widget.sections.contains(RecoverySection.passkeys);
+    final hasD = widget.sections.contains(RecoverySection.devices);
+    final hasE = widget.sections.contains(RecoverySection.emailRecovery);
+    if (card != null) {
+      return [
+        if (hasE || lead != null)
+          card('Protection', [?lead, if (hasE) ...emailKids]),
+        if (hasP) card('Passkeys', passkeyKids),
+        if (hasD) card('Signed-in devices', deviceKids),
+      ];
+    }
+    return [
+      if (hasP) ...[
+        const Text('Passkeys', style: TextStyle(fontWeight: FontWeight.w700)),
+        ...passkeyKids,
+      ],
+      if (hasD) ...[
+        const SizedBox(height: 12),
+        const Text(
+          'Signed-in devices',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        ...deviceKids,
+      ],
+      ?lead,
+      if (hasE) ...[const SizedBox(height: 12), ...emailKids],
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = status;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Recovery',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
+        if (widget._all && widget.sectionCard == null) ...[
+          const Text(
+            'Recovery',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+        ],
         if (busy && s == null) const LinearProgressIndicator(),
         if (failed)
           Row(
@@ -268,86 +402,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
                 ),
               ),
             ),
-          const Text('Passkeys', style: TextStyle(fontWeight: FontWeight.w700)),
-          for (final p in s.passkeys)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.key),
-              title: Text('Passkey added ${recoveryDate(p.createdAt)}'),
-              subtitle: Text(
-                p.lastUsedAt == null
-                    ? 'Not used yet'
-                    : 'Last used ${recoveryDate(p.lastUsedAt!)}',
-              ),
-              trailing: TextButton(
-                onPressed: busy || s.passkeys.length < 2
-                    ? null
-                    : () => removePasskey(p),
-                child: const Text('Remove'),
-              ),
-            ),
-          Text(
-            s.passkeys.isEmpty
-                ? 'Add a passkey before changing recovery settings or signing out another device.'
-                : s.passkeys.length < 2
-                ? 'Removing a passkey needs a different passkey of yours to confirm. Your only passkey cannot be removed here. Add another passkey first.'
-                : 'Removing a passkey needs a different passkey of yours to confirm.',
-            style: const TextStyle(fontSize: 12),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Signed-in devices',
-            style: TextStyle(fontWeight: FontWeight.w700),
-          ),
-          for (final d in s.sessions)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                d.clientKind == 'android'
-                    ? Icons.phone_android
-                    : Icons.language,
-              ),
-              title: Text(
-                d.current
-                    ? 'This device'
-                    : 'Signed in ${recoveryDate(d.createdAt)}',
-              ),
-              subtitle: Text(
-                d.lastUsedAt == null
-                    ? d.clientKind
-                    : '${d.clientKind}, last used ${recoveryDate(d.lastUsedAt!)}',
-              ),
-              trailing: d.current
-                  ? null
-                  : TextButton(
-                      onPressed: busy ? null : () => signOutDevice(d),
-                      child: const Text('Sign out'),
-                    ),
-            ),
-          const SizedBox(height: 12),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Email-only recovery'),
-            subtitle: Text(
-              s.escapeEnabled
-                  ? 'On. If you lose every passkey and device, you can regain access with only your email after a ${s.delayDays}-day wait.'
-                  : s.blockedByGoogleProtection
-                  ? 'Turn off extra verification on new devices first. The two cannot be on together, and neither changes the other.'
-                  : 'Off. Turn on only if you could lose every passkey and device. A ${s.delayDays}-day wait always applies.',
-            ),
-            value: s.escapeEnabled,
-            onChanged: busy || (!s.escapeEnabled && s.blockedByGoogleProtection)
-                ? null
-                : (on) => on ? enable() : disable(),
-          ),
-          if (!widget.bridge.enrolledClientApprovalAvailable)
-            const Padding(
-              padding: EdgeInsets.only(top: 4),
-              child: Text(
-                'Approving a change from another enrolled device is not available yet.',
-                style: TextStyle(fontSize: 12),
-              ),
-            ),
+          ..._groups(s),
         ],
       ],
     );
