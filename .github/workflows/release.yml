@@ -106,8 +106,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           flutter build apk --release --build-name "${version%%-*}" --build-number "$GITHUB_RUN_NUMBER"
           apk=build/app/outputs/flutter-apk/app-release.apk
-          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          "$apksigner" verify --print-certs "$apk" | grep -E 'Signer #1 certificate (SHA-256|DN)'
+          bash .github/scripts/verify-apk-signature.sh "$apk"
           mkdir -p dist
           cp "$apk" "dist/otpanda-android-${GITHUB_REF_NAME}.apk"
       - uses: actions/upload-artifact@v4
