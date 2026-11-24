@@ -7,6 +7,8 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const OTPandaApp());
+    await tester.tap(find.text('Temporary demo'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Entries'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add entry'));
@@ -33,6 +35,8 @@ void main() {
     'shared entries have no edit/delete and deletion requires confirmation',
     (tester) async {
       await tester.pumpWidget(const OTPandaApp());
+      await tester.tap(find.text('Temporary demo'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Entries'));
       await tester.pumpAndSettle();
       expect(find.text('Edit entry'), findsNWidgets(2));
@@ -54,6 +58,8 @@ void main() {
   );
   testWidgets('entry edit keeps code bound to the same entry', (tester) async {
     await tester.pumpWidget(const OTPandaApp());
+    await tester.tap(find.text('Temporary demo'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Entries'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit entry').first);
