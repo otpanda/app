@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'assignment_dialog.dart';
+
 import 'organization_contract.dart';
 import 'organization_panel.dart';
 
@@ -24,11 +26,13 @@ class _ReadTransport implements SessionTransport {
 class BrowserAccountPage extends StatefulWidget {
   final BrowserSessionBridge? bridge;
   final bool loginEnabled;
+  final bool assignmentEnabled;
   final int Function()? clock;
   const BrowserAccountPage({
     super.key,
     this.bridge,
     this.loginEnabled = false,
+    this.assignmentEnabled = false,
     this.clock,
   });
   @override
@@ -212,6 +216,71 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     super.dispose();
   }
 
+  Future<void> assignPrivate(UnassignedCode code) async {
+    if (!widget.assignmentEnabled ||
+        bridge is! AssignmentBridge ||
+        status != 'restored' ||
+        !code.active(now())) {
+      return;
+    }
+    final assignment = bridge as AssignmentBridge;
+    if ([
+      'unknown',
+      'pending',
+      'submitting',
+    ].contains(assignment.assignmentState)) {
+      final assigned = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AssignmentDialog(
+          bridge: assignment,
+          sourceId: '',
+          eventId: '',
+          entryId: '',
+        ),
+      );
+      if (mounted && assigned == true) await refresh();
+      return;
+    }
+    final epoch = revision;
+    final owned = store.entries.where((entry) => entry.manage).toList();
+    final target = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Choose an owned entry'),
+        children: [
+          for (final entry in owned)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, entry.id),
+              child: Text(
+                '${entry.service}${entry.account.isEmpty ? '' : ' · ${entry.account}'}',
+              ),
+            ),
+        ],
+      ),
+    );
+    if (!mounted ||
+        target == null ||
+        epoch != revision ||
+        status != 'restored' ||
+        !code.active(now()) ||
+        !store.visibleUnassigned(now()).contains(code) ||
+        !store.entries.any((entry) => entry.id == target && entry.manage)) {
+      return;
+    }
+    final assigned = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AssignmentDialog(
+        bridge: bridge as AssignmentBridge,
+        sourceId: code.sourceId,
+        eventId: code.eventId,
+        entryId: target,
+      ),
+    );
+    if (mounted && assigned == true) await refresh();
+  }
+
   Future<void> copyPrivate(UnassignedCode code) async {
     if (status != 'restored' ||
         !code.active(now()) ||
@@ -377,10 +446,22 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                             .firstWhere((s) => s.id == code.sourceId)
                             .label,
                       ),
-                      trailing: IconButton(
-                        tooltip: 'Copy private code',
-                        onPressed: () => copyPrivate(code),
-                        icon: const Icon(Icons.copy_outlined),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (widget.assignmentEnabled &&
+                              bridge is AssignmentBridge)
+                            IconButton(
+                              tooltip: 'Assign private code',
+                              onPressed: () => assignPrivate(code),
+                              icon: const Icon(Icons.move_to_inbox_outlined),
+                            ),
+                          IconButton(
+                            tooltip: 'Copy private code',
+                            onPressed: () => copyPrivate(code),
+                            icon: const Icon(Icons.copy_outlined),
+                          ),
+                        ],
                       ),
                     ),
                 ],
