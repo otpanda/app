@@ -107,8 +107,8 @@ jobs:
           block = (
               '    signingConfigs {\n'
               '        create("release") {\n'
-              '            val props = java.util.Properties()\n'
-              '            props.load(java.io.FileInputStream(rootProject.file("key.properties")))\n'
+              '            val props = Properties()\n'
+              '            props.load(FileInputStream(rootProject.file("key.properties")))\n'
               '            storeFile = file(props.getProperty("storeFile"))\n'
               '            storePassword = props.getProperty("storePassword")\n'
               '            keyAlias = props.getProperty("keyAlias")\n'
@@ -119,6 +119,7 @@ jobs:
           assert 'buildTypes {' in s and 'release {' in s, 'unexpected Gradle template'
           s = s.replace('    buildTypes {', block + '    buildTypes {', 1)
           s = s.replace('        release {\n', '        release {\n            signingConfig = signingConfigs.getByName("release")\n', 1)
+          s = 'import java.io.FileInputStream\nimport java.util.Properties\n\n' + s
           p.write_text(s)
           PY
       - name: Build, verify signature and name APK
