@@ -59,6 +59,11 @@ flutter:
   assets:
     - assets/service-catalog.json
     - assets/2fa-directory-LICENSE.txt
+    - assets/fonts/GoogleSans-OFL.txt
+  fonts:
+    - family: GoogleSans
+      fonts:
+        - asset: assets/fonts/GoogleSans.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:
