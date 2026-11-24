@@ -28,6 +28,14 @@ Map<String, Object> code(String id, {int received = 100, int expires = 200}) =>
       'expiresAt': expires,
     };
 void main() {
+  test('optional account name may be absent, null or empty, not an invalid populated account', () {
+    for (final value in [null, '']) {
+      final row = entry('id');
+      row['account_name'] = value ?? '';
+      expect(ManagedEntry.fromJson(row).account, '');
+    }
+  });
+
   test('private inbox only includes live owner source records, retains empty entries and redacts', () async {
     final store = CodeStore(
       FakeTransport((path) async {

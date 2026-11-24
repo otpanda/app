@@ -55,15 +55,13 @@ class AccessPreview extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Text(
-        'People and apps have separate permissions. Nothing here grants real access.',
-      ),
+      const Text('People and apps have separate permissions.'),
       const SizedBox(height: 14),
       panel([
         const Text('People', style: TextStyle(fontSize: 11)),
         const SizedBox(height: 8),
         const Text(
-          'Fictional teammate',
+          'Sam (teammate)',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         const Text('Northstar · alex@example.test only'),
@@ -71,7 +69,7 @@ class AccessPreview extends StatelessWidget {
         const Text('Read-only codes · Automation not allowed'),
         const SizedBox(height: 8),
         const Text(
-          'Sharing invitations and changes are not connected in this preview.',
+          'Only you can change who has access.',
           style: TextStyle(fontSize: 11),
         ),
       ]),
@@ -80,7 +78,7 @@ class AccessPreview extends StatelessWidget {
         const Text('Apps & automation', style: TextStyle(fontSize: 11)),
         const SizedBox(height: 8),
         const Text(
-          'Fictional laptop assistant',
+          'Laptop assistant',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         const Text('Northstar · alex@example.test only'),
@@ -97,7 +95,7 @@ class AccessPreview extends StatelessWidget {
           ),
         const SizedBox(height: 8),
         const Text(
-          'No real token exists. Token creation, expiry and one-time credential display are not connected.',
+          'Access tokens are shown once, when created.',
           style: TextStyle(fontSize: 11),
         ),
       ]),
