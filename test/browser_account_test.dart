@@ -16,7 +16,7 @@ class Bridge implements BrowserSessionBridge {
   int? clockNow;
   int lifetime = 60000;
   int copyReceipts = 0, organizationWrites = 0, organizationReads = 0;
-  Completer<SessionResponse>? pendingReceipt;
+  Completer<SessionResponse>? pendingReceipt, pendingSession;
   bool conflict = false, organizationDenied = false;
   Map<String, dynamic> cloud = {
     'revision': 0,
@@ -74,6 +74,9 @@ class Bridge implements BrowserSessionBridge {
   @override
   Future<SessionResponse> read(String path) async {
     reads++;
+    if (path == '/v1/manage/session' && pendingSession != null) {
+      return pendingSession!.future;
+    }
     if (path.endsWith('/sources')) {
       return SessionResponse(200, jsonEncode({'sources': sources}));
     }
@@ -101,6 +104,184 @@ class Bridge implements BrowserSessionBridge {
 }
 
 void main() {
+  testWidgets('account-only accepts server session with lagging client clock', (
+    t,
+  ) async {
+    final b = Bridge()
+      ..status = 'restored'
+      ..clockNow = 500000;
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          loginEnabled: true,
+          clock: () => 100000,
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(
+      find.text(
+        'Account session verified. Sources and codes are unavailable in this stage.',
+      ),
+      findsOneWidget,
+    );
+    expect(b.reads, 1);
+    expect(b.organizationReads, 0);
+  });
+  testWidgets(
+    'account-only pause invalidates refresh without stuck busy or late verified state',
+    (t) async {
+      final b = Bridge()
+        ..status = 'restored'
+        ..clockNow = 100000;
+      await t.pumpWidget(
+        MaterialApp(
+          home: BrowserAccountPage(
+            bridge: b,
+            accountOnly: true,
+            loginEnabled: true,
+            clock: () => 100000,
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      b.pendingSession = Completer<SessionResponse>();
+      await t.tap(find.text('Check account session'));
+      await t.pump();
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await t.pump();
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await t.pump();
+      b.pendingSession!.complete(
+        const SessionResponse(
+          200,
+          '{"ownerId":"synthetic","expiresAt":160000}',
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(
+        find.text(
+          'Account session verified. Sources and codes are unavailable in this stage.',
+        ),
+        findsNothing,
+      );
+      expect(
+        t
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Check account session'),
+            )
+            .onPressed,
+        isNotNull,
+      );
+      expect(
+        t
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Sign out of this browser'),
+            )
+            .onPressed,
+        isNotNull,
+      );
+      b.pendingSession = null;
+      await t.tap(find.text('Check account session'));
+      await t.pumpAndSettle();
+      expect(
+        find.text(
+          'Account session verified. Sources and codes are unavailable in this stage.',
+        ),
+        findsOneWidget,
+      );
+      expect(b.organizationReads, 0);
+    },
+  );
+  testWidgets('account-only reads session and never data or organization', (
+    t,
+  ) async {
+    final b = Bridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          loginEnabled: true,
+          clock: () => 100000,
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(b.reads, 1);
+    expect(b.organizationReads, 0);
+    expect(
+      find.text(
+        'Account session verified. Sources and codes are unavailable in this stage.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('No active codes in selected entries.'), findsNothing);
+    expect(find.text('Refresh real codes'), findsNothing);
+    await t.tap(find.text('Check account session'));
+    await t.pumpAndSettle();
+    expect(b.reads, 2);
+    expect(b.organizationReads, 0);
+  });
+  testWidgets('account-only expiry clears verified state', (t) async {
+    var now = 100000;
+    final b = Bridge()
+      ..status = 'restored'
+      ..clockNow = now
+      ..lifetime = 1000;
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          loginEnabled: true,
+          clock: () => now,
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    now += 1001;
+    await t.pump(const Duration(seconds: 1));
+    expect(find.text('Browser access expired. Sign in again.'), findsOneWidget);
+    expect(
+      find.text(
+        'Account session verified. Sources and codes are unavailable in this stage.',
+      ),
+      findsNothing,
+    );
+    expect(b.organizationReads, 0);
+  });
+  testWidgets(
+    'account-only denied read never presents verified or empty code success',
+    (t) async {
+      final b = Bridge()
+        ..status = 'restored'
+        ..denied = true;
+      await t.pumpWidget(
+        MaterialApp(
+          home: BrowserAccountPage(
+            bridge: b,
+            accountOnly: true,
+            loginEnabled: true,
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(b.reads, 1);
+      expect(b.organizationReads, 0);
+      expect(
+        find.text(
+          'Account session verified. Sources and codes are unavailable in this stage.',
+        ),
+        findsNothing,
+      );
+      expect(find.text('No active codes in selected entries.'), findsNothing);
+    },
+  );
   testWidgets('signup ready uses explicit create label and manual prompt', (
     t,
   ) async {
