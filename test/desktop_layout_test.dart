@@ -10,6 +10,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(const OTPandaApp());
+    await tester.tap(find.text('Temporary demo'));
+    await tester.pumpAndSettle();
     for (final label in [
       'Codes',
       'Sources',
