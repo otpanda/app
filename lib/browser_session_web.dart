@@ -26,6 +26,7 @@ extension type _Session(JSObject _) implements JSObject {
   external JSPromise<JSAny?> googleStart(JSBoolean remember);
   external JSBoolean firstPasskeyAvailable();
   external JSPromise<JSAny?> firstPasskey();
+  external JSPromise<JSAny?> addPasskey();
   external JSPromise<JSAny?> signupEmail(JSString email, JSString proof);
   external JSPromise<JSAny?> start(JSString mode);
   external JSPromise<JSAny?> passkey();
@@ -51,7 +52,13 @@ class _Browser
         BrowserSessionBridge,
         AssignmentBridge,
         AuthEntryBridge,
-        FirstPasskeyBridge {
+        FirstPasskeyBridge,
+        AdditionalPasskeyBridge {
+  @override
+  Future<void> addPasskey() async {
+    await _session.addPasskey().toDart;
+  }
+
   @override
   bool get firstPasskeyAvailable => _session.firstPasskeyAvailable().toDart;
   @override
@@ -142,4 +149,4 @@ class _Browser
     final response = await _session.read(path.toJS).toDart;
     return SessionResponse(response.status.toDartInt, response.body.toDart);
   }
-}
+        }
