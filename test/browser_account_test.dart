@@ -127,7 +127,8 @@ void main() {
       ),
     );
     await t.pumpAndSettle();
-    expect(find.text('Your account'), findsWidgets);
+    expect(find.text('Settings'), findsWidgets);
+    expect(find.text('Temporary diagnostics'), findsNothing);
     await t.tap(find.byTooltip('Back to codes'));
     await t.pumpAndSettle();
     expect(bridge.restoredView, 0);
@@ -153,16 +154,18 @@ void main() {
       ),
     );
     await t.pumpAndSettle();
-    expect(find.text('Temporary diagnostics'), findsOneWidget);
+    expect(find.text('Temporary diagnostics'), findsNothing);
+    expect(find.text('Account & security'), findsWidgets);
     expect(b.reads, 2);
     expect(b.organizationReads, 0);
   });
   testWidgets(
-    'account-only pause invalidates refresh without stuck busy or late verified state',
+    'account-only pause invalidates a pending read without stuck busy or late verified state',
     (t) async {
       final b = Bridge()
         ..status = 'restored'
-        ..clockNow = 100000;
+        ..clockNow = 100000
+        ..pendingSession = Completer<SessionResponse>();
       await t.pumpWidget(
         MaterialApp(
           home: BrowserAccountPage(
@@ -173,14 +176,6 @@ void main() {
           ),
         ),
       );
-      await t.pumpAndSettle();
-      b.pendingSession = Completer<SessionResponse>();
-      if (find.text('Temporary diagnostics').evaluate().isNotEmpty &&
-          find.text('Check account session').evaluate().isEmpty) {
-        await t.tap(find.text('Temporary diagnostics'));
-        await t.pumpAndSettle();
-      }
-      await t.tap(find.text('Check account session'));
       await t.pump();
       t.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await t.pump();
@@ -192,37 +187,10 @@ void main() {
           '{"ownerId":"synthetic","expiresAt":160000}',
         ),
       );
-      await t.pumpAndSettle();
-      expect(find.text('Account session verified.'), findsNothing);
-      if (find.text('Check account session').evaluate().isEmpty) {
-        await t.tap(find.text('Temporary diagnostics'));
-        await t.pumpAndSettle();
-      }
-      expect(
-        t
-            .widget<OutlinedButton>(
-              find.widgetWithText(OutlinedButton, 'Check account session'),
-            )
-            .onPressed,
-        isNotNull,
-      );
-      expect(
-        t
-            .widget<OutlinedButton>(
-              find.widgetWithText(OutlinedButton, 'Sign out of this browser'),
-            )
-            .onPressed,
-        isNotNull,
-      );
       b.pendingSession = null;
-      if (find.text('Temporary diagnostics').evaluate().isNotEmpty &&
-          find.text('Check account session').evaluate().isEmpty) {
-        await t.tap(find.text('Temporary diagnostics'));
-        await t.pumpAndSettle();
-      }
-      await t.tap(find.text('Check account session'));
       await t.pumpAndSettle();
-      expect(find.text('Temporary diagnostics'), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.text('Temporary diagnostics'), findsNothing);
       expect(b.organizationReads, 0);
     },
   );
@@ -245,17 +213,10 @@ void main() {
     await t.pumpAndSettle();
     expect(b.reads, 2);
     expect(b.organizationReads, 0);
-    expect(find.text('Temporary diagnostics'), findsOneWidget);
+    expect(find.text('Temporary diagnostics'), findsNothing);
     expect(find.text('No active codes in selected entries.'), findsNothing);
     expect(find.text('Refresh real codes'), findsNothing);
-    if (find.text('Temporary diagnostics').evaluate().isNotEmpty &&
-        find.text('Check account session').evaluate().isEmpty) {
-      await t.tap(find.text('Temporary diagnostics'));
-      await t.pumpAndSettle();
-    }
-    await t.tap(find.text('Check account session'));
-    await t.pumpAndSettle();
-    expect(b.reads, 4);
+    expect(b.reads, 2);
     expect(b.organizationReads, 0);
   });
   testWidgets('account-only expiry clears verified state', (t) async {
@@ -662,12 +623,7 @@ void main() {
       expect(find.text('Reset copy counts'), findsNothing);
       expect(find.textContaining('confirmed copies'), findsNothing);
       expect(find.textContaining('Sort:'), findsNothing);
-      expect(
-        find.text(
-          'Private cloud organization. Recent successful copies help order your unpinned entries automatically.',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text('Organize your entries'), findsOneWidget);
       expect(
         t.getTopLeft(find.text('Second')).dy,
         lessThan(t.getTopLeft(find.text('First')).dy),
@@ -833,4 +789,45 @@ void main() {
       expect(find.textContaining('Organization was not saved'), findsOneWidget);
     },
   );
+  testWidgets('partial entry view does not shrink saved organization on PUT', (
+    t,
+  ) async {
+    await t.binding.setSurfaceSize(const Size(800, 1600));
+    addTearDown(() => t.binding.setSurfaceSize(null));
+    final b = Bridge()
+      ..status = 'restored'
+      ..clockNow = 100000
+      ..entries = [
+        {
+          'entry_id': 'visible',
+          'service_name': 'Visible',
+          'capabilities': {'manage': true},
+        },
+      ]
+      ..cloud = {
+        'revision': 2,
+        'tags': [],
+        'entries': [
+          {'entryId': 'visible', 'pinned': false, 'tagIds': []},
+          {'entryId': 'not-loaded', 'pinned': true, 'tagIds': []},
+        ],
+        'ranking': [],
+      };
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(bridge: b, clock: () => 100000),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(find.text('not-loaded'), findsNothing);
+    await t.tap(find.byTooltip('Pin Visible'));
+    await t.pumpAndSettle();
+    expect(b.organizationWrites, 1);
+    expect(
+      (b.cloud['entries'] as List).any(
+        (e) => e['entryId'] == 'not-loaded' && e['pinned'] == true,
+      ),
+      isTrue,
+    );
+  });
 }
