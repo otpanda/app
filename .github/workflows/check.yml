@@ -1,6 +1,7 @@
 name: Shared app checks and preview
 on:
   push:
+    branches: ['**']
   pull_request:
   workflow_dispatch:
   schedule:
@@ -34,6 +35,9 @@ jobs:
       - run: python3 tool/test_service_catalog.py
       - run: node --test test/assignment*.mjs test/session_bootstrap_test.cjs
       - run: flutter analyze
+      - name: Check formatting (advisory until a one-time reformat lands after the App53 merge)
+        continue-on-error: true
+        run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter test
       - run: flutter build web --base-href /app/ --no-wasm-dry-run
       - uses: actions/upload-artifact@v4

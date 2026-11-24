@@ -1,0 +1,210 @@
+name: Release clients
+# Runs when a version tag is pushed. It rebuilds every client from the tagged
+# commit, publishes them on the GitHub release page, and attaches checksums.
+# Tags containing a hyphen (for example v0.0.2-rc.1) become prereleases.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+permissions:
+  contents: read
+concurrency:
+  group: app-release-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  FLUTTER_VERSION: '3.50.1'
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter --disable-analytics
+      - run: bash tool/bootstrap.sh
+      - run: python3 tool/test_service_catalog.py
+      - run: node --test test/assignment*.mjs test/session_bootstrap_test.cjs
+      - run: flutter analyze
+      - run: flutter test
+  web:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter --disable-analytics
+      - run: bash tool/bootstrap.sh
+      - name: Build web app and extension package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          flutter build web --base-href /app/ --no-wasm-dry-run --build-name "${version%%-*}" --build-number "$GITHUB_RUN_NUMBER"
+          mkdir -p dist
+          (cd build/web && zip -qr "../../dist/otpanda-web-${GITHUB_REF_NAME}.zip" .)
+          flutter build web --csp --no-web-resources-cdn --base-href / --no-wasm-dry-run --build-name "${version%%-*}" --build-number "$GITHUB_RUN_NUMBER"
+          node tool/extension/package.mjs
+          (cd build/extension-preview && zip -qr "../../dist/otpanda-extension-${GITHUB_REF_NAME}.zip" .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-web
+          path: dist/*
+          retention-days: 7
+  android:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter --disable-analytics
+      - run: bash tool/bootstrap.sh
+      - name: Configure persistent release signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!v:-}" ]; then echo "::error::Release signing secret $v is not set."; exit 1; fi
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > android/key.properties
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/build.gradle.kts')
+          s = p.read_text()
+          block = (
+              '    signingConfigs {\n'
+              '        create("release") {\n'
+              '            val props = java.util.Properties()\n'
+              '            props.load(java.io.FileInputStream(rootProject.file("key.properties")))\n'
+              '            storeFile = file(props.getProperty("storeFile"))\n'
+              '            storePassword = props.getProperty("storePassword")\n'
+              '            keyAlias = props.getProperty("keyAlias")\n'
+              '            keyPassword = props.getProperty("keyPassword")\n'
+              '        }\n'
+              '    }\n'
+          )
+          assert 'buildTypes {' in s and 'release {' in s, 'unexpected Gradle template'
+          s = s.replace('    buildTypes {', block + '    buildTypes {', 1)
+          s = s.replace('        release {\n', '        release {\n            signingConfig = signingConfigs.getByName("release")\n', 1)
+          p.write_text(s)
+          PY
+      - name: Build, verify signature and name APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          flutter build apk --release --build-name "${version%%-*}" --build-number "$GITHUB_RUN_NUMBER"
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "$apk" | grep -E 'Signer #1 certificate (SHA-256|DN)'
+          mkdir -p dist
+          cp "$apk" "dist/otpanda-android-${GITHUB_REF_NAME}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: dist/*
+          retention-days: 7
+  desktop:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: windows
+          - os: macos-latest
+            target: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: false
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -y && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev
+      - run: flutter --disable-analytics
+      - run: python tool/desktop/bootstrap.py
+      - name: Build and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          flutter build ${{ matrix.target }} --release --build-name "${version%%-*}" --build-number "$GITHUB_RUN_NUMBER"
+          mkdir -p dist
+          name="otpanda-${{ matrix.target }}-${GITHUB_REF_NAME}"
+          case "${{ matrix.target }}" in
+            linux) tar -czf "dist/$name-x64.tar.gz" -C build/linux/x64/release/bundle . ;;
+            windows) (cd build/windows/x64/runner/Release && 7z a -tzip "$GITHUB_WORKSPACE/dist/$name-x64.zip" . >/dev/null) ;;
+            macos)
+              app=$(ls -d build/macos/Build/Products/Release/*.app | head -1)
+              codesign --force --deep --sign - "$app"
+              ditto -c -k --sequesterRsrc --keepParent "$app" "dist/$name-adhoc-signed.zip" ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*
+          retention-days: 7
+  publish:
+    needs: [web, android, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags=(--verify-tag --generate-notes --title "OTPanda ${GITHUB_REF_NAME}")
+          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" dist/*

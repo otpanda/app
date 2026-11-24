@@ -1,9 +1,8 @@
 name: Optional extension development preview
 on:
   push:
-    paths: ['lib/**', 'web/**', 'tool/**', 'pubspec.*', '.github/workflows/extension-preview.yml']
+    branches: ['**']
   pull_request:
-    paths: ['lib/**', 'web/**', 'tool/**', 'pubspec.*', '.github/workflows/extension-preview.yml']
   workflow_dispatch:
 permissions:
   contents: read
