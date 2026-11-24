@@ -125,7 +125,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const body=await readBounded(r,4096);if(attempt!==generation)return {status:401,body:'{}'};
       if(r.status===401){clear();status='sign-in-required';}return {status:r.status,body};
     },
-    pendingLabel:()=>protectionPending?.pendingId??'',
+    pendingLabel:()=>protectionPending?.pendingId.slice(0,6).toUpperCase()??'',
     protectionContinue:async action=>{
       const p=protectionPending,attempt=generation;if(!p||p.expiresAt<=Date.now()||!['passkey','check'].includes(action))throw Error('Start sign-in again.');
       const post=async(path,value)=>{const r=await fetch(API+'/auth/google/protection/'+path,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json','X-OTPanda-Pending':p.token},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,16384));if(!r.ok||attempt!==generation)throw Error('Verification expired. Start sign-in again.');return v;};
@@ -152,6 +152,15 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
         value={ceremony:c.token,emailProof:null,response:{id:credential.id,rawId:encode(new Uint8Array(credential.rawId)),type:credential.type,clientExtensionResults:credential.getClientExtensionResults(),response:{clientDataJSON:encode(new Uint8Array(credential.response.clientDataJSON)),authenticatorData:encode(new Uint8Array(credential.response.authenticatorData)),signature:encode(new Uint8Array(credential.response.signature)),userHandle:credential.response.userHandle?encode(new Uint8Array(credential.response.userHandle)):null}}};
       }
       await post('verify',value);if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({...g.saved,created:Date.now()}));googlePending=undefined;location.assign(API+'/auth/google/continue/complete#'+new URLSearchParams({token:g.token}));
+    },
+    addPasskey:async()=>{
+      const attempt=generation,token=Date.now()<expires?access:undefined;if(!token)throw Error('Sign in again.');
+      const post=async(step,value,grant)=>{const r=await fetch(API+'/v1/manage/passkey/add/'+step,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',...(grant?{'X-OTPanda-Enrollment':grant}:{})},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,24576));if(!r.ok||attempt!==generation)throw Error('Passkey setup could not finish. Start again.');return v;};
+      const verification=await post('verify-begin',{}),response=await assertion(verification);if(attempt!==generation)throw Error('Cancelled');const grant=await post('verify-finish',{token:verification.token,response});if(!/^otpda_[A-Za-z0-9_-]{55}$/.test(grant.token)||!Number.isSafeInteger(grant.expiresAt)||grant.expiresAt<=Date.now()||grant.expiresAt>Date.now()+120000)throw Error('Invalid authorization');
+      const c=await post('register-begin',{},grant.token),o=c.options,decode=v=>Uint8Array.from(atob(v.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0));
+      if(!/^otpda_[A-Za-z0-9_-]{55}$/.test(c.token)||o?.rp?.id!=='otpanda.github.io'||o.rp.name!=='OTPanda'||!/^[A-Za-z0-9_-]{43}$/.test(o.challenge)||!Number.isSafeInteger(c.expiresAt)||c.expiresAt<=Date.now()||c.expiresAt>Date.now()+120000||o.authenticatorSelection?.userVerification!=='required'||!Array.isArray(o.excludeCredentials)||o.excludeCredentials.length>10||o.excludeCredentials.some(v=>v.type!=='public-key'||typeof v.id!=='string'||!/^[A-Za-z0-9_-]{1,1400}$/.test(v.id)))throw Error('Invalid passkey setup');
+      const credential=await navigator.credentials.create({publicKey:{rp:o.rp,user:{...o.user,id:decode(o.user.id)},challenge:decode(o.challenge),pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],timeout:Math.min(120000,c.expiresAt-Date.now()),attestation:'none',authenticatorSelection:{residentKey:'required',userVerification:'required'},excludeCredentials:o.excludeCredentials.map(v=>({type:'public-key',id:decode(v.id)}))}});if(attempt!==generation||!credential||credential.type!=='public-key')throw Error('Cancelled');
+      await post('register-finish',{token:c.token,response:{id:credential.id,rawId:encode(new Uint8Array(credential.rawId)),type:credential.type,clientExtensionResults:credential.getClientExtensionResults(),response:{clientDataJSON:encode(new Uint8Array(credential.response.clientDataJSON)),attestationObject:encode(new Uint8Array(credential.response.attestationObject)),transports:credential.response.getTransports?.()??[]}}},grant.token);
     },
     firstPasskeyAvailable:()=>Boolean(enrollment&&Date.now()<expires),
     firstPasskey:async()=>{
