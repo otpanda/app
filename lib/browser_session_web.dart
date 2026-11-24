@@ -31,6 +31,10 @@ extension type _Session(JSObject _) implements JSObject {
   external void assignmentDismiss();
   external JSPromise<JSAny?> get ready;
   external JSString status();
+  external JSNumber view();
+  external JSPromise<JSAny?> maintain();
+  external JSNumber accessExpiresAt();
+  external void setView(JSNumber view);
   external JSString email();
   external JSString pendingLabel();
   external JSPromise<JSString> protectionContinue(JSString action);
@@ -67,11 +71,25 @@ BrowserSessionBridge createBrowserSession() => _Browser();
 class _Browser
     implements
         BrowserSessionBridge,
+        SessionViewBridge,
+        SessionContinuityBridge,
         AssignmentBridge,
         AuthEntryBridge,
         FirstPasskeyBridge,
         AdditionalPasskeyBridge,
         RecoveryBridge {
+  @override
+  Future<void> maintain() async {
+    await _session.maintain().toDart;
+  }
+
+  @override
+  int get accessExpiresAt => _session.accessExpiresAt().toDartInt;
+  @override
+  int get restoredView => _session.view().toDartInt;
+  @override
+  void setView(int view) => _session.setView(view.toJS);
+
   void _outcome(String v) {
     if (v == 'ok') return;
     throw v == 'refused'
