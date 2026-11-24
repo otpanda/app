@@ -7,7 +7,7 @@
   let access, expires = 0, status = 'idle', generation = 0, loginPending;
   const encode = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
   const random = () => encode(crypto.getRandomValues(new Uint8Array(32)));
-  const clear = () => { generation++; access = undefined; expires = 0; loginPending=undefined; };
+  const clear = () => { assignment?.clear();generation++; access = undefined; expires = 0; loginPending=undefined; };
   // Bound bytes as they arrive. A post-buffer string length check is too late.
   const readBounded = async (response, limit) => {
     const advertised=response.headers?.get('content-length');
@@ -18,6 +18,9 @@
     catch(error){try{await reader.cancel();}catch{}throw error;}
     finally{reader.releaseLock();}
   };
+  // Factories are loaded before this closure only in a separately enabled host.
+  // No bearer or ceremony is persisted or passed to Flutter.
+  const assignment=typeof globalThis.OTPandaAssignmentController==='function'&&typeof globalThis.OTPandaAssignmentTransport==='function'?new globalThis.OTPandaAssignmentController(globalThis.OTPandaAssignmentTransport({access:()=>Date.now()<expires?access:undefined,generation:()=>generation,fetchImpl:(...args)=>fetch(...args),credentials:{get:options=>globalThis.navigator.credentials.get(options)}})):null;
   const pending = location.hash;
   // Callback fragment is always removed before a promise, fetch or Flutter load.
   if (pending) history.replaceState(null, '', location.pathname + location.search);
@@ -58,6 +61,11 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
   })();
   Object.defineProperty(globalThis,'OTPandaSession',{value:Object.freeze({
     ready,
+    assignmentPrepare:async target=>{if(!assignment)throw Error('Assignment unavailable');return JSON.stringify(await assignment.prepare(JSON.parse(target)));},
+    assignmentConfirm:async()=>{if(!assignment)throw Error('Assignment unavailable');return assignment.confirm();},
+    assignmentReconcile:async()=>{if(!assignment)throw Error('Assignment unavailable');return assignment.reconcile();},
+    assignmentState:()=>assignment?.state??'unsupported',
+    assignmentDismiss:()=>assignment?.dismiss(),
     status:()=>status,
     access:()=>{if(access!==undefined&&Date.now()>=expires){clear();status='sign-in-required';}return access;},
     clear:()=>{clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
