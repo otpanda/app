@@ -1,0 +1,27 @@
+name: Native recovery source checks
+# Inactive source only. This job compiles and runs JVM tests. It is not device,
+# OS credential, Keystore, lifecycle, backup or signing-identity evidence, and it
+# wires nothing into the app host.
+on:
+  push:
+    paths:
+      - 'tool/android-recovery/**'
+      - '.github/workflows/native-recovery-check.yml'
+  pull_request:
+    paths:
+      - 'tool/android-recovery/**'
+      - '.github/workflows/native-recovery-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: bash tool/android-recovery/ci.sh
