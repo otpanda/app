@@ -10,9 +10,68 @@ import 'browser_session_contract.dart';
 import 'fictional_totp_dialog.dart';
 import 'public_service_catalog.dart';
 
-const ink = Color(0xff17332a), green = Color(0xff0a7955);
-const line = Color(0xffdfe8e2), pale = Color(0xffe7f8ee);
+const ink = Color(0xff12281f), green = Color(0xff0a7955);
+const line = Color(0xffe0e8e3), pale = Color(0xffe9f8f0);
+const muted = Color(0xff5d746a), surface = Color(0xfff4f7f5);
+
+/// Stable, readable avatar colours so each service keeps one look.
+Color avatarTint(String name) {
+  const tints = [
+    Color(0xffdff3e8),
+    Color(0xffe3ecfb),
+    Color(0xfffbe9dc),
+    Color(0xffefe5fa),
+    Color(0xfffaf0d2),
+    Color(0xffdcf1f3),
+  ];
+  var h = 0;
+  for (final c in name.codeUnits) {
+    h = (h * 31 + c) & 0x7fffffff;
+  }
+  return tints[h % tints.length];
+}
+
 void main() => runApp(const OTPandaApp());
+
+ThemeData otpandaTheme() => ThemeData(
+  navigationBarTheme: NavigationBarThemeData(
+    backgroundColor: Colors.white,
+    indicatorColor: pale,
+    surfaceTintColor: Colors.transparent,
+    labelTextStyle: WidgetStateProperty.all(
+      const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+    ),
+  ),
+  dialogTheme: DialogThemeData(
+    backgroundColor: Colors.white,
+    surfaceTintColor: Colors.transparent,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+  ),
+  filledButtonTheme: FilledButtonThemeData(
+    style: FilledButton.styleFrom(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ),
+  ),
+  outlinedButtonTheme: OutlinedButtonThemeData(
+    style: OutlinedButton.styleFrom(
+      side: const BorderSide(color: line),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ),
+  ),
+  useMaterial3: true,
+  scaffoldBackgroundColor: surface,
+  colorScheme: ColorScheme.fromSeed(seedColor: green),
+  textTheme: const TextTheme(bodyMedium: TextStyle(color: ink, fontSize: 13)),
+  cardTheme: const CardThemeData(
+    elevation: 0,
+    color: Colors.white,
+    margin: EdgeInsets.zero,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.all(Radius.circular(14)),
+      side: BorderSide(color: line),
+    ),
+  ),
+);
 
 class OTPandaApp extends StatelessWidget {
   const OTPandaApp({super.key});
@@ -20,26 +79,7 @@ class OTPandaApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
     title: 'OTPanda',
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      navigationBarTheme: NavigationBarThemeData(
-        labelTextStyle: WidgetStateProperty.all(const TextStyle(fontSize: 10)),
-      ),
-      useMaterial3: true,
-      scaffoldBackgroundColor: const Color(0xfff5f8f7),
-      colorScheme: ColorScheme.fromSeed(seedColor: green),
-      textTheme: const TextTheme(
-        bodyMedium: TextStyle(color: ink, fontSize: 13),
-      ),
-      cardTheme: const CardThemeData(
-        elevation: 0,
-        color: Colors.white,
-        margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(11)),
-          side: BorderSide(color: line),
-        ),
-      ),
-    ),
+    theme: otpandaTheme(),
     home: const AccountEntryRouter(),
   );
 }
@@ -59,30 +99,43 @@ class _AccountEntryRouterState extends State<AccountEntryRouter> {
     bridge: widget.bridge,
     loginEnabled: true,
     accountOnly: true,
+    workspaceEnabled: true,
   );
 }
 
 class ClientHome extends StatefulWidget {
   // Opt-in only for the local fixture catalog, never inferred from permissions.
   final bool fictionalCatalog;
-  const ClientHome({super.key, this.fictionalCatalog = false});
+  final int initialTab;
+  // Test/preview fixture: start with no entries or codes, never for real data.
+  final bool emptyFixture;
+  const ClientHome({
+    super.key,
+    this.fictionalCatalog = false,
+    this.initialTab = 0,
+    this.emptyFixture = false,
+  });
   @override
   State<ClientHome> createState() => _ClientHomeState();
 }
 
 class _ClientHomeState extends State<ClientHome> {
-  int tab = 0;
+  late int tab = widget.initialTab;
   String query = '';
   int entrySequence = 0;
   bool sourceRevoked = false;
   bool tokenRevoked = false;
-  final entries = [
-    const AccountEntry('north', 'Northstar', 'alex@example.test', true),
-    const AccountEntry('harbor', 'Harbor', 'team@example.test', false),
-    const AccountEntry('orchard', 'Orchard', 'alex-work', true),
-  ];
-  final codes = <String, String>{'north': '123456'};
-  bool unassigned = true;
+  late final entries = widget.emptyFixture
+      ? <AccountEntry>[]
+      : [
+          const AccountEntry('north', 'Northstar', 'alex@example.test', true),
+          const AccountEntry('harbor', 'Harbor', 'team@example.test', false),
+          const AccountEntry('orchard', 'Orchard', 'alex-work', true),
+        ];
+  late final codes = <String, String>{
+    if (!widget.emptyFixture) 'north': '123456',
+  };
+  late bool unassigned = !widget.emptyFixture;
   static const names = ['Codes', 'Sources', 'Access', 'Unassigned', 'Entries'];
   static const icons = [
     Icons.password,
@@ -356,7 +409,7 @@ class _ClientHomeState extends State<ClientHome> {
                   else
                     const Text(
                       'Shared, read-only. Only the owner can change this entry.',
-                      style: TextStyle(fontSize: 11, color: Color(0xff657e70)),
+                      style: TextStyle(fontSize: 12, color: muted),
                     ),
                 ],
               ),
@@ -397,19 +450,23 @@ class _ClientHomeState extends State<ClientHome> {
       children: [
         if (bounds.maxWidth >= 80) ...[
           Container(
-            width: 28,
-            height: 28,
+            width: 36,
+            height: 36,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: const Color(0xffedf5f0),
-              borderRadius: BorderRadius.circular(7),
+              color: avatarTint(e.service),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
-              e.service[0],
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              e.service.isEmpty ? '?' : e.service[0].toUpperCase(),
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+                color: ink,
+              ),
             ),
           ),
-          const SizedBox(width: 9),
+          const SizedBox(width: 11),
         ],
         Expanded(
           child: Column(
@@ -418,14 +475,14 @@ class _ClientHomeState extends State<ClientHome> {
               Text(
                 e.service,
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: FontWeight.w700,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
               Text(
                 e.account,
-                style: const TextStyle(fontSize: 11, color: Color(0xff657e70)),
+                style: const TextStyle(fontSize: 12, color: muted),
                 overflow: TextOverflow.ellipsis,
               ),
             ],
@@ -441,25 +498,27 @@ class _ClientHomeState extends State<ClientHome> {
       children: [
         Text(
           code == null ? '' : '${code.substring(0, 3)} ${code.substring(3)}',
-          style: const TextStyle(
+          style: TextStyle(
             fontFamily: 'monospace',
-            fontSize: 23,
+            fontSize: compact ? 22 : 26,
+            fontWeight: FontWeight.w600,
             color: ink,
-            letterSpacing: 1,
+            letterSpacing: compact ? 0.5 : 1.5,
           ),
         ),
-        IconButton(
+        const SizedBox(width: 4),
+        IconButton.filledTonal(
           tooltip: 'Copy fictional code',
           onPressed: code == null ? null : () => copy(code),
           icon: const Icon(Icons.copy_outlined, size: 18),
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+          constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
         ),
       ],
     );
     return Card(
-      color: code == null ? Colors.white : const Color(0xfff5fff8),
+      color: Colors.white,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -480,20 +539,25 @@ class _ClientHomeState extends State<ClientHome> {
                   padding: EdgeInsets.only(top: 12, bottom: 8),
                   child: Text(
                     'No active code',
-                    style: TextStyle(color: Color(0xff657e70), fontSize: 12),
+                    style: TextStyle(color: muted, fontSize: 13),
                   ),
                 ),
             ],
             Text(
               e.manage
-                  ? (code == null
-                        ? 'Source not connected'
-                        : 'Fictional received code')
+                  ? (code == null ? 'Source not connected' : 'Latest code')
                   : 'Shared · Read-only · Source hidden',
-              style: const TextStyle(fontSize: 10, color: Color(0xff657e70)),
+              style: const TextStyle(fontSize: 11, color: muted),
             ),
             if (widget.fictionalCatalog)
               TextButton(
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 32),
+                  foregroundColor: muted,
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
                 onPressed: () => previewGeneratedCode(e),
                 child: const Text('Preview fictional generated code'),
               ),
@@ -507,11 +571,9 @@ class _ClientHomeState extends State<ClientHome> {
     List<AccountEntry> list,
     double width,
     bool compact, {
-    bool received = false,
+    Widget? extra,
   }) {
-    final columns = received && width >= 520
-        ? 2
-        : width >= 850
+    final columns = width >= 850
         ? 3
         : width >= 520
         ? 2
@@ -520,14 +582,20 @@ class _ClientHomeState extends State<ClientHome> {
     return Wrap(
       spacing: 11,
       runSpacing: 11,
-      children: list
-          .map((e) => SizedBox(width: itemWidth, child: card(e, compact)))
-          .toList(),
+      children:
+          list
+              .map<Widget>(
+                (e) => SizedBox(width: itemWidth, child: card(e, compact)),
+              )
+              .toList()
+            ..addAll([
+              if (extra != null) SizedBox(width: itemWidth, child: extra),
+            ]),
     );
   }
 
-  Widget unassignedCard() => Container(
-    margin: const EdgeInsets.only(top: 12),
+  Widget unassignedCard({bool spaced = true}) => Container(
+    margin: EdgeInsets.only(top: spaced ? 12 : 0),
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
       color: const Color(0xfff2fcf6),
@@ -581,12 +649,28 @@ class _ClientHomeState extends State<ClientHome> {
           30,
         ),
         children: [
+          if (!desktop)
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Chip(
+                key: ValueKey('sample-chip'),
+                label: Text('Temporary demo data'),
+                visualDensity: VisualDensity.compact,
+                backgroundColor: Color(0xfffff3d6),
+                side: BorderSide.none,
+                labelStyle: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xff7a5a12),
+                ),
+              ),
+            ),
           Text(
             tab == 0 ? 'Your codes' : names[tab],
             style: const TextStyle(
               fontWeight: FontWeight.w700,
-              fontSize: 26,
-              letterSpacing: -1,
+              fontSize: 28,
+              letterSpacing: -0.8,
               color: ink,
             ),
           ),
@@ -599,7 +683,7 @@ class _ClientHomeState extends State<ClientHome> {
               'Private incoming codes awaiting assignment.',
               'All your configured entries.',
             ][tab],
-            style: const TextStyle(color: Color(0xff657e70), fontSize: 12),
+            style: const TextStyle(color: muted, fontSize: 13),
           ),
           const SizedBox(height: 18),
           if (tab == 0 || tab == 4) ...[
@@ -607,12 +691,13 @@ class _ClientHomeState extends State<ClientHome> {
               key: ValueKey(tab),
               decoration: const InputDecoration(
                 hintText: 'Search services or accounts',
-                prefixIcon: Icon(Icons.search, size: 19),
+                prefixIcon: Icon(Icons.search, size: 20),
+                contentPadding: EdgeInsets.symmetric(vertical: 14),
                 filled: true,
                 fillColor: Colors.white,
                 isDense: true,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(9)),
+                  borderRadius: BorderRadius.all(Radius.circular(12)),
                   borderSide: BorderSide(color: line),
                 ),
               ),
@@ -621,13 +706,54 @@ class _ClientHomeState extends State<ClientHome> {
             const SizedBox(height: 15),
           ],
           if (tab == 0) ...[
+            if (received.isEmpty && !unassigned && rest.isEmpty)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(22),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        query.isEmpty ? 'No codes yet' : 'No matches',
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        query.isEmpty
+                            ? 'Add a source and your codes show up here the moment they arrive.'
+                            : 'Nothing matches your search.',
+                      ),
+                      if (query.isEmpty) ...[
+                        const SizedBox(height: 14),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            FilledButton(
+                              onPressed: () => navigate(1),
+                              child: const Text('Add a source'),
+                            ),
+                            OutlinedButton(
+                              onPressed: () => navigate(4),
+                              child: const Text('Add an entry'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
             if (received.isNotEmpty || unassigned)
               Container(
                 padding: const EdgeInsets.all(11),
                 decoration: BoxDecoration(
                   color: pale,
-                  border: Border.all(color: const Color(0xffafe4c9)),
-                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xffb7e6cd)),
+                  borderRadius: BorderRadius.circular(18),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -648,18 +774,11 @@ class _ClientHomeState extends State<ClientHome> {
                         received,
                         inner.maxWidth,
                         !desktop,
-                        received: true,
+                        extra: unassigned
+                            ? unassignedCard(spaced: false)
+                            : null,
                       ),
                     ),
-                    if (unassigned)
-                      LayoutBuilder(
-                        builder: (context, inner) => SizedBox(
-                          width: inner.maxWidth >= 520
-                              ? (inner.maxWidth - 11) / 2
-                              : inner.maxWidth,
-                          child: unassignedCard(),
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -688,8 +807,8 @@ class _ClientHomeState extends State<ClientHome> {
             ),
           const SizedBox(height: 24),
           const Text(
-            'Fictional data only. No sign-in, real sources or account changes. Resets when restarted. Platform login, secure storage and management parity are still being implemented.',
-            style: TextStyle(fontSize: 11, color: Color(0xff657e70)),
+            'Temporary demo data. Changes here are not saved and reset when you restart.',
+            style: TextStyle(fontSize: 12, color: muted),
           ),
         ],
       );
@@ -703,19 +822,6 @@ class _ClientHomeState extends State<ClientHome> {
         body: SafeArea(
           child: Column(
             children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  vertical: 7,
-                  horizontal: 12,
-                ),
-                color: const Color(0xfffff6df),
-                child: const Text(
-                  'DEVELOPMENT PREVIEW · Fictional workspace accounts and codes',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 10, color: Color(0xff7a6029)),
-                ),
-              ),
               Container(
                 height: desktop ? 76 : 64,
                 decoration: const BoxDecoration(
@@ -741,6 +847,28 @@ class _ClientHomeState extends State<ClientHome> {
                       ),
                     ),
                     const Spacer(),
+                    if (desktop) ...[
+                      Container(
+                        key: const ValueKey('sample-chip'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xfffff3d6),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          'Temporary demo data',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xff7a5a12),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (desktop) const SizedBox(width: 6),
                     IconButton(
                       tooltip: 'Account & security',
                       onPressed: () => Navigator.of(context).push(
@@ -751,18 +879,8 @@ class _ClientHomeState extends State<ClientHome> {
                           ),
                         ),
                       ),
-                      icon: const Icon(Icons.person_outline),
+                      icon: const Icon(Icons.account_circle_outlined, size: 26),
                     ),
-                    if (desktop)
-                      const Text(
-                        'YOUR PRIVATE CODE SPACE',
-                        style: TextStyle(
-                          fontSize: 10,
-                          letterSpacing: 1.4,
-                          color: Color(0xff657e70),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -777,7 +895,7 @@ class _ClientHomeState extends State<ClientHome> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 SizedBox(
-                                  width: 210,
+                                  width: 232,
                                   child: Padding(
                                     padding: const EdgeInsets.only(
                                       top: 22,
@@ -797,19 +915,19 @@ class _ClientHomeState extends State<ClientHome> {
                                                 ),
                                             minLeadingWidth: 18,
                                             horizontalTitleGap: 10,
-                                            dense: true,
+                                            dense: false,
                                             shape: RoundedRectangleBorder(
                                               borderRadius:
                                                   BorderRadius.circular(9),
                                             ),
                                             selected: tab == i,
-                                            selectedTileColor: green,
-                                            selectedColor: Colors.white,
+                                            selectedTileColor: pale,
+                                            selectedColor: green,
                                             leading: Icon(icons[i], size: 18),
                                             title: Text(
                                               names[i],
                                               style: const TextStyle(
-                                                fontSize: 12,
+                                                fontSize: 14,
                                                 fontWeight: FontWeight.w600,
                                               ),
                                             ),
@@ -835,7 +953,7 @@ class _ClientHomeState extends State<ClientHome> {
         bottomNavigationBar: desktop
             ? null
             : NavigationBar(
-                height: 68,
+                height: 72,
                 selectedIndex: tab,
                 onDestinationSelected: navigate,
                 labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
