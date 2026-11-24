@@ -49,7 +49,7 @@ class SourcePreview extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       const Text(
-        'Source setup is not connected. No mailbox or phone is being read. SMS collection will be a separate opt-in.',
+        'Phones and mailboxes that send codes to your account. SMS collection is always opt-in.',
       ),
       const SizedBox(height: 14),
       Card(
@@ -59,14 +59,10 @@ class SourcePreview extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Fictional phone',
+                'Pixel phone',
                 style: TextStyle(fontWeight: FontWeight.w700),
               ),
-              Text(
-                revoked
-                    ? 'SMS · Revoked in this demo'
-                    : 'SMS · Fictional active source',
-              ),
+              Text(revoked ? 'SMS · Revoked in this demo' : 'SMS · Active'),
               if (!revoked)
                 Align(
                   alignment: Alignment.centerLeft,
