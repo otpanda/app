@@ -622,6 +622,18 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     title: const Text('Passkeys'),
                     subtitle: Text('${overview!['passkeys']} registered'),
                   ),
+                  if ((overview!['passkeys'] as int) > 0 &&
+                      bridge is AdditionalPasskeyBridge)
+                    FilledButton(
+                      onPressed: busy
+                          ? null
+                          : () => run(() async {
+                              await (bridge as AdditionalPasskeyBridge)
+                                  .addPasskey();
+                              await loadAccount(revision);
+                            }),
+                      child: const Text('Add another passkey'),
+                    ),
                   if (overview!['passkeys'] == 0 &&
                       bridge is FirstPasskeyBridge &&
                       (bridge as FirstPasskeyBridge).firstPasskeyAvailable)
@@ -712,7 +724,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text('New-device sign-in request'),
-                                Text('Request: ${raw['pendingId']}'),
+                                Text(
+                                  'Match code: ${(raw['pendingId'] as String).substring(0, (raw['pendingId'] as String).length < 6 ? (raw['pendingId'] as String).length : 6).toUpperCase()}',
+                                ),
                                 Text(
                                   'Requested at ${DateTime.fromMillisecondsSinceEpoch(raw['createdAt'] as int).toLocal()}',
                                 ),
