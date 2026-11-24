@@ -7,6 +7,8 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const OTPandaApp());
+    await tester.tap(find.text('Temporary demo'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Sources'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Revoke source'));
