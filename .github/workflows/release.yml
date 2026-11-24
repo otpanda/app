@@ -94,34 +94,11 @@ jobs:
             if [ -z "${!v:-}" ]; then echo "::error::Release signing secret $v is not set."; exit 1; fi
           done
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          {
-            echo "storeFile=$RUNNER_TEMP/release.jks"
-            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
-            echo "keyAlias=$ANDROID_KEY_ALIAS"
-            echo "keyPassword=$ANDROID_KEY_PASSWORD"
-          } > android/key.properties
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('android/app/build.gradle.kts')
-          s = p.read_text()
-          block = (
-              '    signingConfigs {\n'
-              '        create("release") {\n'
-              '            val props = Properties()\n'
-              '            props.load(FileInputStream(rootProject.file("key.properties")))\n'
-              '            storeFile = file(props.getProperty("storeFile"))\n'
-              '            storePassword = props.getProperty("storePassword")\n'
-              '            keyAlias = props.getProperty("keyAlias")\n'
-              '            keyPassword = props.getProperty("keyPassword")\n'
-              '        }\n'
-              '    }\n'
-          )
-          assert 'buildTypes {' in s and 'release {' in s, 'unexpected Gradle template'
-          s = s.replace('    buildTypes {', block + '    buildTypes {', 1)
-          s = s.replace('        release {\n', '        release {\n            signingConfig = signingConfigs.getByName("release")\n', 1)
-          s = 'import java.io.FileInputStream\nimport java.util.Properties\n\n' + s
-          p.write_text(s)
-          PY
+          RELEASE_STORE_FILE="$RUNNER_TEMP/release.jks" \
+          RELEASE_STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD" \
+          RELEASE_KEY_ALIAS="$ANDROID_KEY_ALIAS" \
+          RELEASE_KEY_PASSWORD="$ANDROID_KEY_PASSWORD" \
+          python3 .github/scripts/android-release-signing.py
       - name: Build, verify signature and name APK
         shell: bash
         run: |
