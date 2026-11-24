@@ -161,25 +161,30 @@ class _AuthEntryState extends State<AuthEntry> {
                         ),
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    shape: const StadiumBorder(),
-                    side: const BorderSide(color: Color(0xff747775)),
+                for (final (label, icon, onTap) in [
+                  (
+                    'Sign in with a passkey',
+                    Icons.key_outlined,
+                    () => widget.run(() => widget.bridge.start('login')),
                   ),
-                  onPressed: widget.busy
-                      ? null
-                      : () => widget.run(() => widget.bridge.start('login')),
-                  icon: const Icon(Icons.key_outlined, size: 20),
-                  label: const Text('Use a passkey'),
-                ),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: widget.busy
-                      ? null
-                      : () => setState(() => emailOpen = true),
-                  child: const Text('Create an account without Google'),
-                ),
+                  (
+                    'Create account with a passkey',
+                    Icons.person_add_alt_1_outlined,
+                    () => setState(() => emailOpen = true),
+                  ),
+                ]) ...[
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      shape: const StadiumBorder(),
+                      side: const BorderSide(color: Color(0xff747775)),
+                    ),
+                    onPressed: widget.busy ? null : onTap,
+                    icon: Icon(icon, size: 20),
+                    label: Text(label),
+                  ),
+                  const SizedBox(height: 12),
+                ],
               ] else ...[
                 TextField(
                   controller: email,
