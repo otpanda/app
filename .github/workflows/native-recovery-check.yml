@@ -6,10 +6,12 @@ on:
   push:
     paths:
       - 'tool/android-recovery/**'
+      - 'tool/offline-totp/**'
       - '.github/workflows/native-recovery-check.yml'
   pull_request:
     paths:
       - 'tool/android-recovery/**'
+      - 'tool/offline-totp/**'
       - '.github/workflows/native-recovery-check.yml'
   workflow_dispatch:
 permissions:
