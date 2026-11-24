@@ -6,7 +6,6 @@ import 'branding.dart';
 import 'source_preview.dart';
 import 'access_preview.dart';
 import 'browser_account_page.dart';
-import 'browser_session.dart';
 import 'browser_session_contract.dart';
 import 'fictional_totp_dialog.dart';
 import 'public_service_catalog.dart';
@@ -55,38 +54,12 @@ class AccountEntryRouter extends StatefulWidget {
 }
 
 class _AccountEntryRouterState extends State<AccountEntryRouter> {
-  late final BrowserSessionBridge bridge;
   @override
-  void initState() {
-    super.initState();
-    bridge = widget.bridge ?? createBrowserSession();
-    resume();
-  }
-
-  Future<void> resume() async {
-    try {
-      await bridge.ready;
-    } catch (_) {
-      return;
-    }
-    if (!mounted || ['idle', 'unsupported'].contains(bridge.status)) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => BrowserAccountPage(
-            bridge: bridge,
-            loginEnabled: true,
-            accountOnly: true,
-          ),
-        ),
-      );
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) =>
-      const ClientHome(fictionalCatalog: true);
+  Widget build(BuildContext context) => BrowserAccountPage(
+    bridge: widget.bridge,
+    loginEnabled: true,
+    accountOnly: true,
+  );
 }
 
 class ClientHome extends StatefulWidget {
