@@ -80,6 +80,8 @@ void main() {
     (t) async {
       await t.runAsync(() => PublicServiceCatalog.bundled());
       await t.pumpWidget(const OTPandaApp());
+      await t.tap(find.text('Temporary demo'));
+      await t.pumpAndSettle();
       await t.tap(find.text('Entries'));
       await t.pumpAndSettle();
       await t.tap(find.text('Add entry'));
@@ -107,6 +109,8 @@ void main() {
     (t) async {
       await t.runAsync(() => PublicServiceCatalog.bundled());
       await t.pumpWidget(const OTPandaApp());
+      await t.tap(find.text('Temporary demo'));
+      await t.pumpAndSettle();
       await t.tap(find.text('Entries'));
       await t.pumpAndSettle();
       await t.tap(find.text('Add entry'));
@@ -136,6 +140,8 @@ void main() {
     (t) async {
       await t.runAsync(() => PublicServiceCatalog.bundled());
       await t.pumpWidget(const OTPandaApp());
+      await t.tap(find.text('Temporary demo'));
+      await t.pumpAndSettle();
       await t.tap(find.text('Entries'));
       await t.pumpAndSettle();
       final dynamic state = t.state(find.byType(ClientHome));
