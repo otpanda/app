@@ -8,7 +8,14 @@ import 'package:otpanda_client/browser_account_page.dart';
 import 'package:otpanda_client/browser_session_contract.dart';
 import 'package:otpanda_client/session_contract.dart';
 
-class Bridge implements BrowserSessionBridge {
+class Bridge implements BrowserSessionBridge, SessionViewBridge {
+  @override
+  int restoredView = 0;
+  @override
+  void setView(int view) {
+    restoredView = view;
+  }
+
   @override
   String status = 'idle';
   int reads = 0, prompts = 0, logouts = 0;
@@ -104,6 +111,31 @@ class Bridge implements BrowserSessionBridge {
 }
 
 void main() {
+  testWidgets('account restore opens account without storing account content', (
+    t,
+  ) async {
+    final bridge = Bridge()
+      ..status = 'restored'
+      ..restoredView = 4;
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: bridge,
+          accountOnly: true,
+          workspaceEnabled: true,
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(find.text('Your account'), findsWidgets);
+    await t.tap(find.byTooltip('Back to codes'));
+    await t.pumpAndSettle();
+    expect(bridge.restoredView, 0);
+    expect(find.text('Your codes'), findsOneWidget);
+    await t.pumpWidget(const SizedBox.shrink());
+    expect(t.takeException(), isNull);
+  });
+
   testWidgets('account-only accepts server session with lagging client clock', (
     t,
   ) async {
@@ -419,50 +451,54 @@ void main() {
       expect(t.takeException(), isNull);
     },
   );
-  testWidgets('background, local clear and signout remove private code', (
-    t,
-  ) async {
-    await t.binding.setSurfaceSize(const Size(800, 1100));
-    addTearDown(() => t.binding.setSurfaceSize(null));
-    for (final action in ['background', 'clear', 'signout']) {
-      final b = privateBridge(100000);
-      await t.pumpWidget(
-        MaterialApp(
-          home: BrowserAccountPage(
-            key: UniqueKey(),
-            bridge: b,
-            clock: () => 100000,
-            loginEnabled: true,
-          ),
-        ),
-      );
-      await t.pumpAndSettle();
-      expect(find.text('654321'), findsOneWidget);
-      if (action == 'background') {
-        t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-        await t.pump();
-        t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      } else {
-        await t.ensureVisible(
-          find.text(
-            action == 'clear'
-                ? 'Clear local access'
-                : 'Sign out of this browser',
+  testWidgets(
+    'focus retains valid codes; local clear and signout remove them',
+    (t) async {
+      await t.binding.setSurfaceSize(const Size(800, 1100));
+      addTearDown(() => t.binding.setSurfaceSize(null));
+      for (final action in ['background', 'clear', 'signout']) {
+        final b = privateBridge(100000);
+        await t.pumpWidget(
+          MaterialApp(
+            home: BrowserAccountPage(
+              key: UniqueKey(),
+              bridge: b,
+              clock: () => 100000,
+              loginEnabled: true,
+            ),
           ),
         );
         await t.pumpAndSettle();
-        await t.tap(
-          find.text(
-            action == 'clear'
-                ? 'Clear local access'
-                : 'Sign out of this browser',
-          ),
+        expect(find.text('654321'), findsOneWidget);
+        if (action == 'background') {
+          t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+          await t.pump();
+          t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        } else {
+          await t.ensureVisible(
+            find.text(
+              action == 'clear'
+                  ? 'Clear local access'
+                  : 'Sign out of this browser',
+            ),
+          );
+          await t.pumpAndSettle();
+          await t.tap(
+            find.text(
+              action == 'clear'
+                  ? 'Clear local access'
+                  : 'Sign out of this browser',
+            ),
+          );
+        }
+        await t.pumpAndSettle();
+        expect(
+          find.text('654321'),
+          action == 'background' ? findsOneWidget : findsNothing,
         );
       }
-      await t.pumpAndSettle();
-      expect(find.text('654321'), findsNothing);
-    }
-  });
+    },
+  );
   testWidgets('copy rechecks expiry before clipboard write', (t) async {
     var clock = 100000;
     var copies = 0;
