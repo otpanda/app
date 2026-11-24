@@ -27,12 +27,14 @@ class BrowserAccountPage extends StatefulWidget {
   final BrowserSessionBridge? bridge;
   final bool loginEnabled;
   final bool assignmentEnabled;
+  final bool accountOnly;
   final int Function()? clock;
   const BrowserAccountPage({
     super.key,
     this.bridge,
     this.loginEnabled = false,
     this.assignmentEnabled = false,
+    this.accountOnly = false,
     this.clock,
   });
   @override
@@ -46,6 +48,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   bool busy = true;
   String status = 'loading', message = '';
   int revision = 0;
+  int? accountExpiresAt;
   final organization = OrganizationStore();
   bool organizationReady = false, organizationBusy = false;
   int organizationEpoch = 0, organizationSnapshot = 0, organizationRequest = 0;
@@ -59,7 +62,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     store = CodeStore(_ReadTransport(bridge));
     expiryTick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && status == 'restored') {
-        if (store.sessionExpired(now())) {
+        if ((widget.accountOnly &&
+                accountExpiresAt != null &&
+                now() >= accountExpiresAt!) ||
+            store.sessionExpired(now())) {
           clearOrganization();
           store.clear();
           status = 'sign-in-required';
@@ -98,8 +104,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       if (!mounted || attempt != revision) return;
       status = bridge.status;
       if (status == 'restored' && loadAfter) {
-        await store.load(now, includePrivateInbox: true);
-        await loadOrganization();
+        await loadAccount(attempt);
       } else if (status == 'sign-in-required') {
         message =
             'Sign-in did not finish. Start again when sign-in is available.';
@@ -117,10 +122,40 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
 
   Future<void> refresh() => run(() async {
     clearOrganization();
-    await store.load(now, includePrivateInbox: true);
-    if (bridge.status == 'restored') await loadOrganization();
+    await loadAccount(revision);
   }, loadAfter: false);
+  Future<void> loadAccount(int attempt) async {
+    if (!widget.accountOnly) {
+      await store.load(now, includePrivateInbox: true);
+      if (mounted && attempt == revision && bridge.status == 'restored') {
+        await loadOrganization();
+      }
+      return;
+    }
+    accountExpiresAt = null;
+    final response = await bridge.read('/v1/manage/session');
+    if (!mounted || attempt != revision) return;
+    if (response.status == 401) {
+      bridge.clear();
+      status = 'sign-in-required';
+      return;
+    }
+    if (response.status != 200) throw const ClientFailure();
+    final value = jsonDecode(response.body);
+    if (value is! Map<String, dynamic> ||
+        value.keys.length != 2 ||
+        value['ownerId'] is! String ||
+        (value['ownerId'] as String).isEmpty ||
+        (value['ownerId'] as String).length > 256 ||
+        value['expiresAt'] is! int ||
+        (value['expiresAt'] as int) <= now()) {
+      throw const FormatException('Invalid session metadata');
+    }
+    accountExpiresAt = value['expiresAt'] as int;
+  }
+
   void clearOrganization() {
+    accountExpiresAt = null;
     organizationEpoch++;
     organizationRequest++;
     organization.clear();
@@ -200,6 +235,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
+      if (widget.accountOnly) {
+        revision++;
+        busy = false;
+      }
       clearOrganization();
       store.clear();
       if (mounted) setState(() {});
@@ -362,8 +401,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 12),
-              const Text(
-                'This is separate from the fictional development preview. Real authentication is not enabled in the current deployment.',
+              Text(
+                !widget.loginEnabled
+                    ? 'This is separate from the fictional development preview. Real authentication is not enabled in the current deployment.'
+                    : widget.accountOnly
+                    ? 'Account access only. Sources, real codes, sharing and account recovery are not available in this stage.'
+                    : 'This is separate from the fictional development preview.',
               ),
               const SizedBox(height: 20),
               Text(
@@ -429,7 +472,19 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     'Sign-in will be available after the complete flow is enabled and checked.',
                   ),
               ],
-              if (status == 'restored') ...[
+              if (status == 'restored' && widget.accountOnly) ...[
+                Text(
+                  accountExpiresAt == null
+                      ? 'Session could not be verified. Retry the session check.'
+                      : 'Account session verified. Sources and codes are unavailable in this stage.',
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: busy ? null : refresh,
+                  child: const Text('Check account session'),
+                ),
+              ],
+              if (status == 'restored' && !widget.accountOnly) ...[
                 if (store.visibleUnassigned(now()).isNotEmpty) ...[
                   const Text(
                     'Fresh private unassigned codes',
@@ -515,25 +570,28 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     ),
               ],
               if (status != 'unsupported' && widget.loginEnabled)
-                OutlinedButton(
-                  onPressed: busy
-                      ? null
-                      : () {
-                          revision++;
-                          clearOrganization();
-                          store.clear();
-                          try {
-                            bridge.logout();
-                            message = 'Confirm signout on the API page. Until then the saved browser session is not revoked.';
-                          } catch (_) {
-                            message = 'Could not open signout. Local access is cleared but the saved browser session is not revoked.';
-                          }
-                          setState(() {
-                            status = bridge.status;
-                            busy = false;
-                          });
-                        },
-                  child: const Text('Sign out of this browser'),
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: OutlinedButton(
+                    onPressed: busy
+                        ? null
+                        : () {
+                            revision++;
+                            clearOrganization();
+                            store.clear();
+                            try {
+                              bridge.logout();
+                              message = 'Confirm signout on the API page. Until then the saved browser session is not revoked.';
+                            } catch (_) {
+                              message = 'Could not open signout. Local access is cleared but the saved browser session is not revoked.';
+                            }
+                            setState(() {
+                              status = bridge.status;
+                              busy = false;
+                            });
+                          },
+                    child: const Text('Sign out of this browser'),
+                  ),
                 ),
               if (status != 'unsupported')
                 TextButton(
