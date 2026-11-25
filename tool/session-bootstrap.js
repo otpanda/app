@@ -67,6 +67,7 @@
   // approve page, which shows its own explicit Continue. A malformed intent is dropped.
   const NATIVE_KEY='otpanda.native.intent.v1',nativeLaunch=!routeHash&&location.hash.startsWith('#native=');
   if(nativeLaunch){
+    try{sessionStorage.removeItem('otpanda.extension.intent.v1');}catch{}
     const intent=location.origin+location.pathname===REDIRECT&&!location.search?globalThis.OTPandaNativeIntent?.parseNativeIntent(location.hash):null;
     try{if(intent)sessionStorage.setItem(NATIVE_KEY,JSON.stringify({challenge:intent.challenge,state:intent.state,...(intent.provider?{provider:intent.provider}:{}),...(intent.remember!==undefined?{remember:intent.remember}:{}),created:Date.now()}));else sessionStorage.removeItem(NATIVE_KEY);}catch{}
   }
@@ -104,6 +105,7 @@
   // (10 minutes). Nothing happens until the signed-in user clicks Connect: only that click calls begin.
   const EXT_KEY='otpanda.extension.intent.v1',extensionLaunch=!routeHash&&location.hash.startsWith('#extension=');
   if(extensionLaunch){
+    try{sessionStorage.removeItem(NATIVE_KEY);}catch{}
     const intent=location.origin+location.pathname===REDIRECT&&!location.search?globalThis.OTPandaExtensionIntent?.parseExtensionIntent(location.hash):null;
     try{if(intent)sessionStorage.setItem(EXT_KEY,JSON.stringify({challenge:intent.challenge,state:intent.state,redirect:intent.redirect,created:Date.now()}));else sessionStorage.removeItem(EXT_KEY);}catch{}
   }
@@ -115,6 +117,7 @@
     return lib.parseExtensionIntent('#extension=1&challenge='+m.challenge+'&state='+m.state+'&redirect='+m.redirect);
   };
   const dropExtIntent=()=>{try{sessionStorage.removeItem(EXT_KEY);}catch{}};
+  const dropHandoffIntents=()=>{dropExtIntent();try{sessionStorage.removeItem(NATIVE_KEY);}catch{}};
   const pending = (routeHash||nativeLaunch||extensionLaunch)?'':location.hash;
   if(pending||nativeLaunch||extensionLaunch) history.replaceState(null, '', location.pathname + location.search);
   let saved;
@@ -252,7 +255,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     return value&&Number.isSafeInteger(value.serverTime)&&value.serverTime>=0&&['firstPartyExpiresAt,handleId,lineageId,serverTime','handleId,lineageId,serverTime'].includes(Object.keys(value).sort().join(','))&&/^[A-Za-z0-9_-]{8,64}$/.test(value.lineageId)&&/^[A-Za-z0-9_-]{8,64}$/.test(value.handleId)&&token.slice(6,18)===value.handleId&&(value.firstPartyExpiresAt===undefined||(Number.isSafeInteger(value.firstPartyExpiresAt)&&(tabKey?value.firstPartyExpiresAt>0:value.firstPartyExpiresAt>now)&&value.firstPartyExpiresAt<=now+30*86400000));
   }
   async function restoreAfterUnauthorized() {
-    clear();status='session-paused';
+    dropHandoffIntents();clear();status='session-paused';
     // Persist only a cooldown timestamp across the first-party redirect, never access.
     try {
       const previous=Number(sessionStorage.getItem(READ_RESTORE_KEY));
@@ -405,7 +408,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       let r;try{r=await fetch(API+'/auth/extension/begin',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({challenge:intent.challenge,confirm:true,redirect:intent.redirect,state:intent.state})});}catch{return 'unavailable';}
       let v;try{v=JSON.parse(await readBounded(r,4096));}catch{return 'unavailable';}
       if(attempt!==generation)return 'unavailable';
-      if(!r.ok){if(r.status===409){dropExtIntent();return 'restart';}return r.status===429?'retry':r.status===401||r.status===403?'signin':'unavailable';}
+      if(!r.ok){if([401,403,409].includes(r.status)){dropHandoffIntents();return r.status===409?'restart':'signin';}return r.status===429?'retry':r.status===401||r.status===403?'signin':'unavailable';}
       const target=globalThis.OTPandaExtensionIntent.validReturn(v?.redirect,intent.state,intent.redirect);
       if(!target){dropExtIntent();return 'unavailable';}
       dropExtIntent();location.assign(target);return '';
@@ -417,8 +420,8 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const u=new URL(API+'/auth/signup/app');u.search=new URLSearchParams({challenge,state,redirect_uri:REDIRECT});u.hash=new URLSearchParams({action:proof?'begin':'email',email,...(proof?{email_token:proof}:{})});location.assign(u.href);
     },
     access:()=>{if(access!==undefined&&serverNow()>=expires){status='session-paused';return undefined;}return access;},
-    clear:()=>{showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
-    logout:()=>{showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}location.assign(API+'/auth/device/logout');},
+    clear:()=>{dropHandoffIntents();showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
+    logout:()=>{dropHandoffIntents();showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}location.assign(API+'/auth/device/logout');},
     read:async path=>{
       if(!['/v1/manage/account','/v1/manage/session','/v1/manage/session?view=cache-v1','/v1/manage/entries','/v1/manage/active-codes','/v1/manage/sources','/v1/manage/unassigned'].includes(path))throw Error('Read path required');
       if(!await maintainSession(true))return {status:access||status==='restoring'||status==='session-paused'?503:401,body:'{}'};

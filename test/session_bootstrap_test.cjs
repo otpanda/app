@@ -649,7 +649,7 @@ test('extensionConnect refuses unsafe returns and maps failures; cancel and expi
   for(const [st,reason] of Object.entries(codes)){
     const {e}=await xRestored(async()=>({ok:false,status:Number(st),text:async()=>'{}'}));
     assert.equal(await e.context.OTPandaSession.extensionConnect(),reason);assert.equal(e.context.location.assigned,undefined);
-    assert.equal(e.context.OTPandaSession.extensionIntent(),st==='409'?'':'chrome','retry keeps the intent except after restart');
+    assert.equal(e.context.OTPandaSession.extensionIntent(),['409','401','403'].includes(st)?'':'chrome','retry keeps the intent except after restart');
   }
   const {e:c}=await xRestored(async()=>assert.fail('no call'));c.context.OTPandaSession.extensionCancel();assert.equal(c.context.OTPandaSession.extensionIntent(),'');assert.equal(await c.context.OTPandaSession.extensionConnect(),'expired');
   const sv=new Map([[XKEY,JSON.stringify({challenge:NC,state:NS,redirect:'chrome',created:NOW-600001})]]);const x=env({sessionValues:sv,lib:true});await x.context.OTPandaSession.ready;assert.equal(x.context.OTPandaSession.extensionIntent(),'');
@@ -657,3 +657,6 @@ test('extensionConnect refuses unsafe returns and maps failures; cancel and expi
 test('a normal sign-in callback with no extension intent never calls begin',async()=>{
   const {e,seen}=await xRestored(async()=>assert.fail('no call'),new Map());e.context.OTPandaSession.extensionCancel();assert.equal(seen.length,0);assert.equal(e.context.location.assigned,undefined);
 });
+
+test('logout and explicit clear remove both pending handoff intents',async()=>{for(const action of ['logout','clear']){const sv=new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,created:NOW})],[XKEY,JSON.stringify({challenge:NC,state:NS,redirect:'chrome',created:NOW})]]);const e=env({sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;e.context.OTPandaSession[action]();assert.equal(sv.has(NKEY),false);assert.equal(sv.has(XKEY),false);}});
+test('a new native or extension launch clears the opposite old tab intent',async()=>{for(const [hash,old] of [[launchHash,XKEY],[XHASH,NKEY]]){const sv=new Map([[old,'stale']]);const e=env({hash,sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;assert.equal(sv.has(old),false);}});
