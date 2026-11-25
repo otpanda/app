@@ -1,2 +1,2 @@
-/// Native clients have no page to reload; the shell refreshes its own data.
+/// Native hosts have no document reload or pull gesture. Updates are automatic.
 const Future<void> Function()? pageReload = null;

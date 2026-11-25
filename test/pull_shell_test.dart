@@ -1,4 +1,5 @@
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:otpanda_client/main.dart';
@@ -54,18 +55,19 @@ Future<void> pullDown(WidgetTester t) async {
 }
 
 void main() {
-  testWidgets('native: pull refreshes data in place once the gate opens', (
-    t,
-  ) async {
-    final (tr, now, set) = await setup(t);
-    final before = tr.calls;
-    await pullDown(t); // inside the 15s gate: nothing
-    expect(tr.calls, before);
-    set(now() + 15000);
-    await pullDown(t);
-    expect(tr.calls, greaterThan(before));
-    expect(find.text('Your codes'), findsOneWidget);
-  });
+  for (final platform in TargetPlatform.values) {
+    testWidgets('native $platform has no pull indicator or refetch', (t) async {
+      debugDefaultTargetPlatformOverride = platform;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final (tr, now, set) = await setup(t);
+      final before = tr.calls;
+      expect(find.byType(RefreshIndicator), findsNothing);
+      await pullDown(t);
+      set(now() + 15000);
+      await pullDown(t);
+      expect(tr.calls, before);
+    });
+  }
 
   testWidgets('web: pull reloads the page right away, never refetches data', (
     t,

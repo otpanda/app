@@ -1,6 +1,13 @@
 import 'package:material_ui/material_ui.dart';
 
 import 'recovery_contract.dart';
+import 'settings_hub.dart' show RedactedText, StableText;
+
+const _emailCopy = [
+  'On. If you lose every passkey and device, you can regain access with only your email after a 7-day wait.',
+  'Turn off extra verification on new devices first. The two cannot be on together, and neither changes the other.',
+  'Off. Turn on only if you could lose every passkey and device. A 7-day wait always applies.',
+];
 
 String recoveryDate(int ms) {
   final d = DateTime.fromMillisecondsSinceEpoch(ms).toLocal();
@@ -250,11 +257,12 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
                 ? 'Not used yet'
                 : 'Last used ${recoveryDate(p.lastUsedAt!)}',
           ),
-          trailing: TextButton(
+          trailing: IconButton(
+            tooltip: 'Remove passkey',
+            icon: const Icon(Icons.delete_outline),
             onPressed: busy || s.passkeys.length < 2
                 ? null
                 : () => removePasskey(p),
-            child: const Text('Remove'),
           ),
         ),
       Text(
@@ -285,9 +293,10 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
           ),
           trailing: d.current
               ? null
-              : TextButton(
+              : IconButton(
+                  tooltip: 'Sign out this device',
+                  icon: const Icon(Icons.logout),
                   onPressed: busy ? null : () => signOutDevice(d),
-                  child: const Text('Sign out'),
                 ),
         ),
     ];
@@ -295,12 +304,17 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
         title: const Text('Email-only recovery'),
-        subtitle: Text(
-          s.escapeEnabled
+        subtitle: StableText(
+          shown: s.escapeEnabled
               ? 'On. If you lose every passkey and device, you can regain access with only your email after a ${s.delayDays}-day wait.'
               : s.blockedByGoogleProtection
-              ? 'Turn off extra verification on new devices first. The two cannot be on together, and neither changes the other.'
+              ? _emailCopy[1]
               : 'Off. Turn on only if you could lose every passkey and device. A ${s.delayDays}-day wait always applies.',
+          versions: [
+            _emailCopy[0].replaceAll('7-day', '${s.delayDays}-day'),
+            _emailCopy[1],
+            _emailCopy[2].replaceAll('7-day', '${s.delayDays}-day'),
+          ],
         ),
         value: s.escapeEnabled,
         onChanged: busy || (!s.escapeEnabled && s.blockedByGoogleProtection)
@@ -357,18 +371,34 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
           const SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: Text('Email-only recovery'),
-            subtitle: Text('Checking automatically...'),
+            subtitle: StableText(shown: null, versions: _emailCopy),
             value: false,
             onChanged: null,
           ),
+          if (!widget.bridge.enrolledClientApprovalAvailable)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: RedactedText(
+                'Approving a change from another enrolled device is not available yet.',
+                fontSize: 12,
+              ),
+            ),
         ]),
       if (widget.sections.contains(RecoverySection.passkeys))
         card('Passkeys', const [
-          ListTile(title: Text(' '), subtitle: Text(' ')),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: RedactedText('Passkey added 5 Nov 2026, 10:38'),
+            subtitle: RedactedText('Last used 25 Nov 2026, 09:38'),
+          ),
         ]),
       if (widget.sections.contains(RecoverySection.devices))
         card('Signed-in devices', const [
-          ListTile(title: Text(' '), subtitle: Text(' ')),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: RedactedText('Signed in 19 Nov 2026, 10:44'),
+            subtitle: RedactedText('web, last used 25 Nov 2026, 07:44'),
+          ),
         ]),
     ];
   }
@@ -393,9 +423,10 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
           Row(
             children: [
               const Expanded(child: Text('Recovery settings could not load.')),
-              TextButton(
+              OutlinedButton.icon(
                 onPressed: busy ? null : load,
-                child: const Text('Try again'),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try again'),
               ),
             ],
           ),
@@ -422,9 +453,10 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
                       'It can be completed from ${recoveryDate(s.request!.availableAt)}. '
                       'If this was not you, cancel it now and review your passkeys and devices.',
                     ),
-                    TextButton(
+                    OutlinedButton.icon(
                       onPressed: busy ? null : () => cancelRequest(s.request!),
-                      child: const Text('Cancel recovery request'),
+                      icon: const Icon(Icons.cancel_outlined),
+                      label: const Text('Cancel recovery request'),
                     ),
                   ],
                 ),

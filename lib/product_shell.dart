@@ -1,5 +1,6 @@
 import 'browser_session_contract.dart';
 import 'totp_enrollment.dart';
+import 'gmail_source.dart';
 import 'read_workspace_controller.dart';
 
 import 'package:material_ui/material_ui.dart';
@@ -95,21 +96,10 @@ class _ProductShellState extends State<ProductShell> {
 
   Future<void> refresh() => widget.controller.refresh();
 
-  /// Pull-down gesture (touch platforms only). Web: reload the page. Native:
-  /// refetch, under the same gate as automatic updates (signed in, not
-  /// loading, 15s gap, 429 cooldown).
+  /// Mobile-web pull reloads the document. Native hosts have no pageReload
+  /// callback and never install the pull wrapper.
   Future<void> pull() async {
-    // On the web a pull reloads the whole page. It is the person's own
-    // gesture and adds no data requests of its own, so the refetch cooldown
-    // and loading gate do not apply: gating it made the indicator show and
-    // then do nothing.
-    final reload = widget.pageReload;
-    if (reload != null) {
-      await reload();
-      return;
-    }
-    if (!widget.controller.canRefresh) return;
-    await widget.controller.refresh();
+    await widget.pageReload?.call();
   }
 
   String spaced(String c) =>
@@ -316,23 +306,35 @@ class _ProductShellState extends State<ProductShell> {
           ],
         );
       case 1:
-        if (store.sources.isEmpty) {
-          return empty(
-            'No sources yet',
-            'Phones and mailboxes that send codes to your account appear here.',
-          );
-        }
         return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (widget.controller.bridge is GmailSourceBridge)
+              GmailSourceConnect(
+                bridge: widget.controller.bridge as GmailSourceBridge,
+                onOpenAccount: widget.onOpenAccount,
+              ),
+            if (store.sources.isEmpty)
+              empty(
+                'No sources yet',
+                'Phones and mailboxes that send codes to your account appear here.',
+              ),
             for (final s in store.sources)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: codeTile(
-                  s.label,
-                  s.kind.toUpperCase(),
-                  null,
-                  null,
-                  false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    codeTile(s.label, s.kind.toUpperCase(), null, null, false),
+                    if (s.kind == 'gmail' &&
+                        widget.controller.bridge is GmailSourceBridge)
+                      GmailSourceDisconnect(
+                        bridge: widget.controller.bridge as GmailSourceBridge,
+                        sourceId: s.id,
+                        label: s.label,
+                        onChanged: () => widget.controller.refresh(),
+                      ),
+                  ],
                 ),
               ),
           ],
@@ -462,7 +464,9 @@ class _ProductShellState extends State<ProductShell> {
             const SizedBox(height: 80),
         ],
       );
-      final content = PullToRefresh(onRefresh: pull, child: list);
+      final content = widget.pageReload == null
+          ? list
+          : PullToRefresh(onRefresh: pull, child: list);
       return Scaffold(
         floatingActionButton: widget.controller.bridge is TotpManagementBridge
             ? FloatingActionButton.extended(

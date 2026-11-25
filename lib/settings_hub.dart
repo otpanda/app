@@ -31,6 +31,9 @@ enum SettingsCategory {
 
 const settingsHubRoute = 'settings';
 
+/// A page under Account & security. Allow-listed with the categories.
+const settingsPasskeysRoute = 'settings/account-security/passkeys';
+
 /// Strict parse. Anything not on the allow-list is not a settings route.
 SettingsCategory? settingsCategoryForRoute(String? route) {
   for (final c in SettingsCategory.values) {
@@ -40,9 +43,65 @@ SettingsCategory? settingsCategoryForRoute(String? route) {
 }
 
 bool isSettingsRoute(String? route) =>
-    route == settingsHubRoute || settingsCategoryForRoute(route) != null;
+    route == settingsHubRoute ||
+    route == settingsPasskeysRoute ||
+    settingsCategoryForRoute(route) != null;
 
 const settingsWideBreakpoint = 700.0;
+
+/// Stands in for text that has not loaded. It lays out a sample of the real
+/// text, so it wraps and takes the same height the loaded text will, and
+/// paints it as grey bars instead of letters. Nothing is hard-coded: the
+/// height follows the sample's content and the screen width.
+class RedactedText extends StatelessWidget {
+  final String sample;
+  final double? fontSize;
+  const RedactedText(this.sample, {super.key, this.fontSize});
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+    child: Text(
+      sample,
+      style: TextStyle(
+        color: Colors.transparent,
+        backgroundColor: line,
+        fontSize: fontSize,
+      ),
+    ),
+  );
+}
+
+/// Text that keeps the height of the tallest of its possible versions. Each
+/// version is laid out invisibly under the one shown (or its redacted
+/// stand-in while loading), so a setting that changes its wording between
+/// states does not change its row's height. Content-driven: the height is
+/// whatever the longest wording needs at the current width.
+class StableText extends StatelessWidget {
+  final String? shown;
+  final List<String> versions;
+  final double? fontSize;
+  const StableText({
+    super.key,
+    required this.shown,
+    required this.versions,
+    this.fontSize,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final style = fontSize == null ? null : TextStyle(fontSize: fontSize);
+    return Stack(
+      children: [
+        for (final v in versions)
+          ExcludeSemantics(
+            child: Opacity(opacity: 0, child: Text(v, style: style)),
+          ),
+        if (shown == null)
+          RedactedText(versions.first, fontSize: fontSize)
+        else
+          Text(shown!, style: style),
+      ],
+    );
+  }
+}
 
 /// A titled card for one group of settings. Uses the app card theme.
 Widget settingsCard(String title, List<Widget> children) => Padding(
@@ -80,7 +139,12 @@ class SettingsHub extends StatelessWidget {
   final SettingsCategory? selected;
   final ValueChanged<SettingsCategory> onSelect;
   final Map<SettingsCategory, Widget> pages;
+
+  /// Pages that lay themselves out to the full height of the screen instead
+  /// of scrolling as a whole (they scroll an inner list and pin a footer).
+  final Set<SettingsCategory> fillPages;
   const SettingsHub({
+    this.fillPages = const {},
     super.key,
     required this.selected,
     required this.onSelect,
@@ -149,11 +213,17 @@ class SettingsHub extends StatelessWidget {
       alignment: Alignment.topCenter,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 640),
-        child: ListView(
-          key: ValueKey(c.route),
-          padding: const EdgeInsets.all(16),
-          children: [pages[c]!],
-        ),
+        child: fillPages.contains(c)
+            ? Padding(
+                key: ValueKey(c.route),
+                padding: const EdgeInsets.all(16),
+                child: pages[c]!,
+              )
+            : ListView(
+                key: ValueKey(c.route),
+                padding: const EdgeInsets.all(16),
+                children: [pages[c]!],
+              ),
       ),
     );
   }

@@ -166,7 +166,7 @@ void main() {
       t.widget<SwitchListTile>(find.byType(SwitchListTile)).onChanged,
       isNull,
     );
-    expect(find.textContaining('cannot be on together'), findsOneWidget);
+    expect(find.textContaining('cannot be on together'), findsWidgets);
   });
 
   testWidgets('turning off asks and sends exact kind', (t) async {
@@ -190,20 +190,22 @@ void main() {
       );
       expect(
         t
-            .widget<TextButton>(find.widgetWithText(TextButton, 'Remove'))
+            .widget<IconButton>(
+              find.widgetWithIcon(IconButton, Icons.delete_outline).first,
+            )
             .onPressed,
         isNull,
       );
       final f = FakeRecovery(st());
       await panel(t, f);
-      await t.tap(find.text('Remove').first);
+      await t.tap(find.byTooltip('Remove passkey').first);
       await t.pumpAndSettle();
       await t.tap(find.widgetWithText(FilledButton, 'Remove'));
       await t.pumpAndSettle();
       expect(f.log.single, 'change:passkey-revoke:k0:false');
       f.log.clear();
-      expect(find.text('Sign out'), findsOneWidget);
-      await t.tap(find.text('Sign out'));
+      expect(find.byTooltip('Sign out this device'), findsOneWidget);
+      await t.tap(find.byTooltip('Sign out this device'));
       await t.pumpAndSettle();
       await t.tap(find.widgetWithText(FilledButton, 'Sign out'));
       await t.pumpAndSettle();
@@ -214,7 +216,7 @@ void main() {
   testWidgets('refusal is generic and state reloads', (t) async {
     final f = FakeRecovery(st())..failChange = true;
     await panel(t, f);
-    await t.tap(find.text('Sign out'));
+    await t.tap(find.byTooltip('Sign out this device'));
     await t.pumpAndSettle();
     await t.tap(find.widgetWithText(FilledButton, 'Sign out'));
     await t.pumpAndSettle();
@@ -322,7 +324,7 @@ void main() {
   ) async {
     final f = FakeRecovery(st())..unknownChange = true;
     await panel(t, f);
-    await t.tap(find.text('Sign out'));
+    await t.tap(find.byTooltip('Sign out this device'));
     await t.pumpAndSettle();
     await t.tap(find.widgetWithText(FilledButton, 'Sign out'));
     await t.pumpAndSettle();
