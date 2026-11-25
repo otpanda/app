@@ -184,7 +184,8 @@ void main() {
       expect(find.text('Welcome to OTPanda.'), findsOneWidget);
       expect(find.text('Sign in with a passkey'), findsOneWidget);
       expect(find.text('Create account with a passkey'), findsOneWidget);
-      expect(find.text('Remember this device'), findsOneWidget);
+      expect(find.text('Remember this device'), findsNothing);
+      expect(find.byType(Checkbox), findsNothing);
       expect(find.text('Sign in with browser'), findsNothing);
       expect(find.byKey(const Key('native-browser')), findsNothing);
       // Widget-test render, Linux baseline only. Not a device screenshot.
@@ -209,11 +210,10 @@ void main() {
       t,
     ) async {
       await pumpShared(t, ctl(), google: false);
-      await t.tap(find.byType(Checkbox));
       await t.tap(find.textContaining('Google').first);
       await t.pumpAndSettle();
       expect(br.runs, 1);
-      expect(br.last!.fragment, endsWith('&provider=google&remember=0'));
+      expect(br.last!.fragment, endsWith('&provider=google&remember=1'));
     });
   });
 
@@ -391,7 +391,7 @@ void googleRecognitionTests() {
       expect(sent['recognition'], 'REC');
       expect(sent['id_token'], 'IDTOK');
     });
-    test('unchecked sends remember false; none stored sends no key', () async {
+    test('native always remembers even when called with false; none stored sends no key', () async {
       final (sent, _) = await run(remember: false);
       expect(sent['remember'], false);
       expect(sent.containsKey('recognition'), isFalse);

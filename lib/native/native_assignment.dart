@@ -123,7 +123,11 @@ class NativeAssignmentDriver {
       final sourceId = t['sourceId'] as String;
       final eventId = t['eventId'] as String;
       final entryId = t['entryId'] as String;
-      if ([sourceId, eventId, entryId].any((s) => s.isEmpty || s.length > 256)) {
+      if ([
+        sourceId,
+        eventId,
+        entryId,
+      ].any((s) => s.isEmpty || s.length > 256)) {
         throw const FormatException();
       }
       final me = await identity();
@@ -419,9 +423,8 @@ AssignmentIdentity assignmentIdentity({
   try {
     final spki = await source.publicKeyOrNull();
     if (spki != null) {
-      final r = await DeviceStatusRoutes(
-        post,
-      ).status(publicKeyDigest(spkiToJwk(spki)));
+      final r = await DeviceStatusRoutes(post)
+          .status(publicKeyDigest(spkiToJwk(spki)));
       if (r != null && r.status == ServerKeyStatus.enrolled) keyId = r.keyId;
     }
   } catch (_) {

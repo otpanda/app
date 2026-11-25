@@ -37,6 +37,7 @@ class NativeDevicesService extends ChangeNotifier {
       );
     }
   }
+
   /// Called once the one-time enrollment grant has been sent to the server
   /// (the server consumes it on finish). The same grant also backs the first
   /// passkey, so the owner of the session must stop offering it.

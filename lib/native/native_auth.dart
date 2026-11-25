@@ -209,7 +209,7 @@ class NativeAuth {
       if (provider != null || remember != null) {
         final extra = [
           if (provider != null) 'provider=$provider',
-          if (remember != null) 'remember=${remember ? 1 : 0}',
+          if (provider == 'google') 'remember=1',
         ].join('&');
         url = url.replace(fragment: '${url.fragment}&$extra');
       }
@@ -295,7 +295,7 @@ class NativeAuth {
       final r = await _post('/auth/native/google/complete', {
         'id_token': token,
         'renewal_key': key,
-        'remember': ?remember,
+        'remember': true,
         if (known != null && known.isNotEmpty && known.length <= 200)
           'recognition': known,
       });

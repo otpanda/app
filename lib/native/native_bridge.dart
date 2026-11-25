@@ -272,8 +272,8 @@ class NativeSessionBridge
   /// browser handoff (also what controller does on browser_required).
   @override
   Future<void> googleStart(bool remember) => googleAvailable
-      ? controller.signInWithGoogle(remember: remember)
-      : controller.signInWithBrowser(provider: 'google', remember: remember);
+      ? controller.signInWithGoogle(remember: true)
+      : controller.signInWithBrowser(provider: 'google', remember: true);
 
   /// INTERIM for account creation: no native register route exists, so it
   /// uses the browser handoff.

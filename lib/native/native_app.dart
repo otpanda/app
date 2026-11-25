@@ -123,6 +123,7 @@ class _State extends State<NativeSessionPage> {
             status: _authStatus(shared.status),
             message: err ?? '',
             busy: busy,
+            showRemember: false,
             run: _run,
           ),
         );
