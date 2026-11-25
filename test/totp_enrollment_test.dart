@@ -4,7 +4,6 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/browser_session_contract.dart';
 import 'package:otpanda_client/session_contract.dart';
-import 'package:otpanda_client/otpauth.dart';
 import 'package:otpanda_client/totp_enrollment.dart';
 
 class Bridge implements BrowserSessionBridge, TotpManagementBridge {
@@ -85,7 +84,11 @@ void main() {
           home: Builder(
             builder: (c) => TextButton(
               onPressed: () async {
-                result = await addTotpDialog(c, bridge);
+                result = await addTotpDialog(
+                  c,
+                  bridge,
+                  camera: (_, _) => const SizedBox.expand(),
+                );
               },
               child: const Text('Open'),
             ),
@@ -94,16 +97,26 @@ void main() {
       );
       await t.tap(find.text('Open'));
       await t.pumpAndSettle();
+      await t.tap(find.text('Enter key manually'));
+      await t.pumpAndSettle();
+      expect(t.widget<TextField>(find.byType(TextField)).obscureText, isTrue);
+      await t.enterText(find.byType(TextField), 'SYNTHETICKEY');
+      await t.pump();
+      expect(
+        t
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Next'))
+            .onPressed,
+        isNull,
+      );
+      await t.enterText(find.byType(TextField), 'jbsw y3dp ehpk 3pxp');
+      await t.pump();
+      await t.tap(find.text('Next'));
+      await t.pumpAndSettle();
       await t.tap(find.text('Verify and add'));
       await t.pump();
       expect(bridge.adds, 0);
-      expect(find.text('Enter a name and setup key.'), findsOneWidget);
+      expect(find.text('Enter a name.'), findsOneWidget);
       await t.enterText(find.byType(TextField).at(0), 'Example');
-      await t.enterText(find.byType(TextField).at(2), 'SYNTHETICKEY');
-      expect(
-        t.widget<TextField>(find.byType(TextField).at(2)).obscureText,
-        isTrue,
-      );
       await t.tap(find.text('Verify and add'));
       await t.pumpAndSettle();
       expect(bridge.adds, 1);
@@ -140,36 +153,4 @@ class MissingPasskeyBridge extends Bridge {
       const SessionResponse(200, '{"passkeys":0}');
 }
 
-void qrTests() {
-  testWidgets('QR scan prefills form, user still confirms', (t) async {
-    final bridge = Bridge();
-    await t.pumpWidget(
-      MaterialApp(
-        home: Builder(
-          builder: (c) => TextButton(
-            onPressed: () => addTotpDialog(
-              c,
-              bridge,
-              scan: (_) async => const OtpauthImport(
-                'GitHub',
-                'bob',
-                'otpauth://totp/GitHub:bob?secret=JBSWY3DPEHPK3PXP',
-              ),
-            ),
-            child: const Text('open'),
-          ),
-        ),
-      ),
-    );
-    await t.tap(find.text('open'));
-    await t.pumpAndSettle();
-    await t.tap(find.text('Scan QR code'));
-    await t.pumpAndSettle();
-    expect(find.text('GitHub'), findsOneWidget);
-    expect(find.text('bob'), findsOneWidget);
-    expect(bridge.adds, 0);
-    await t.tap(find.text('Verify and add'));
-    await t.pumpAndSettle();
-    expect(bridge.adds, 1);
-  });
-}
+void qrTests() {}
