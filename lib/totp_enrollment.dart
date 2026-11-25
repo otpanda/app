@@ -242,7 +242,7 @@ class _AddTotpState extends State<_AddTotp> {
       account = TextEditingController(),
       key = TextEditingController();
   OtpauthImport? found;
-  bool manual = false, busy = false, showKey = false;
+  bool manual = false, busy = false, showKey = false, noCamera = false;
   QrCameraProblem? problem;
   String scanError = '', error = '';
 
@@ -278,7 +278,20 @@ class _AddTotpState extends State<_AddTotp> {
   }
 
   void onProblem(QrCameraProblem p) {
-    if (mounted) setState(() => problem = p);
+    if (!mounted) return;
+    setState(() {
+      problem = p;
+      // No camera at all (a desktop without one): go straight to manual
+      // entry. The button still offers the camera again. A denied permission
+      // keeps its own explanation, since the user can fix that.
+      if (p == QrCameraProblem.unavailable && found == null) {
+        manual = true;
+        noCamera = true;
+        showKey = false;
+        scanError = '';
+        key.clear();
+      }
+    });
   }
 
   Future<void> save() async {
@@ -336,7 +349,15 @@ class _AddTotpState extends State<_AddTotp> {
                     ),
             ),
           )
-        else
+        else ...[
+          if (noCamera)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text(
+                'No camera found. Enter the key manually.',
+                key: Key('no-camera-note'),
+              ),
+            ),
           TextField(
             controller: key,
             autofocus: true,
@@ -359,6 +380,7 @@ class _AddTotpState extends State<_AddTotp> {
               if (v != null) advance(v);
             },
           ),
+        ],
         if (!manual && scanError.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 8),
@@ -368,6 +390,7 @@ class _AddTotpState extends State<_AddTotp> {
         TextButton(
           onPressed: () => setState(() {
             manual = !manual;
+            noCamera = false;
             problem = null;
             scanError = '';
             showKey = false;
