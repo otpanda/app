@@ -22,6 +22,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:otpanda_client/browser_account_page.dart';
+import 'package:otpanda_client/main.dart' show otpandaTheme;
 import 'package:otpanda_client/native/android_adapters.dart';
 import 'package:otpanda_client/native/native_auth.dart';
 import 'package:otpanda_client/native/native_bridge.dart';
@@ -174,6 +175,7 @@ void main() {
       addTearDown(() => t.binding.setSurfaceSize(null));
       await t.pumpWidget(
         MaterialApp(
+          theme: otpandaTheme(),
           home: RepaintBoundary(
             key: _shotKey,
             child: StatefulBuilder(
@@ -225,6 +227,7 @@ void main() {
       await t.pump();
       await t.pumpWidget(
         MaterialApp(
+          theme: otpandaTheme(),
           home: RepaintBoundary(
             key: _shotKey,
             child: BrowserAccountPage(
