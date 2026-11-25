@@ -31,12 +31,16 @@ dependencies:
   flutter:
     sdk: flutter
   material_ui: ^1.11.1
+  camera: ^0.12.2
+  web: ^1.1.0
+  zxing2: ^0.2.4
   url_launcher: ^6.3.3
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
 
 dev_dependencies:
+  image: ^4.0.0
   flutter_test:
     sdk: flutter
 
@@ -63,7 +67,27 @@ flutter:
     - assets/service-catalog.json
     - assets/2fa-directory-LICENSE.txt
     - assets/fonts/GoogleSans-OFL.txt
+    - assets/fonts/Figtree-OFL.txt
+    - assets/zxing/zxing-library-0.23.0.min.js
+    - assets/zxing/zxing-library-LICENSE.txt
+    - assets/fonts/BricolageGrotesque-OFL.txt
   fonts:
+    - family: Figtree
+      fonts:
+        - asset: assets/fonts/Figtree-400.ttf
+          weight: 400
+        - asset: assets/fonts/Figtree-500.ttf
+          weight: 500
+        - asset: assets/fonts/Figtree-600.ttf
+          weight: 600
+        - asset: assets/fonts/Figtree-700.ttf
+          weight: 700
+    - family: BricolageGrotesque
+      fonts:
+        - asset: assets/fonts/BricolageGrotesque-700.ttf
+          weight: 700
+        - asset: assets/fonts/BricolageGrotesque-800.ttf
+          weight: 800
     - family: GoogleSans
       fonts:
         - asset: assets/fonts/GoogleSans.ttf
