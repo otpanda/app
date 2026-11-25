@@ -120,3 +120,10 @@ test('legacy Security client approval controls use the same unavailable capabili
  assert.equal((source.match(/if \(clientApprovalAvailable\)/g)||[]).length,3);
  assert(!source.includes('New devices need a passkey or approval from another signed-in device.'));
 });
+
+test('change: google-unlink is a known kind that sends no target and finishes after the passkey step',async()=>{
+  const s=setup({reply:p=>p.endsWith('/begin')?{body:ceremony()}:{body:{revoked:'google'}}});
+  assert.equal(await s.bridge.change('google-unlink'),'ok');
+  assert.deepEqual(s.calls.map(c=>c.path.split('/').pop()),['begin','finish']);
+  assert.equal(s.calls[0].body.kind,'google-unlink');assert.ok(!('target' in s.calls[0].body));assert.ok(!('warningAccepted' in s.calls[0].body));
+});
