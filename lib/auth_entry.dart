@@ -11,6 +11,8 @@ class AuthEntry extends StatefulWidget {
   final BrowserSessionBridge bridge;
   final String status, message;
   final bool busy;
+  /// Native clients always remember the device, so they hide the checkbox.
+  final bool showRemember;
   final VoidCallback? onLostAccess;
   final Future<void> Function(Future<void> Function()) run;
   const AuthEntry({
@@ -20,6 +22,7 @@ class AuthEntry extends StatefulWidget {
     required this.message,
     required this.busy,
     this.onLostAccess,
+    this.showRemember = true,
     required this.run,
   });
   @override
@@ -243,7 +246,8 @@ class _AuthEntryState extends State<AuthEntry> {
                 ),
               ],
             ],
-            if (!form &&
+            if (widget.showRemember &&
+                !form &&
                 !passkey &&
                 !google &&
                 !protected &&
@@ -461,12 +465,6 @@ class _AuthEntryState extends State<AuthEntry> {
                 padding: const EdgeInsets.only(top: 16),
                 child: Text(widget.message),
               ),
-            const SizedBox(height: 28),
-            const Text(
-              'No passwords. No SMS codes.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Color(0xff52665e)),
-            ),
           ],
         ),
       ),
