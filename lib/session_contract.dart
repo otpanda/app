@@ -33,12 +33,17 @@ class ManagedEntry {
   final String id, service, account;
   final bool manage;
   final bool totp;
+
+  /// The catalogue service id the server stores (its primary domain), kept
+  /// for cosmetic logo identity only. Null for custom entries.
+  final String? catalogId;
   const ManagedEntry(
     this.id,
     this.service,
     this.account,
     this.manage, [
     this.totp = false,
+    this.catalogId,
   ]);
   factory ManagedEntry.fromJson(Map<String, dynamic> json) {
     final capabilities = json['capabilities'];
@@ -54,6 +59,17 @@ class ManagedEntry {
           : _text(json, 'account_name'),
       capabilities['manage'] == true,
       json['service_id'] == 'custom-totp',
+      // The owner-chosen, untrusted catalogue id wins. Entries created before
+      // it existed fall back to the legacy service id, when it is a plain host.
+      json['catalogId'] is String &&
+              RegExp(r'^[a-z0-9][a-z0-9._-]{0,127}$')
+                  .hasMatch(json['catalogId'])
+          ? json['catalogId'] as String
+          : json['service_id'] is String &&
+                RegExp(r'^[a-z0-9-]+(?:\.[a-z0-9-]+)+$')
+                    .hasMatch(json['service_id'])
+          ? json['service_id'] as String
+          : null,
     );
   }
 }
@@ -178,6 +194,7 @@ class CodeStore {
                 account ?? e.account,
                 e.manage,
                 e.totp,
+                e.catalogId,
               )
             : e,
     ];

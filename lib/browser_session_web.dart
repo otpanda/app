@@ -82,8 +82,9 @@ extension type _Session(JSObject _) implements JSObject {
   external JSPromise<JSString> addTotp(
     JSString label,
     JSString account,
-    JSString secret,
-  );
+    JSString secret, [
+    JSString? catalogId,
+  ]);
   external JSPromise<_ReadResponse> totpCode(JSString entryId);
   external JSPromise<_ReadResponse> read(JSString path);
   external JSPromise<_ReadResponse> organize(JSString method, JSString body);
@@ -150,8 +151,21 @@ class _Browser
       );
 
   @override
-  Future<String> addTotp(String label, String account, String secret) async =>
-      (await _session.addTotp(label.toJS, account.toJS, secret.toJS).toDart)
+  Future<String> addTotp(
+    String label,
+    String account,
+    String secret, {
+    String? catalogId,
+  }) async =>
+      (await (catalogId == null
+                  ? _session.addTotp(label.toJS, account.toJS, secret.toJS)
+                  : _session.addTotp(
+                      label.toJS,
+                      account.toJS,
+                      secret.toJS,
+                      catalogId.toJS,
+                    ))
+              .toDart)
           .toDart;
   @override
   String profileRead(String ownerId, String sessionId) =>

@@ -536,6 +536,8 @@ class _ClientHomeState extends State<ClientHome> {
         if (bounds.maxWidth >= 80) ...[
           ServiceAvatar(
             service: e.service,
+            serviceId: e.serviceId,
+            websiteHost: e.websiteHost,
             color: avatarTint(e.service),
             ink: ink,
             fontSize: 15,

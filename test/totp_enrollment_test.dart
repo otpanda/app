@@ -12,7 +12,12 @@ class Bridge implements BrowserSessionBridge, TotpManagementBridge {
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
   @override
-  Future<String> addTotp(String label, String account, String secret) async {
+  Future<String> addTotp(
+    String label,
+    String account,
+    String secret, {
+    String? catalogId,
+  }) async {
     adds++;
     if (fail) throw const ClientFailure();
     return 'entry';

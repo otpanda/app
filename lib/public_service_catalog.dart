@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'service_directory.dart';
+import 'service_logo.dart';
+
 class PublicService {
   final String id, name, host;
   const PublicService(this.id, this.name, this.host);
@@ -80,6 +83,25 @@ class PublicServiceCatalog {
     return PublicServiceCatalog(List.unmodifiable(services), data['fetchedAt']);
   }
 
+  /// Runtime catalogue from the cached or fetched directory. Rows must pass the
+  /// same id and name rules as the bundled file. The id is the primary host,
+  /// as in the bundled file. Rows that fail are left out, never repaired.
+  factory PublicServiceCatalog.fromDirectory(
+    List<DirectoryService> rows,
+    int fetchedAt,
+  ) {
+    final seen = <String>{};
+    final out = <PublicService>[];
+    for (final r in rows) {
+      if (isPublicServiceId(r.host) &&
+          isPublicServiceName(r.name) &&
+          seen.add(r.host)) {
+        out.add(PublicService(r.host, r.name, r.host));
+      }
+    }
+    return PublicServiceCatalog(List.unmodifiable(out), fetchedAt);
+  }
+
   List<PublicService> search(String query) {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return const [];
@@ -90,14 +112,50 @@ class PublicServiceCatalog {
   }
 }
 
+final _publicNameForbidden = RegExp(
+  r'[\u{0}-\u{1f}\u{7f}-\u{9f}\u{ad}\u{600}-\u{605}\u{61c}\u{6dd}\u{70f}\u{890}-\u{891}\u{8e2}\u{180e}\u{200b}-\u{200f}\u{2028}-\u{202e}\u{2060}-\u{206f}\u{feff}\u{fff9}-\u{fffb}\u{110bd}\u{110cd}\u{13430}-\u{1345f}\u{1bca0}-\u{1bca3}\u{1d173}-\u{1d17a}\u{e0001}\u{e0020}-\u{e007f}]',
+  unicode: true,
+);
+
+/// The id and name rules the bundled catalogue enforces on every row.
+bool isPublicServiceId(String id) =>
+    id.length <= 128 &&
+    RegExp(r'^[a-z0-9-]+(?:\.[a-z0-9-]+)+$').hasMatch(id) &&
+    !RegExp(r'^[0-9.]+$').hasMatch(id) &&
+    !['.local', '.localhost', '.internal'].any(id.endsWith) &&
+    !id
+        .split('.')
+        .any((p) => p.length > 63 || p.startsWith('-') || p.endsWith('-'));
+
+bool isPublicServiceName(String name) =>
+    name.trim().isNotEmpty &&
+    name.length <= 120 &&
+    !_publicNameForbidden.hasMatch(name);
+
 class PublicServicePicker extends StatefulWidget {
-  const PublicServicePicker({super.key});
+  final ServiceDirectory? directory;
+  const PublicServicePicker({super.key, this.directory});
   @override
   State<PublicServicePicker> createState() => _PublicServicePickerState();
 }
 
 class _PublicServicePickerState extends State<PublicServicePicker> {
-  final catalog = PublicServiceCatalog.bundled();
+  late final Future<void> ready =
+      (widget.directory ?? ServiceDirectory.instance).ensureReady();
+  List<DirectoryService>? _rowsFor;
+  PublicServiceCatalog? _built;
+
+  /// The runtime directory (cache, then network, with the bundled snapshot
+  /// as its fallback). The picker never waits on the network: it opens from
+  /// the cache or snapshot and updates when a refresh lands.
+  PublicServiceCatalog catalogFor(ServiceDirectory d) {
+    if (!identical(_rowsFor, d.services) || _built == null) {
+      _rowsFor = d.services;
+      _built = PublicServiceCatalog.fromDirectory(d.services, d.fetchedAtMs);
+    }
+    return _built!;
+  }
+
   String query = '';
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -130,42 +188,57 @@ class _PublicServicePickerState extends State<PublicServicePicker> {
             onChanged: (value) => setState(() => query = value),
           ),
           Expanded(
-            child: FutureBuilder<PublicServiceCatalog>(
-              future: catalog,
+            child: FutureBuilder<void>(
+              future: ready,
               builder: (context, snapshot) {
-                if (snapshot.hasError) {
+                final dir = widget.directory ?? ServiceDirectory.instance;
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final data = catalogFor(dir);
+                if (data.services.isEmpty) {
                   return const Text(
                     'Catalog unavailable. Close this picker and enter a custom label.',
                   );
                 }
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final results = snapshot.data!.search(query);
-                return ListView(
-                  children: [
-                    if (query.trim().isEmpty)
-                      const Text(
-                        'Type to search. You can always use a custom label instead.',
-                      ),
-                    if (query.trim().isNotEmpty && results.isEmpty)
-                      const Text(
-                        'No matching service. Close this picker to use a custom label.',
-                      ),
-                    for (final service in results)
-                      ListTile(
-                        title: Text(service.name),
-                        subtitle: Text(service.host),
-                        onTap: () => Navigator.pop(context, service),
-                      ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Snapshot checked ${DateTime.fromMillisecondsSinceEpoch(snapshot.data!.fetchedAt, isUtc: true).toIso8601String().substring(0, 10)} UTC. Not proof of current service support.',
-                    ),
-                    const Text(
-                      'Data sourced from 2FA Directory by 2factorauth. MIT license. https://2fa.directory',
-                    ),
-                  ],
+                return ListenableBuilder(
+                  listenable: dir,
+                  builder: (context, _) {
+                    final results = catalogFor(dir).search(query);
+                    return ListView(
+                      children: [
+                        if (query.trim().isEmpty)
+                          const Text(
+                            'Type to search. You can always use a custom label instead.',
+                          ),
+                        if (query.trim().isNotEmpty && results.isEmpty)
+                          const Text(
+                            'No matching service. Close this picker to use a custom label.',
+                          ),
+                        for (final service in results)
+                          ListTile(
+                            leading: ServiceAvatar(
+                              service: service.name,
+                              serviceId: service.id,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainer,
+                              ink: Theme.of(context).colorScheme.onSurface,
+                            ),
+                            title: Text(service.name),
+                            subtitle: Text(service.host),
+                            onTap: () => Navigator.pop(context, service),
+                          ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Snapshot checked ${DateTime.fromMillisecondsSinceEpoch(catalogFor(dir).fetchedAt, isUtc: true).toIso8601String().substring(0, 10)} UTC. Not proof of current service support.',
+                        ),
+                        const Text(
+                          'Data sourced from 2FA Directory by 2factorauth. MIT license. https://2fa.directory',
+                        ),
+                      ],
+                    );
+                  },
                 );
               },
             ),

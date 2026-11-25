@@ -6,6 +6,9 @@ import 'package:material_ui/material_ui.dart';
 
 import 'browser_session_contract.dart';
 import 'otpauth.dart';
+import 'public_service_catalog.dart';
+import 'service_directory.dart';
+import 'service_logo.dart';
 import 'qr_camera.dart';
 import 'session_contract.dart';
 import 'totp_read_contract.dart';
@@ -224,15 +227,18 @@ Future<String?> addTotpDialog(
   BuildContext context,
   TotpManagementBridge bridge, {
   QrCameraBuilder camera = _defaultCamera,
+  ServiceDirectory? directory,
 }) async => showDialog<String>(
   context: context,
-  builder: (_) => _AddTotp(bridge: bridge, camera: camera),
+  builder: (_) =>
+      _AddTotp(bridge: bridge, camera: camera, directory: directory),
 );
 
 class _AddTotp extends StatefulWidget {
   final TotpManagementBridge bridge;
   final QrCameraBuilder camera;
-  const _AddTotp({required this.bridge, required this.camera});
+  final ServiceDirectory? directory;
+  const _AddTotp({required this.bridge, required this.camera, this.directory});
   @override
   State<_AddTotp> createState() => _AddTotpState();
 }
@@ -242,6 +248,10 @@ class _AddTotpState extends State<_AddTotp> {
       account = TextEditingController(),
       key = TextEditingController();
   OtpauthImport? found;
+
+  /// The catalogue service the user chose. Kept until the user removes or
+  /// replaces it: editing the name never rebinds or drops it.
+  PublicService? chosen;
   bool manual = false, busy = false, showKey = false, noCamera = false;
   QrCameraProblem? problem;
   String scanError = '', error = '';
@@ -310,6 +320,7 @@ class _AddTotpState extends State<_AddTotp> {
         label.text.trim(),
         account.text.trim(),
         v.uri,
+        catalogId: chosen?.id,
       );
       if (mounted) Navigator.pop(context, id);
     } catch (_) {
@@ -414,6 +425,49 @@ class _AddTotpState extends State<_AddTotp> {
     );
   }
 
+  Future<void> pickService() async {
+    final selected = await showDialog<PublicService>(
+      context: context,
+      builder: (_) => PublicServicePicker(directory: widget.directory),
+    );
+    if (selected != null && mounted) {
+      setState(() {
+        chosen = selected;
+        label.text = selected.name;
+      });
+    }
+  }
+
+  Widget servicePicker() => chosen == null
+      ? Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            key: const Key('find-service'),
+            icon: const Icon(Icons.search),
+            label: const Text('Find a service'),
+            onPressed: busy ? null : pickService,
+          ),
+        )
+      : ListTile(
+          key: const Key('chosen-service'),
+          contentPadding: EdgeInsets.zero,
+          leading: ServiceAvatar(
+            service: chosen!.name,
+            serviceId: chosen!.id,
+            color: const Color(0xffdff3e8),
+            ink: const Color(0xff17372a),
+            directory: widget.directory,
+          ),
+          title: Text(chosen!.name),
+          subtitle: Text(chosen!.host),
+          trailing: IconButton(
+            key: const Key('remove-service'),
+            tooltip: 'Remove service',
+            icon: const Icon(Icons.close),
+            onPressed: busy ? null : () => setState(() => chosen = null),
+          ),
+        );
+
   Widget stageTwo() => Column(
     mainAxisSize: MainAxisSize.min,
     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -421,6 +475,8 @@ class _AddTotpState extends State<_AddTotp> {
       const Text(
         'The key is encrypted in your cloud account so OTPanda can generate codes. Verify with a passkey to save.',
       ),
+      const SizedBox(height: 8),
+      servicePicker(),
       TextField(
         controller: label,
         maxLength: 120,
