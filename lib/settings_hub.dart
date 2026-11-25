@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import 'main.dart' show green, ink, line, muted, pale;
+import 'profile_header.dart';
 
 /// The settings categories and the route ids primary's router allow-lists.
 enum SettingsCategory {
@@ -140,7 +141,10 @@ Widget settingsCard(String title, List<Widget> children) => Padding(
 /// Wide screens show a category list beside the page. Narrow screens show the
 /// list first and each category as its own screen.
 class SettingsHub extends StatelessWidget {
-  final String? email;
+  final String? email, googlePicture;
+
+  /// The account has not loaded yet: the header holds its space meanwhile.
+  final bool emailLoading;
   final SettingsCategory? selected;
   final ValueChanged<SettingsCategory> onSelect;
   final Map<SettingsCategory, Widget> pages;
@@ -155,6 +159,8 @@ class SettingsHub extends StatelessWidget {
     required this.onSelect,
     required this.pages,
     this.email,
+    this.googlePicture,
+    this.emailLoading = false,
   });
 
   List<SettingsCategory> get categories => [
@@ -166,18 +172,8 @@ class SettingsHub extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        if (email != null && current == null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
-            child: Text(
-              email!,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: ink,
-              ),
-            ),
-          ),
+        if (email != null || emailLoading)
+          ProfileHeader(email: email, googlePicture: googlePicture),
         for (final c in categories)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
