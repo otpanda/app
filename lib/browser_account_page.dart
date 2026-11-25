@@ -1326,6 +1326,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 child: SettingsHub(
                   fillPages: const {SettingsCategory.devices},
                   email: overview?['email'] as String?,
+                  emailLoading: overview == null && busy,
+                  googlePicture: overview?['picture'] is String
+                      ? overview!['picture'] as String
+                      : null,
                   selected: settingsCategory,
                   onSelect: (c) {
                     setState(() {
