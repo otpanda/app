@@ -57,6 +57,13 @@ abstract interface class SessionContinuityBridge {
   int get accessExpiresAt;
 }
 
+/// Content-free realtime hints. The listener receives a reason ('connect' after
+/// every open, 'changed' on a server hint) and must only trigger an ordinary
+/// authenticated refresh; hints carry no data. Returns an unsubscribe function.
+abstract interface class RealtimeBridge {
+  void Function() realtimeSubscribe(void Function(String reason) listener);
+}
+
 /// New TOTP creation never exposes stored seed material.
 abstract interface class TotpManagementBridge {
   Future<String> addTotp(String label, String account, String secret);

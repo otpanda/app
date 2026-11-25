@@ -38,6 +38,7 @@ extension type _Session(JSObject _) implements JSObject {
   external JSNumber view();
   external JSPromise<JSAny?> maintain();
   external JSNumber accessExpiresAt();
+  external JSFunction realtimeSubscribe(JSFunction listener);
   external void setView(JSNumber view);
   external JSString email();
   external JSString pendingLabel();
@@ -98,6 +99,7 @@ class _Browser
         BrowserSessionBridge,
         SessionViewBridge,
         SessionContinuityBridge,
+        RealtimeBridge,
         AssignmentBridge,
         AuthEntryBridge,
         FirstPasskeyBridge,
@@ -179,6 +181,19 @@ class _Browser
 
   @override
   int get accessExpiresAt => _session.accessExpiresAt().toDartInt;
+  @override
+  void Function() realtimeSubscribe(void Function(String reason) listener) {
+    try {
+      final stop = _session.realtimeSubscribe(
+        ((JSString reason) => listener(reason.toDart)).toJS,
+      );
+      return () => stop.callAsFunction();
+    } catch (_) {
+      // Older bootstrap without the realtime client: nothing to subscribe to.
+      return () {};
+    }
+  }
+
   @override
   int get restoredView => _session.view().toDartInt;
   @override
