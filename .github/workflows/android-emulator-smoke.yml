@@ -53,6 +53,7 @@ jobs:
             bash tool/android-emulator-smoke.sh build/app/outputs/flutter-apk/app-google-debug.apk smoke-out
             bash tool/android-os-qualify.sh os-qualify-out
             API_DIR="$PWD/api-qualification" bash tool/android-roundtrip.sh roundtrip-out
+            API_DIR="$PWD/api-qualification" bash tool/android-signed-in-ui.sh signed-in-ui-out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -61,4 +62,5 @@ jobs:
             smoke-out
             os-qualify-out
             roundtrip-out
+            signed-in-ui-out
           retention-days: 7
