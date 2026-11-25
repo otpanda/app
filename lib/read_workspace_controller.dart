@@ -28,7 +28,8 @@ class ReadWorkspaceController extends ChangeNotifier {
   String message = '';
   bool rateLimited = false, sessionEnded = false, hasLoaded = false;
   int publishedRevision = 0;
-  int _epoch = 0, _nextRefreshAt = 0, _nextAutomaticAt = 0;
+  bool connectionLost = false;
+  int _epoch = 0, _nextRefreshAt = 0;
   void Function()? _unsubscribeRealtime;
   Timer? _hintTimer;
   bool _hintPending = false;
@@ -66,6 +67,12 @@ class ReadWorkspaceController extends ChangeNotifier {
 
   void _onHint(String reason) {
     if (_disposed || suspended || !signedIn) return;
+    if (reason == 'connection-lost' || reason == 'connection-restored') {
+      connectionLost = reason == 'connection-lost';
+      _notify();
+      return;
+    }
+    if (reason != 'connect' && reason != 'changed') return;
     _hintPending = true;
     _drainHint();
   }
@@ -99,7 +106,6 @@ class ReadWorkspaceController extends ChangeNotifier {
     if (!canRefresh || _disposed) return;
     final epoch = ++_epoch;
     _nextRefreshAt = clock() + 15000;
-    _nextAutomaticAt = clock() + 30000;
     loading = true;
     message = '';
     rateLimited = false;
@@ -170,9 +176,6 @@ class ReadWorkspaceController extends ChangeNotifier {
       message = 'Your session ended. Sign in again.';
     }
     _ensureRealtime();
-    if (canRefresh && (!hasLoaded || clock() >= _nextAutomaticAt)) {
-      refresh();
-    }
     _notify();
   }
 
@@ -180,6 +183,7 @@ class ReadWorkspaceController extends ChangeNotifier {
     ++_epoch;
     loading = false;
     hasLoaded = false;
+    connectionLost = false;
     store.clear();
     _notify();
   }
