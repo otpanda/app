@@ -47,6 +47,8 @@ extension type _Session(JSObject _) implements JSObject {
   );
   external JSPromise<JSAny?> googleContinue(JSString action, JSString proof);
   external JSPromise<JSAny?> googleStart(JSBoolean remember);
+  external JSPromise<JSString> connectGoogle();
+  external JSString googleLinkResult();
   external JSBoolean firstPasskeyAvailable();
   external JSPromise<JSAny?> firstPasskey();
   external JSPromise<JSAny?> addPasskey();
@@ -91,7 +93,15 @@ class _Browser
         RecoveryBridge,
         TotpManagementBridge,
         GmailSourceBridge,
-        GoogleLinkBridge {
+        GoogleLinkBridge,
+        GoogleConnectBridge {
+  @override
+  bool get googleConnectAvailable => true;
+  @override
+  Future<String> connectGoogle() async =>
+      (await _session.connectGoogle().toDart).toDart;
+  @override
+  String takeGoogleLinkResult() => _session.googleLinkResult().toDart;
   @override
   bool get googleDisconnectAvailable => recoveryAvailable;
   @override
@@ -288,4 +298,4 @@ class _Browser
     final response = await _session.read(path.toJS).toDart;
     return SessionResponse(response.status.toDartInt, response.body.toDart);
   }
-        }
+}

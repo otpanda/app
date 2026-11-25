@@ -54,10 +54,10 @@ void main() {
         expect(find.text('Connect'), findsNothing);
       } else {
         expect(find.text('Not connected'), findsOneWidget);
+        // A bridge without the signed-in connect never offers the signed-out
+        // Google sign-in from here.
+        expect(find.text('Connect'), findsNothing);
         expect(b.starts, isEmpty);
-        await t.tap(find.text('Connect'));
-        await t.pumpAndSettle();
-        expect(b.starts, ['google']);
       }
       await t.pumpWidget(const SizedBox());
     });
