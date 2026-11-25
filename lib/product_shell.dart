@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'browser_session_contract.dart';
 import 'assignment_dialog.dart';
+import 'entry_domains_dialog.dart';
 import 'entry_manage_dialog.dart';
 import 'totp_enrollment.dart';
 import 'gmail_source.dart';
@@ -39,6 +40,10 @@ class ProductShell extends StatefulWidget {
   /// Offer "Edit" on owned entries. Off until the rename/account routes are
   /// mounted and verified for the real account.
   final bool entryEditEnabled;
+
+  /// Offer "Websites" (private extra exact domains) on every entry, owned or
+  /// shared. Off until the API's entry/domains routes are mounted and verified.
+  final bool entryDomainsEnabled;
   final int initialTab;
   final ValueChanged<int>? onTabChanged;
 
@@ -57,6 +62,7 @@ class ProductShell extends StatefulWidget {
     this.profilePicture,
     this.assignmentEnabled = false,
     this.entryEditEnabled = false,
+    this.entryDomainsEnabled = false,
     this.initialTab = 0,
     this.onTabChanged,
     this.pageReload = platform.pageReload,
@@ -154,11 +160,8 @@ class _ProductShellState extends State<ProductShell> {
   String spaced(String c) =>
       c.length == 6 ? '${c.substring(0, 3)} ${c.substring(3)}' : c;
 
-  Widget avatar(String name) => ServiceAvatar(
-    service: name,
-    color: const Color(0xffdff3e8),
-    ink: ink,
-  );
+  Widget avatar(String name) =>
+      ServiceAvatar(service: name, color: const Color(0xffdff3e8), ink: ink);
 
   Widget codeTile(
     String title,
@@ -505,12 +508,25 @@ class _ProductShellState extends State<ProductShell> {
                   null,
                   false,
                   false,
-                  editable(e)
-                      ? IconButton(
-                          key: Key('edit-${e.id}'),
-                          tooltip: 'Edit entry',
-                          onPressed: () => editEntry(e),
-                          icon: const Icon(Icons.edit_outlined, size: 20),
+                  editable(e) || domainsEditable(e)
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (domainsEditable(e))
+                              IconButton(
+                                key: Key('domains-${e.id}'),
+                                tooltip: 'Websites',
+                                onPressed: () => editDomains(e),
+                                icon: const Icon(Icons.language, size: 20),
+                              ),
+                            if (editable(e))
+                              IconButton(
+                                key: Key('edit-${e.id}'),
+                                tooltip: 'Edit entry',
+                                onPressed: () => editEntry(e),
+                                icon: const Icon(Icons.edit_outlined, size: 20),
+                              ),
+                          ],
                         )
                       : null,
                 ),
@@ -600,6 +616,21 @@ class _ProductShellState extends State<ProductShell> {
       widget.entryEditEnabled &&
       e.manage &&
       widget.controller.bridge is EntryManagementBridge;
+
+  bool domainsEditable(ManagedEntry e) =>
+      widget.entryDomainsEnabled &&
+      widget.controller.bridge is EntryDomainsBridge;
+
+  Future<void> editDomains(ManagedEntry e) async {
+    if (!domainsEditable(e)) return;
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => EntryDomainsDialog(
+        bridge: widget.controller.bridge as EntryDomainsBridge,
+        entry: e,
+      ),
+    );
+  }
 
   Future<void> editEntry(ManagedEntry e) async {
     if (!editable(e)) return;

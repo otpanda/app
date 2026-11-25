@@ -435,6 +435,27 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       let ok=false;try{ok=r.status===200&&JSON.parse(text)?.ok===true;}catch{}
       if(!ok)throw Error('Not confirmed');return 'ok';
     },
+    entryDomains:async(kind,entryId,domainsJson)=>{
+      // Private extra websites for this viewer. Bearer-only, exact shapes, one request, never retried.
+      if(!['read','replace'].includes(kind))throw Error('Website change required');
+      let payload;
+      if(kind==='replace'){
+        if(typeof entryId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(entryId)||typeof domainsJson!=='string'||domainsJson.length>16384)throw Error('Website change required');
+        let list;try{list=JSON.parse(domainsJson);}catch{throw Error('Website change required');}
+        const label=/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+        if(!Array.isArray(list)||list.length>32||new Set(list).size!==list.length)throw Error('Website change required');
+        for(const d of list){const parts=typeof d==='string'?d.split('.'):[];if(parts.length<2||d.length>253||!parts.every(x=>label.test(x))||/^[0-9]+$/.test(parts[parts.length-1])||['local','localhost','internal','lan','arpa'].includes(parts[parts.length-1]))throw Error('Website change required');}
+        payload={entryId,domains:list};
+      }
+      if(!await maintainSession(true))throw Error('Not confirmed');
+      const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)throw Error('Not confirmed');
+      const init=kind==='read'?{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}}:{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(payload)};
+      const r=await fetch(API+'/v1/manage/entry/domains',init);
+      const text=await readBounded(r,kind==='read'?262144:65536);if(attempt!==generation)throw Error('Not confirmed');
+      if(r.status===401){await restoreAfterUnauthorized();throw Error('Not confirmed');}
+      if(r.status!==200)throw Error('Not confirmed');
+      return text;
+    },
     pendingLabel:()=>protectionPending?.pendingId.slice(0,6).toUpperCase()??'',
     protectionContinue:async action=>{
       const p=protectionPending,attempt=generation;if(!p||p.expiresAt<=Date.now()||!['passkey','check'].includes(action))throw Error('Start sign-in again.');

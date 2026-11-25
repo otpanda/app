@@ -85,6 +85,21 @@ abstract interface class EntryManagementBridge {
   Future<void> updateAccount(String entryId, String? account);
 }
 
+/// Private extra websites per entry, for the signed-in viewer only. A shared
+/// recipient edits their own list, never the owner's. Replace semantics: read
+/// first, send the whole list. Both throw when not confirmed and never retry.
+abstract interface class EntryDomainsBridge {
+  /// entryId -> exact HTTPS hosts. An entry with none is absent or empty.
+  Future<Map<String, List<String>>> readEntryDomains();
+
+  /// Replaces this viewer's list for one entry. Returns the normalized list
+  /// that was sent.
+  Future<List<String>> replaceEntryDomains(
+    String entryId,
+    List<String> domains,
+  );
+}
+
 /// Separate on purpose: delete has its own adapter and is offered only when
 /// the bridge implements it.
 abstract interface class EntryDeleteBridge {

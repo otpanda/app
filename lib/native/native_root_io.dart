@@ -30,6 +30,11 @@ const bool nativeSignInEnabled = bool.fromEnvironment('NATIVE_SIGNIN');
 const bool nativeEntryEditEnabled = bool.fromEnvironment(
   'NATIVE_ENTRY_EDIT_ENABLED',
 );
+
+/// Needs the API's /v1/manage/entry/domains routes deployed.
+const bool nativeEntryDomainsEnabled = bool.fromEnvironment(
+  'NATIVE_ENTRY_DOMAINS_ENABLED',
+);
 const bool nativeSettingsEnabled = bool.fromEnvironment(
   'NATIVE_SETTINGS_ENABLED',
 );
@@ -192,6 +197,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
                 assignmentEnabled: nativeAuthEnabled,
                 // Own switch: needs the server's native entry routes.
                 entryEditEnabled: nativeEntryEditEnabled,
+                entryDomainsEnabled: nativeEntryDomainsEnabled,
               );
               // Only with NATIVE_AUTH_ENABLED: the way into phone sign-in.
               if (!nativeAuthEnabled) return page;

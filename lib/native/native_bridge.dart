@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import '../browser_session_contract.dart';
+import '../entry_domains.dart';
 import '../google_link.dart';
 import '../recovery_contract.dart';
 import '../session_contract.dart';
@@ -59,6 +60,7 @@ class NativeSessionBridge
         TotpCreationCapability,
         AssignmentBridge,
         EntryManagementBridge,
+        EntryDomainsBridge,
         AuthEntryBridge,
         FirstPasskeyBridge,
         AdditionalPasskeyBridge,
@@ -527,6 +529,38 @@ class NativeSessionBridge
   }
 
   static final _entryId = RegExp(r'^[A-Za-z0-9_-]{1,128}$');
+
+  @override
+  Future<Map<String, List<String>>> readEntryDomains() async {
+    final r = await _call('GET', '/v1/manage/entry/domains');
+    if (r.status != 200) throw StateError('Not available');
+    try {
+      return parseEntryDomains(r.body);
+    } on FormatException {
+      throw StateError('Not available');
+    }
+  }
+
+  @override
+  Future<List<String>> replaceEntryDomains(
+    String entryId,
+    List<String> domains,
+  ) async {
+    final body = entryDomainsBody(entryId, domains);
+    if (body == null) throw StateError('Website change required');
+    final sent = (body['domains'] as List).cast<String>();
+    // One request. The 401 renew-and-retry in _call only happens before the
+    // server has accepted anything.
+    final r = await _call(
+      'POST',
+      '/v1/manage/entry/domains',
+      body: jsonEncode(body),
+    );
+    if (!entryDomainsConfirmed(r.status, r.body, sent)) {
+      throw StateError('Not confirmed');
+    }
+    return sent;
+  }
 
   @override
   Future<void> renameEntry(String entryId, String label) async {

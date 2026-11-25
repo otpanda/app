@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:js_interop';
 
 import 'browser_session_contract.dart';
+import 'entry_domains.dart';
 import 'google_link.dart';
 import 'gmail_source.dart';
 import 'recovery_contract.dart';
@@ -34,6 +35,11 @@ extension type _Session(JSObject _) implements JSObject {
     JSString value, [
     JSBoolean? clear,
   ]);
+  external JSPromise<JSString> entryDomains(
+    JSString kind,
+    JSString entryId,
+    JSString domainsJson,
+  );
   external JSPromise<JSString> assignmentPrepare(JSString target);
   external JSPromise<JSString> assignmentConfirm();
   external JSPromise<JSString> assignmentReconcile();
@@ -109,6 +115,7 @@ class _Browser
         RealtimeBridge,
         AssignmentBridge,
         EntryManagementBridge,
+        EntryDomainsBridge,
         AuthEntryBridge,
         FirstPasskeyBridge,
         AdditionalPasskeyBridge,
@@ -339,6 +346,41 @@ class _Browser
         'ok') {
       throw StateError('Not confirmed');
     }
+  }
+
+  @override
+  Future<Map<String, List<String>>> readEntryDomains() async {
+    try {
+      return parseEntryDomains(
+        (await _session.entryDomains('read'.toJS, ''.toJS, ''.toJS).toDart)
+            .toDart,
+      );
+    } on FormatException {
+      throw StateError('Not available');
+    }
+  }
+
+  @override
+  Future<List<String>> replaceEntryDomains(
+    String entryId,
+    List<String> domains,
+  ) async {
+    final body = entryDomainsBody(entryId, domains);
+    if (body == null) throw StateError('Website change required');
+    final sent = (body['domains'] as List).cast<String>();
+    final text =
+        (await _session
+                .entryDomains(
+                  'replace'.toJS,
+                  entryId.toJS,
+                  jsonEncode(sent).toJS,
+                )
+                .toDart)
+            .toDart;
+    if (!entryDomainsConfirmed(200, text, sent)) {
+      throw StateError('Not confirmed');
+    }
+    return sent;
   }
 
   @override
