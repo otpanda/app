@@ -605,6 +605,8 @@ test('an invalid restore callback (bad state) also falls back to Google once for
   const e=env({hash:'#code='+token+'&state=wrong',saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;
   assert.ok(e.context.location.assigned.startsWith('https://otpanda-api.abrahammurciano.workers.dev/auth/google/start?'));
   assert.equal(e.calls,0);
+});
+
 const XKEY='otpanda.extension.intent.v1',XID='abcdefghijklmnopabcdefghijklmnop',XHASH=`#extension=1&challenge=${NC}&redirect=chrome&state=${NS}`;
 const XCODE='c'.repeat(43),XRETURN=`https://${XID}.chromiumapp.org/#code=${XCODE}&state=${NS}`;
 const xRestored=async(begin,sv=new Map())=>{
