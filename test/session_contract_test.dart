@@ -28,6 +28,18 @@ Map<String, Object> code(String id, {int received = 100, int expires = 200}) =>
       'expiresAt': expires,
     };
 void main() {
+  test('persisted entry label wins over catalogue name on initial load and refresh', () {
+    final row = entry('id');
+    row['label'] = 'Fictional service';
+    expect(ManagedEntry.fromJson(row).service, 'Fictional service');
+    row['label'] = 'Renamed in UI';
+    expect(ManagedEntry.fromJson(row).service, 'Renamed in UI');
+    row['label'] = '';
+    expect(() => ManagedEntry.fromJson(row), throwsFormatException);
+    row.remove('label');
+    expect(ManagedEntry.fromJson(row).service, 'Northstar');
+  });
+
   test('optional account name may be absent, null or empty, not an invalid populated account', () {
     for (final value in [null, '']) {
       final row = entry('id');

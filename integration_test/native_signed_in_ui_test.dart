@@ -117,6 +117,12 @@ Future<void> _until(WidgetTester t, Finder f, {int secs = 20}) async {
     await t.pump(const Duration(milliseconds: 100));
     if (f.evaluate().isNotEmpty) return;
   }
+  await _shot(t, 'failure');
+  // Synthetic fixture only: include visible text to diagnose the failed stage.
+  // ignore: avoid_print
+  print(
+    'VISIBLE: ${t.widgetList<Text>(find.byType(Text)).map((v) => v.data ?? '').join(' | ')}',
+  );
   fail('never showed: $f');
 }
 
@@ -210,6 +216,25 @@ void main() {
         'Renamed in UI',
       );
 
+      // A cold page reconstructs the read model, without the optimistic edit overlay.
+      await t.pumpWidget(const SizedBox());
+      await t.pump();
+      await t.pumpWidget(
+        MaterialApp(
+          home: RepaintBoundary(
+            key: _shotKey,
+            child: BrowserAccountPage(
+              bridge: bridge,
+              navigation: 'codes',
+              accountOnly: true,
+              workspaceEnabled: true,
+              entryEditEnabled: true,
+            ),
+          ),
+        ),
+      );
+      await _until(t, find.text('Renamed in UI'));
+      await _shot(t, 'renamed-cold-page');
       await t.pumpWidget(const SizedBox());
       await ks.deleteKey();
     },

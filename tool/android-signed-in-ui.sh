@@ -20,6 +20,11 @@ for i in $(seq 1 60); do
 done
 grep -q '^READY' "$OUT/harness.log" || { echo "harness not ready"; exit 1; }
 adb reverse "tcp:$PORT" "tcp:$PORT"
+set +e
 flutter test integration_test/native_signed_in_ui_test.dart --flavor google -d "${DEVICE:-emulator-5554}" \
   --dart-define="HARNESS=http://127.0.0.1:$PORT" 2>&1 | tee "$OUT/test.log"
+result=${PIPESTATUS[0]}
+set -e
 python3 "$(dirname "$0")/extract-shots.py" "$OUT/test.log" "$OUT/shots"
+
+exit "$result"
