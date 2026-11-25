@@ -33,6 +33,37 @@ adb shell pm get-app-links "$PKG" > "$OUT/get-app-links-initial.txt" 2>&1
 # Resolver must be tested BEFORE any forced user selection.
 adb shell cmd package resolve-activity --brief -a android.intent.action.VIEW -c android.intent.category.BROWSABLE -d "https://$HOST/app-return" > "$OUT/verified-resolver.txt" 2>&1
 if grep -q "$PKG" "$OUT/verified-resolver.txt"; then say V2_UNFORCED_RESOLVER PASS "Android resolver chooses installed app"; else say V2_UNFORCED_RESOLVER FAIL "see verified-resolver.txt"; fi
+# Drive the actual shared signed-out Google button. FDroid must open its
+# automatic browser fallback without any separate browser-choice button.
+adb shell am force-stop com.google.android.apps.nexuslauncher || true
+adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+for attempt in $(seq 1 20); do
+  sleep 2
+  adb shell uiautomator dump /sdcard/applink-ui.xml >/dev/null 2>&1 || true
+  adb pull /sdcard/applink-ui.xml "$OUT/button-ui.xml" >/dev/null 2>&1 || true
+  if python3 - "$OUT/button-ui.xml" <<'PYTAP'
+import sys,re,subprocess,xml.etree.ElementTree as ET
+try: nodes=list(ET.parse(sys.argv[1]).iter('node'))
+except Exception: sys.exit(1)
+for n in nodes:
+    label=(n.get('text','')+' '+n.get('content-desc','')).strip()
+    if label in ['Continue with Google', 'Close app']:
+        b=list(map(int,re.findall(r'\d+',n.get('bounds',''))))
+        if len(b)==4:
+            subprocess.run(['adb','shell','input','tap',str((b[0]+b[2])//2),str((b[1]+b[3])//2)],check=True)
+            sys.exit(0 if label=='Continue with Google' else 1)
+sys.exit(1)
+PYTAP
+  then break; fi
+done
+sleep 8; shot b1_actual_google_button
+adb shell dumpsys activity activities > "$OUT/button-activities.txt" 2>&1
+adb shell uiautomator dump /sdcard/applink-ui.xml >/dev/null 2>&1 || true
+adb pull /sdcard/applink-ui.xml "$OUT/browser-ui.xml" >/dev/null 2>&1 || true
+if top | grep -qiE 'chrome|browser'; then say B1_BUTTON_BROWSER_DISPATCH PASS "actual Google button opened browser; inspect browser-ui and pixels for first-run/provider state"; else say B1_BUTTON_BROWSER_DISPATCH FAIL "browser not foreground; inspect button-ui and screenshot"; fi
+adb shell input keyevent KEYCODE_BACK; sleep 3; shot b2_cancel_return
+if top | grep -q "$PKG"; then say B2_CANCEL_RETURN PASS "browser Back resumed native app; no credential supplied"; else say B2_CANCEL_RETURN FAIL "native app not resumed"; fi
+
 S=$(rnd); C=$(rnd)
 # I1 return intent delivery (resolves in app, no chooser)
 adb shell am force-stop "$PKG"; adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 6
