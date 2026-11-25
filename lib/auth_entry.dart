@@ -69,7 +69,11 @@ class _AuthEntryState extends State<AuthEntry> {
   @override
   Widget build(BuildContext context) {
     final status = widget.status;
-    final google = ['google-email', 'google-link'].contains(status);
+    final google = [
+      'google-email',
+      'google-link',
+      'google-link-only',
+    ].contains(status);
     final protected = status == 'extra-verification';
     final authenticating = status == 'authenticating';
     final passkey = ['passkey-ready', 'signup-ready'].contains(status);
@@ -94,6 +98,8 @@ class _AuthEntryState extends State<AuthEntry> {
                   : google
                   ? (status == 'google-email'
                         ? 'Verify your email.'
+                        : status == 'google-link-only'
+                        ? 'Connect Google.'
                         : 'Connect your account.')
                   : signup
                   ? 'Create your passkey.'
@@ -116,6 +122,8 @@ class _AuthEntryState extends State<AuthEntry> {
                   : google
                   ? (status == 'google-email'
                         ? 'One more check: verify ${email.text} to finish signing in with Google.'
+                        : status == 'google-link-only'
+                        ? 'Verify a passkey to connect ${email.text} to your account. You stay signed in.'
                         : 'An account already uses this email. Verify its passkey to connect Google. No second account will be created.')
                   : signup
                   ? 'Create a passkey to sign in with your fingerprint, face or device PIN.'
@@ -296,6 +304,27 @@ class _AuthEntryState extends State<AuthEntry> {
                     googleCodeSent ? 'Send another code' : 'Email me a code',
                   ),
                 ),
+              ] else if (status == 'google-link-only') ...[
+                FilledButton.icon(
+                  onPressed: widget.busy
+                      ? null
+                      : () => widget.run(
+                          () => (widget.bridge as AuthEntryBridge)
+                              .googleContinue('link-only'),
+                        ),
+                  icon: const Icon(Icons.key),
+                  label: const Text('Verify with passkey'),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: widget.busy
+                      ? null
+                      : () => widget.run(
+                          () => (widget.bridge as AuthEntryBridge)
+                              .googleContinue('link-cancel'),
+                        ),
+                  child: const Text('Cancel'),
+                ),
               ] else
                 FilledButton(
                   onPressed: widget.busy
@@ -308,15 +337,16 @@ class _AuthEntryState extends State<AuthEntry> {
                     'Verify existing account and connect Google',
                   ),
                 ),
-              TextButton(
-                onPressed: widget.busy
-                    ? null
-                    : () {
-                        widget.bridge.clear();
-                        setState(() {});
-                      },
-                child: const Text('Use another sign-in method'),
-              ),
+              if (status != 'google-link-only')
+                TextButton(
+                  onPressed: widget.busy
+                      ? null
+                      : () {
+                          widget.bridge.clear();
+                          setState(() {});
+                        },
+                  child: const Text('Use another sign-in method'),
+                ),
             ],
             if (protected && widget.bridge is AuthEntryBridge) ...[
               Text(
