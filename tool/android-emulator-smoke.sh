@@ -16,7 +16,7 @@ for i in $(seq 1 30); do
   sleep 3
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || true
   adb pull /sdcard/ui.xml "$OUT/ui.xml" >/dev/null 2>&1 || true
-  if [ -s "$OUT/ui.xml" ] && grep -q "Continue with Google" "$OUT/ui.xml" && grep -q "Use a passkey" "$OUT/ui.xml" && ! grep -q "Sign in with browser" "$OUT/ui.xml"; then ok=1; break; fi
+  if [ -s "$OUT/ui.xml" ] && grep -q "Continue with Google" "$OUT/ui.xml" && grep -q "Sign in with a passkey" "$OUT/ui.xml" && ! grep -q "Sign in with browser" "$OUT/ui.xml"; then ok=1; break; fi
 done
 adb exec-out screencap -p > "$OUT/screen.png"
 adb logcat -d > "$OUT/logcat.txt" || true

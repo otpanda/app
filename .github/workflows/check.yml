@@ -113,10 +113,10 @@ jobs:
           for flavor in google fdroid; do
             flutter build apk --release --flavor "$flavor" --target-platform android-arm64 --dart-define=NATIVE_SIGNIN=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
             bash .github/scripts/verify-apk-signature.sh "build/app/outputs/flutter-apk/app-$flavor-release.apk"
+          done
           mapfile -t manifests < <(find build/app/intermediates/merged_manifests -name AndroidManifest.xml -type f)
           test "${#manifests[@]}" -ge 2
           python3 tool/check-android-backup.py "${manifests[@]}" --res android/app/src/main/res
-          done
   deploy-preview:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [web, android-debug]
