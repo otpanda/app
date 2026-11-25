@@ -44,6 +44,8 @@ void _registerFontLicenses() {
     for (final (name, path) in const [
       ('Figtree', 'assets/fonts/Figtree-OFL.txt'),
       ('Bricolage Grotesque', 'assets/fonts/BricolageGrotesque-OFL.txt'),
+      ('Google Sans', 'assets/fonts/GoogleSans-OFL.txt'),
+      ('2FA Directory (service names)', 'assets/2fa-directory-LICENSE.txt'),
       ('@zxing/library', 'assets/zxing/zxing-library-LICENSE.txt'),
       (
         'Font Awesome Free brand icons (CC BY 4.0)',
