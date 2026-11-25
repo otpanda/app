@@ -51,9 +51,11 @@ class ManagedFake extends FakeTransport
     implements EntryManagementBridge, EntryDeleteBridge {
   final calls2 = <String>[];
   Object? failWith;
+  int? failAfter;
   ManagedFake(super.routes);
   Future<void> _do(String c) async {
     calls2.add(c);
+    if (failAfter != null && calls2.length > failAfter!) throw StateError('x');
     if (failWith != null) throw failWith!;
   }
 
@@ -499,7 +501,109 @@ void main() {
     await t.pumpAndSettle();
     expect(tr.calls2, ['rename a Alpha Two', 'account a null']);
     expect(find.byKey(const Key('entry-manage')), findsNothing);
+    // Shown at once: the test clock never reopens the read gate, so no reload
+    // could have supplied it.
+    expect(find.text('Alpha Two'), findsOneWidget);
+    expect(find.text('Alpha'), findsNothing);
+    expect(find.text('me'), findsNothing);
+    expect(tr.calls, 5);
   });
+
+  testWidgets(
+    'entries: a confirmed rename shows at once on Codes and in search',
+    (t) async {
+      final r = twoEntries();
+      final tr = ManagedFake(r);
+      await pump(t, tr, initialTab: 3);
+      await t.tap(find.byKey(const Key('edit-a')));
+      await t.pumpAndSettle();
+      await t.enterText(find.byKey(const Key('entry-name')), 'Gamma');
+      await t.pump();
+      await t.tap(find.byKey(const Key('entry-save')));
+      await t.pumpAndSettle();
+      expect(find.text('Gamma'), findsOneWidget);
+      await t.tap(find.text('Codes'));
+      await t.pumpAndSettle();
+      expect(find.text('Gamma'), findsOneWidget);
+      expect(find.text('Alpha'), findsNothing);
+      final field = find.descendant(
+        of: find.byKey(const Key('product-top-bar')),
+        matching: find.byType(TextField),
+      );
+      await t.enterText(field, 'gamma');
+      await t.pumpAndSettle();
+      expect(find.text('Gamma'), findsOneWidget);
+      await t.enterText(field, 'alpha');
+      await t.pumpAndSettle();
+      expect(find.text('Gamma'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'entries: only the confirmed half shows when the second call fails',
+    (t) async {
+      final tr = ManagedFake(twoEntries());
+      await pump(t, tr, initialTab: 3);
+      await t.tap(find.byKey(const Key('edit-a')));
+      await t.pumpAndSettle();
+      await t.enterText(find.byKey(const Key('entry-name')), 'Delta');
+      await t.enterText(find.byKey(const Key('entry-account')), 'you');
+      await t.pump();
+      tr.failAfter = 1;
+      await t.tap(find.byKey(const Key('entry-save')));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('entry-error')), findsOneWidget);
+      expect(tr.calls2, ['rename a Delta', 'account a you']);
+      await t.tap(find.text('Cancel'));
+      await t.pumpAndSettle();
+      expect(find.text('Delta'), findsOneWidget);
+      expect(find.text('me'), findsOneWidget);
+      expect(find.text('you'), findsNothing);
+    },
+  );
+
+  test('a read that started before a confirmed edit cannot bring the old label back', () async {
+    var clock = now;
+    final gate = Completer<void>();
+    var stale = false;
+    final tr = FakeTransport(twoEntries())
+      ..handler = (path) async {
+        if (stale && path.endsWith('entries')) await gate.future;
+        return twoEntries()[path] ?? const SessionResponse(500, '{}');
+      };
+    final c = ReadWorkspaceController(bridge: tr, clock: () => clock);
+    await c.refresh();
+    expect(c.store.entries.single.service, 'Alpha');
+    clock += 20000;
+    stale = true;
+    final inFlight = c.refresh();
+    await Future<void>.delayed(Duration.zero);
+    c.applyEntryEdit('a', service: 'Omega');
+    expect(c.store.entries.single.service, 'Omega');
+    gate.complete();
+    await inFlight;
+    expect(c.store.entries.single.service, 'Omega');
+    // A later read that began after the edit now carries the server value.
+    clock += 20000;
+    stale = false;
+    await c.refresh();
+    expect(c.store.entries.single.service, 'Alpha');
+    c.dispose();
+  });
+
+  test(
+    'a confirmed edit for an entry the list does not have changes nothing',
+    () async {
+      final tr = FakeTransport(twoEntries());
+      final c = ReadWorkspaceController(bridge: tr, clock: () => now);
+      await c.refresh();
+      final rev = c.publishedRevision;
+      c.applyEntryEdit('nope', service: 'X');
+      expect(c.store.entries.single.service, 'Alpha');
+      expect(c.publishedRevision, greaterThanOrEqualTo(rev));
+      c.dispose();
+    },
+  );
 
   testWidgets('entries: empty name cannot be saved', (t) async {
     await pump(t, ManagedFake(twoEntries()), initialTab: 3);

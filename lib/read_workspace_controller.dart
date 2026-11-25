@@ -142,6 +142,27 @@ class ReadWorkspaceController extends ChangeNotifier {
     );
   }
 
+  // Server-confirmed entry edits not yet seen in a read that started after them.
+  // A read already in flight can still return the old label; the edit is laid
+  // over it so the list never goes back.
+  final Map<String, ({String? service, String? account})> _confirmed = {};
+  int _confirmedCount = 0;
+
+  /// The server confirmed this rename and/or account change: show it now.
+  /// No request is made here. A normal refresh still follows and reconciles.
+  void applyEntryEdit(String id, {String? service, String? account}) {
+    if (_disposed || !hasLoaded) return;
+    final prior = _confirmed[id];
+    _confirmed[id] = (
+      service: service ?? prior?.service,
+      account: account ?? prior?.account,
+    );
+    _confirmedCount++;
+    store.replaceEntry(id, service: service, account: account);
+    publishedRevision++;
+    _notify();
+  }
+
   /// Explicit local mutation invalidation, coalesced behind the existing gate.
   void refreshAfterMutation() {
     if (_disposed || suspended || !signedIn) return;
@@ -162,6 +183,7 @@ class ReadWorkspaceController extends ChangeNotifier {
     loading = true;
     message = '';
     rateLimited = false;
+    final confirmedAtStart = _confirmedCount;
     final staged = CodeStore(
       _BrowserReadTransport(bridge, () => !_disposed && epoch == _epoch),
     );
@@ -176,6 +198,16 @@ class ReadWorkspaceController extends ChangeNotifier {
           staged.updateSessionExpiry(
             (bridge as SessionContinuityBridge).accessExpiresAt,
             clock(),
+          );
+        }
+        // A read that began after the last confirmed edit already carries it.
+        // An older one may predate it, so the edits are laid over it.
+        if (confirmedAtStart == _confirmedCount) {
+          _confirmed.clear();
+        } else {
+          _confirmed.forEach(
+            (id, v) =>
+                staged.replaceEntry(id, service: v.service, account: v.account),
           );
         }
         store = staged;
@@ -241,6 +273,7 @@ class ReadWorkspaceController extends ChangeNotifier {
     loading = false;
     hasLoaded = false;
     _transportLost = false;
+    _confirmed.clear();
     _cancelReadRetry();
     store.clear();
     _notify();
