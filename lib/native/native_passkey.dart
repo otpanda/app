@@ -188,10 +188,13 @@ String passkeyStepUpRequestJson(
   Map<String, dynamic> begin, {
   required int nowMs,
   String rpId = 'otpanda.github.io',
+  String expiresKey = 'expires_at',
+  int maxAllow = 20,
+  int maxWindowMs = 300000,
 }) {
   final o = begin['options'];
   final token = begin['token'];
-  final exp = begin['expires_at'];
+  final exp = begin[expiresKey];
   if (token is! String ||
       token.isEmpty ||
       token.length > 512 ||
@@ -201,10 +204,10 @@ String passkeyStepUpRequestJson(
       o['challenge'] is! String ||
       !RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(o['challenge'] as String) ||
       o['allowCredentials'] is! List ||
-      (o['allowCredentials'] as List).length > 20 ||
+      (o['allowCredentials'] as List).length > maxAllow ||
       exp is! int ||
       exp <= nowMs ||
-      exp > nowMs + 300000) {
+      exp > nowMs + maxWindowMs) {
     throw const PasskeyException('invalid');
   }
   final allow = <Map<String, String>>[];
