@@ -126,3 +126,28 @@ jobs:
       - name: Deploy fictional-data app preview
         id: deployment
         uses: actions/deploy-pages@v4
+
+  persistent-signing-certificate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/native-ready-current'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify public persistent release certificate
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          trap 'rm -f "$RUNNER_TEMP/release.jks"' EXIT
+          keytool -exportcert -keystore "$RUNNER_TEMP/release.jks" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" -file "$RUNNER_TEMP/release-cert.der"
+          openssl x509 -inform DER -in "$RUNNER_TEMP/release-cert.der" -noout -fingerprint -sha1
+          openssl x509 -inform DER -in "$RUNNER_TEMP/release-cert.der" -noout -fingerprint -sha256
+          actual=$(openssl x509 -inform DER -in "$RUNNER_TEMP/release-cert.der" -noout -fingerprint -sha256 | cut -d= -f2)
+          test "$actual" = '05:C6:2F:2D:61:FB:DC:15:0F:DD:DA:58:E7:FB:C8:36:65:0A:65:74:3A:B5:3F:13:93:AE:08:D5:5C:A8:59:99'
