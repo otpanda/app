@@ -16,6 +16,7 @@ import 'page_reload_stub.dart'
     as platform;
 import 'main.dart' show green;
 import 'pull_to_refresh.dart';
+import 'service_logo.dart';
 import 'session_contract.dart';
 
 /// Read-only everyday shell for a signed-in account, backed by [CodeStore].
@@ -149,18 +150,10 @@ class _ProductShellState extends State<ProductShell> {
   String spaced(String c) =>
       c.length == 6 ? '${c.substring(0, 3)} ${c.substring(3)}' : c;
 
-  Widget avatar(String name) => Container(
-    width: 36,
-    height: 36,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      color: const Color(0xffdff3e8),
-      borderRadius: BorderRadius.circular(10),
-    ),
-    child: Text(
-      name.isEmpty ? '?' : name[0].toUpperCase(),
-      style: const TextStyle(fontWeight: FontWeight.w800, color: ink),
-    ),
+  Widget avatar(String name) => ServiceAvatar(
+    service: name,
+    color: const Color(0xffdff3e8),
+    ink: ink,
   );
 
   Widget codeTile(
