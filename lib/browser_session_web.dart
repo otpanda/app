@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:js_interop';
 
 import 'browser_session_contract.dart';
+import 'google_link.dart';
+import 'gmail_source.dart';
 import 'recovery_contract.dart';
 import 'session_contract.dart';
 
@@ -53,6 +55,9 @@ extension type _Session(JSObject _) implements JSObject {
   external JSPromise<JSAny?> passkey();
   external void clear();
   external void logout();
+  external JSPromise<_ReadResponse> gmailSourceStatus();
+  external JSPromise<JSAny?> connectGmail();
+  external JSPromise<JSString> disconnectGmail(JSString sourceId);
   external JSPromise<JSString> addTotp(
     JSString label,
     JSString account,
@@ -84,7 +89,32 @@ class _Browser
         FirstPasskeyBridge,
         AdditionalPasskeyBridge,
         RecoveryBridge,
-        TotpManagementBridge {
+        TotpManagementBridge,
+        GmailSourceBridge,
+        GoogleLinkBridge {
+  @override
+  bool get googleDisconnectAvailable => recoveryAvailable;
+  @override
+  Future<void> disconnectGoogle() =>
+      recoveryChange(const RecoveryChange(RecoveryKind.googleUnlink));
+
+  @override
+  Future<SessionResponse> gmailSourceStatus() async {
+    final r = await _session.gmailSourceStatus().toDart;
+    return SessionResponse(r.status.toDartInt, r.body.toDart);
+  }
+
+  @override
+  Future<void> connectGmail() async {
+    await _session.connectGmail().toDart;
+  }
+
+  @override
+  Future<GmailDisconnectResult> disconnectGmail(String id) async =>
+      GmailDisconnectResult.fromJson(
+        (await _session.disconnectGmail(id.toJS).toDart).toDart,
+      );
+
   @override
   Future<String> addTotp(String label, String account, String secret) async =>
       (await _session.addTotp(label.toJS, account.toJS, secret.toJS).toDart)
