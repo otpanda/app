@@ -13,15 +13,13 @@ Widget host(Future<void> Function() cb, {bool enabled = true}) => MaterialApp(
   ),
 );
 
+
 void main() {
   testWidgets('touch pull down at top calls onRefresh once', (t) async {
     var n = 0;
     await t.pumpWidget(host(() async => n++));
-    await t.drag(
-      find.text('row 0'),
-      const Offset(0, 400),
-      kind: PointerDeviceKind.touch,
-    );
+    await t.drag(find.text('row 0'), const Offset(0, 400),
+        kind: PointerDeviceKind.touch);
     await t.pumpAndSettle();
     expect(n, 1);
   });
@@ -29,11 +27,8 @@ void main() {
   testWidgets('disabled pull calls nothing', (t) async {
     var n = 0;
     await t.pumpWidget(host(() async => n++, enabled: false));
-    await t.drag(
-      find.text('row 0'),
-      const Offset(0, 400),
-      kind: PointerDeviceKind.touch,
-    );
+    await t.drag(find.text('row 0'), const Offset(0, 400),
+        kind: PointerDeviceKind.touch);
     await t.pumpAndSettle();
     expect(n, 0);
   });
@@ -42,11 +37,8 @@ void main() {
     var n = 0;
     await t.pumpWidget(host(() async => n++));
     await t.pump(const Duration(seconds: 5));
-    await t.drag(
-      find.text('row 0'),
-      const Offset(0, -100),
-      kind: PointerDeviceKind.touch,
-    );
+    await t.drag(find.text('row 0'), const Offset(0, -100),
+        kind: PointerDeviceKind.touch);
     await t.pumpAndSettle();
     expect(n, 0);
   });
