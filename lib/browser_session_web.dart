@@ -5,6 +5,7 @@ import 'browser_session_contract.dart';
 import 'google_link.dart';
 import 'gmail_source.dart';
 import 'recovery_contract.dart';
+import 'profile_cache.dart';
 import 'session_contract.dart';
 
 @JS('OTPandaSession')
@@ -18,6 +19,7 @@ extension type _Recovery(JSObject _) implements JSObject {
     JSBoolean warningAccepted,
   );
   external JSPromise<JSString> cancelRequest(JSString requestId);
+  external JSPromise<JSString> renamePasskey(JSString id, JSString? label);
   external JSPromise<JSAny?> start(JSString email);
   external JSPromise<JSNumber> verify(JSString email, JSString code);
   external JSPromise<JSAny?> sendCompletionCode(JSString email);
@@ -55,6 +57,16 @@ extension type _Session(JSObject _) implements JSObject {
   external JSPromise<JSAny?> signupEmail(JSString email, JSString proof);
   external JSPromise<JSAny?> start(JSString mode);
   external JSPromise<JSAny?> passkey();
+  external JSString profileRead(JSString ownerId, JSString sessionId);
+  external void profileWrite(
+    JSString ownerId,
+    JSString sessionId,
+    JSString email,
+    JSString? picture,
+  );
+  external void profileClear();
+  external JSBoolean profileRevoked();
+  external void onProfileRevoked(JSFunction listener);
   external void clear();
   external void logout();
   external JSPromise<_ReadResponse> gmailSourceStatus();
@@ -91,6 +103,8 @@ class _Browser
         FirstPasskeyBridge,
         AdditionalPasskeyBridge,
         RecoveryBridge,
+        PasskeyLabelBridge,
+        ProfileCacheBridge,
         TotpManagementBridge,
         GmailSourceBridge,
         GoogleLinkBridge,
@@ -129,6 +143,29 @@ class _Browser
   Future<String> addTotp(String label, String account, String secret) async =>
       (await _session.addTotp(label.toJS, account.toJS, secret.toJS).toDart)
           .toDart;
+  @override
+  String profileRead(String ownerId, String sessionId) =>
+      _session.profileRead(ownerId.toJS, sessionId.toJS).toDart;
+  @override
+  void profileWrite(
+    String ownerId,
+    String sessionId,
+    String email,
+    String? picture,
+  ) => _session.profileWrite(
+    ownerId.toJS,
+    sessionId.toJS,
+    email.toJS,
+    picture?.toJS,
+  );
+  @override
+  void profileClear() => _session.profileClear();
+  @override
+  bool get profileRevoked => _session.profileRevoked().toDart;
+  @override
+  void onProfileRevoked(void Function() listener) =>
+      _session.onProfileRevoked(listener.toJS);
+
   @override
   Future<SessionResponse> totpCode(String entryId) async {
     final r = await _session.totpCode(entryId.toJS).toDart;
@@ -174,6 +211,13 @@ class _Browser
               )
               .toDart)
           .toDart,
+    );
+  }
+
+  @override
+  Future<void> renamePasskey(String credentialId, String? label) async {
+    _outcome(
+      (await _rec.renamePasskey(credentialId.toJS, label?.toJS).toDart).toDart,
     );
   }
 
@@ -298,4 +342,4 @@ class _Browser
     final response = await _session.read(path.toJS).toDart;
     return SessionResponse(response.status.toDartInt, response.body.toDart);
   }
-}
+        }
