@@ -118,7 +118,11 @@ class _TotpPreviewPanelState extends State<TotpPreviewPanel>
           children: [
             const Text(
               'Generated code preview',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+              style: TextStyle(
+                fontFamily: 'BricolageGrotesque',
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 10),
             const Text(
@@ -137,7 +141,8 @@ class _TotpPreviewPanelState extends State<TotpPreviewPanel>
                 key: const ValueKey('generated-code'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                  fontFamily: 'monospace',
+                  fontFamily: 'Figtree',
+                  fontFeatures: [FontFeature.tabularFigures()],
                   fontSize: 36,
                   letterSpacing: 3,
                 ),
