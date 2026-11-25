@@ -336,3 +336,111 @@ test('Gmail disconnect returns only sanitized booleans from the API result',asyn
 test('Gmail disconnect reports unresolved lifecycle without claiming artifact removal',async()=>{const e=await disconnectEnv({disconnected:true,remoteRevoked:false,googlePermissionRemains:true,lifecycleBlocked:true});const r=JSON.parse(await e.context.OTPandaSession.disconnectGmail('source_1'));assert.deepEqual(r,{disconnected:true,googlePermissionRemains:true,lifecycleBlocked:true});});
 test('Gmail disconnect blocked by an in-flight operation changes nothing and is reported, not thrown',async()=>{const e=await disconnectEnv({disconnected:false,lifecycleBlocked:true});const r=JSON.parse(await e.context.OTPandaSession.disconnectGmail('source_1'));assert.equal(r.disconnected,false);assert.equal(r.lifecycleBlocked,true);});
 test('Gmail disconnect plain failure still throws',async()=>{const e=await disconnectEnv({disconnected:false});await assert.rejects(e.context.OTPandaSession.disconnectGmail('source_1'));});
+
+// Signed-in "Connect Google": same tab, marker holds only state and route.
+const LINK_KEY='otpanda.google-link.tab.v1',ticketValue='t'.repeat(43),pendingLink=(extra={})=>({email:'a@example.test',kind:'link-only',token,expiresAt:NOW+600000,...extra});
+const linkHash=(g,st=state)=>'#google='+encodeURIComponent(JSON.stringify(g))+'&state='+st;
+const marker=(patch={})=>JSON.stringify({state,route:'settings/account-security',created:NOW,...patch});
+function linkEnv(hash,m=marker()){const sessionValues=new Map(m?[[LINK_KEY,m]]:[]);const e=env({hint:true,hash,sessionValues});return {e,sessionValues};}
+const restoreNotice=e=>JSON.parse(e.stored).linkNotice;
+test('connectGoogle asks for a ticket with the memory bearer, stores only state and route, keeps session and hint',async()=>{
+ const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});await e.context.OTPandaSession.ready;
+ assert.equal(e.context.localStorage.getItem('otpanda-session-present'),'yes');
+ let call;e.context.fetch=async(url,o)=>{call={url,o};return{ok:true,status:200,text:async()=>JSON.stringify({ticket:ticketValue,expiresAt:NOW+60000})};};
+ const sv=new Map();e.context.sessionStorage.setItem=(k,v)=>sv.set(k,v);
+ assert.equal(await e.context.OTPandaSession.connectGoogle(),'');
+ assert.match(call.url,/\/v1\/manage\/google\/link\/ticket$/);assert.equal(call.o.method,'POST');assert.equal(call.o.headers.Authorization,'Bearer '+token);assert.equal(call.o.credentials,'omit');
+ const sent=JSON.parse(call.o.body);assert.deepEqual(Object.keys(sent),['state']);assert.match(sent.state,/^[A-Za-z0-9_-]{43}$/);
+ const m=JSON.parse(sv.get(LINK_KEY));assert.equal(m.state,sent.state);assert.deepEqual(Object.keys(m).sort(),['created','route','state']);assert.ok(!sv.get(LINK_KEY).includes(token));
+ assert.match(e.context.location.assigned,/\/auth\/google\/link\/start\?ticket=t{43}$/);
+ assert.equal(e.context.localStorage.getItem('otpanda-session-present'),'yes');assert.equal(e.context.OTPandaSession.access(),token);
+});
+test('connectGoogle refusals return a reason and never navigate or store a marker',async()=>{
+ for(const [status,body,reason] of [[409,{error:'no_passkey'},'no_passkey'],[409,{error:'already_linked'},'already_linked'],[429,{error:'retry'},'retry'],[401,{},'signin'],[500,{},'unavailable']]){
+  const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});await e.context.OTPandaSession.ready;
+  e.context.fetch=async()=>({ok:false,status,text:async()=>JSON.stringify(body)});const sv=new Map();e.context.sessionStorage.setItem=(k,v)=>sv.set(k,v);
+  assert.equal(await e.context.OTPandaSession.connectGoogle(),reason);assert.equal(e.context.location.assigned,undefined);assert.equal(sv.size,0);assert.equal(e.context.localStorage.getItem('otpanda-session-present'),'yes');
+ }
+});
+test('link-only return with matching marker shows verify, keeps hint, no access, marker consumed',async()=>{
+ const {e,sessionValues}=linkEnv(linkHash(pendingLink()));assert.ok(e.cleaned);await e.context.OTPandaSession.ready;
+ assert.equal(e.context.OTPandaSession.status(),'google-link-only');assert.equal(e.context.OTPandaSession.email(),'a@example.test');assert.equal(e.context.OTPandaSession.access(),undefined);
+ assert.equal(sessionValues.has(LINK_KEY),false);assert.equal(e.context.localStorage.getItem('otpanda-session-present'),'yes');assert.equal(e.context.location.assigned,undefined);assert.equal(e.calls,0);
+});
+test('link-only passkey verify uses continuation header only, then restores with a connected notice and never calls complete',async()=>{
+ const {e}=linkEnv(linkHash(pendingLink()));await e.context.OTPandaSession.ready;const calls=[];
+ e.context.navigator={credentials:{get:async()=>credential()}};
+ e.context.fetch=async(url,o)=>{calls.push({url,o});assert.equal(o.headers['X-OTPanda-Continuation'],token);assert.equal(o.headers.Authorization,undefined);assert.equal(o.credentials,'omit');return{ok:true,status:200,text:async()=>JSON.stringify(url.endsWith('/begin')?{token,options:{rpId:'otpanda.github.io',challenge:'A'.repeat(43),userVerification:'required',timeout:120000,allowCredentials:[]}}:{status:'ok'})};};
+ await e.context.OTPandaSession.googleContinue('link-only');
+ assert.deepEqual(calls.map(c=>c.url.split('/').pop()),['begin','verify']);const v=JSON.parse(calls[1].o.body);assert.deepEqual(Object.keys(v).sort(),['ceremony','emailProof','response']);assert.equal(v.emailProof,'');
+ assert.match(e.context.location.assigned,/\/auth\/restore\?/);assert.ok(!e.context.location.assigned.includes('/continue/complete'));
+ assert.equal(restoreNotice(e),'connected');assert.equal(JSON.parse(e.stored).route,'settings/account-security');assert.ok(!e.stored.includes(token));
+ assert.equal(e.context.localStorage.getItem('otpanda-session-present'),'yes');
+});
+test('dismissed passkey prompt keeps the pending link; cancel restores with a cancelled notice',async()=>{
+ const {e}=linkEnv(linkHash(pendingLink()));await e.context.OTPandaSession.ready;
+ e.context.navigator={credentials:{get:async()=>{throw Error('NotAllowed');}}};
+ e.context.fetch=async()=>({ok:true,status:200,text:async()=>JSON.stringify({token,options:{rpId:'otpanda.github.io',challenge:'A'.repeat(43),userVerification:'required',timeout:120000,allowCredentials:[]}})});
+ await assert.rejects(()=>e.context.OTPandaSession.googleContinue('link-only'));assert.equal(e.context.location.assigned,undefined);assert.equal(e.context.OTPandaSession.status(),'google-link-only');
+ await e.context.OTPandaSession.googleContinue('link-cancel');assert.match(e.context.location.assigned,/\/auth\/restore\?/);assert.equal(restoreNotice(e),'cancelled');
+});
+test('refused begin or verify restores with a restart notice, session hint kept',async()=>{
+ for(const failAt of ['begin','verify']){
+  const {e}=linkEnv(linkHash(pendingLink()));await e.context.OTPandaSession.ready;
+  e.context.navigator={credentials:{get:async()=>credential()}};
+  e.context.fetch=async url=>url.endsWith('/'+failAt)?{ok:false,status:403,text:async()=>'{"error":"restart"}'}:{ok:true,status:200,text:async()=>JSON.stringify({token,options:{rpId:'otpanda.github.io',challenge:'A'.repeat(43),userVerification:'required',timeout:120000,allowCredentials:[]}})};
+  await e.context.OTPandaSession.googleContinue('link-only');assert.match(e.context.location.assigned,/\/auth\/restore\?/);assert.equal(restoreNotice(e),'restart');assert.equal(e.context.localStorage.getItem('otpanda-session-present'),'yes');
+ }
+});
+test('an ordinary Google continuation with a live link marker stays ordinary and keeps the marker',async()=>{
+ const sessionValues=new Map([[LINK_KEY,marker({state:'m'.repeat(43)})]]);const g={email:'a@example.test',kind:'link',token,expiresAt:NOW+600000};
+ const e=env({hash:linkHash(g),saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues});await e.context.OTPandaSession.ready;
+ assert.equal(e.context.OTPandaSession.status(),'google-link');assert.equal(sessionValues.has(LINK_KEY),true);
+});
+test('restore carrying a link notice exposes it exactly once; bad notices are refused',async()=>{
+ const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW,route:'settings/account-security',linkNotice:'connected'})});await e.context.OTPandaSession.ready;
+ assert.equal(e.context.OTPandaSession.status(),'restored');assert.equal(e.context.OTPandaSession.googleLinkResult(),'connected');assert.equal(e.context.OTPandaSession.googleLinkResult(),'');
+ const bad=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW,linkNotice:'<b>'})});await bad.context.OTPandaSession.ready;
+ assert.equal(bad.context.OTPandaSession.status(),'sign-in-required');assert.equal(bad.context.OTPandaSession.googleLinkResult(),'');
+});
+const restores=e=>/\/auth\/restore\?/.test(e.context.location.assigned??'');
+const OLD=NOW-600001,ANCIENT=NOW-90000000;
+test('link-only success needs the exact state and a marker under 10 minutes; without a matching marker it is an unknown hash',async()=>{
+ for(const [hash,m] of [[linkHash(pendingLink()),null],[linkHash(pendingLink(),'x'.repeat(43)),marker()],[linkHash(pendingLink(),'x'.repeat(43)),marker({created:OLD})]]){
+  const {e}=linkEnv(hash,m);await e.context.OTPandaSession.ready;assert.notEqual(e.context.OTPandaSession.status(),'google-link-only');assert.equal(e.context.OTPandaSession.access(),undefined);assert.equal(e.context.location.assigned,undefined);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');assert.equal(e.context.localStorage.getItem('otpanda-session-present'),undefined);
+ }
+});
+test('a matching-state link return that is malformed ends the attempt: restore only, hint kept, never the sign-in parser',async()=>{
+ for(const hash of [linkHash(pendingLink({extra:1})),linkHash(pendingLink({kind:'link'})),linkHash(pendingLink({kind:'email'})),linkHash(pendingLink({token:'bad'})),linkHash(pendingLink({expiresAt:NOW-1})),linkHash(pendingLink({expiresAt:NOW+700000})),linkHash(pendingLink({email:5})),'#google=%7Bnot-json&state='+state,'#link=bogus&state='+state]){
+  const {e,sessionValues}=linkEnv(hash);await e.context.OTPandaSession.ready;
+  assert.notEqual(e.context.OTPandaSession.status(),'google-link-only');assert.ok(restores(e),hash);assert.equal(restoreNotice(e),'restart');assert.equal(sessionValues.has(LINK_KEY),false);assert.equal(e.context.localStorage.getItem('otpanda-session-present'),'yes');assert.equal(e.context.OTPandaSession.access(),undefined);assert.ok(!e.stored.includes(token));
+ }
+});
+test('a matching but older-than-10-minutes link-only return restores only, never offers or accepts the token',async()=>{
+ for(const created of [OLD,ANCIENT]){
+  const {e,sessionValues}=linkEnv(linkHash(pendingLink()),marker({created}));await e.context.OTPandaSession.ready;
+  assert.notEqual(e.context.OTPandaSession.status(),'google-link-only');assert.ok(restores(e));assert.equal(restoreNotice(e),'restart');assert.equal(sessionValues.has(LINK_KEY),false);assert.equal(e.context.localStorage.getItem('otpanda-session-present'),'yes');assert.ok(!e.stored.includes(token));
+ }
+});
+test('link restart or mismatch ends the attempt at any marker age: restore, notice, hint kept; wrong state with a live marker restores only; no marker is ordinary',async()=>{
+ for(const created of [NOW,OLD,ANCIENT])for(const [reason,st] of [['restart',state],['restart',''],['mismatch',state],['restart','x'.repeat(43)],['mismatch','y'.repeat(43)],['bogus','x'.repeat(43)]]){
+  const {e,sessionValues}=linkEnv('#link='+reason+'&state='+st,marker({created}));await e.context.OTPandaSession.ready;
+  assert.ok(restores(e));assert.equal(restoreNotice(e),['restart','mismatch'].includes(reason)?reason:'restart');assert.equal(e.context.localStorage.getItem('otpanda-session-present'),'yes');assert.equal(sessionValues.has(LINK_KEY),false);
+ }
+ for(const [m,st] of [[null,state],[null,'x'.repeat(43)]]){
+  const {e}=linkEnv('#link=restart&state='+st,m);await e.context.OTPandaSession.ready;assert.equal(e.context.location.assigned,undefined);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');
+ }
+});
+test('ordinary failure hash with a link marker and no saved ordinary record only restores; with a saved record or no marker it stays ordinary',async()=>{
+ for(const created of [NOW,OLD,ANCIENT])for(const hash of ['#auth=restart&state=','#auth=retry&state=','#auth=restart&state='+state]){
+  const {e,sessionValues}=linkEnv(hash,marker({created}));await e.context.OTPandaSession.ready;
+  assert.ok(restores(e));assert.equal(restoreNotice(e),'restart');assert.equal(e.context.localStorage.getItem('otpanda-session-present'),'yes');assert.equal(sessionValues.has(LINK_KEY),false);
+ }
+ const savedRecord=JSON.stringify({state,verifier:'v'.repeat(43),created:NOW});
+ const withKey=env({hint:true,hash:'#auth=restart&state='+state,saved:savedRecord,sessionValues:new Map([[LINK_KEY,marker()]])});await withKey.context.OTPandaSession.ready;
+ assert.equal(withKey.context.localStorage.getItem('otpanda-session-present'),undefined);assert.equal(withKey.context.location.assigned,undefined);
+ const noMarker=linkEnv('#auth=restart&state=',null);await noMarker.e.context.OTPandaSession.ready;assert.equal(noMarker.e.context.localStorage.getItem('otpanda-session-present'),undefined);assert.equal(noMarker.e.context.location.assigned,undefined);
+ for(const hash of ['#auth=sign-in&state=','#auth=restart&state=&x=1','#auth=email-sent&state=']){
+  const {e}=linkEnv(hash);await e.context.OTPandaSession.ready;assert.equal(e.context.location.assigned,undefined);
+ }
+});
