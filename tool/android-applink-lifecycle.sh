@@ -16,7 +16,8 @@ view(){ adb shell am start -W -a android.intent.action.VIEW -c android.intent.ca
 top(){ adb shell dumpsys activity activities 2>/dev/null | grep -E "topResumedActivity|mResumedActivity" | head -1; }
 : > "$OUT/summary.txt"
 adb install -r "$APK" > "$OUT/install.log" 2>&1 || { say INSTALL FAIL "$(tail -1 "$OUT/install.log")"; exit 1; }
-SIGNER=$(apksigner verify --print-certs "$APK" 2>/dev/null | grep -i "SHA-256 digest" | head -1 | awk '{print $NF}')
+APKSIGNER=$(find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/opt/android-sdk}}/build-tools" -name apksigner -type f | sort -V | tail -1)
+SIGNER=$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null | grep -i "SHA-256 digest" | head -1 | awk '{print $NF}')
 echo "signer=$SIGNER" > "$OUT/signer.txt"
 # V1 live assetlinks vs this APK's signer (verification proof only when they match)
 curl -fsS "https://$HOST/.well-known/assetlinks.json" -o "$OUT/assetlinks.json" 2> "$OUT/assetlinks.err"; AL=$?
@@ -47,11 +48,11 @@ try: nodes=list(ET.parse(sys.argv[1]).iter('node'))
 except Exception: sys.exit(1)
 for n in nodes:
     label=(n.get('text','')+' '+n.get('content-desc','')).strip()
-    if label in ['Continue with Google', 'Close app']:
+    if 'Continue with Google' in label or label=='Close app':
         b=list(map(int,re.findall(r'\d+',n.get('bounds',''))))
         if len(b)==4:
             subprocess.run(['adb','shell','input','tap',str((b[0]+b[2])//2),str((b[1]+b[3])//2)],check=True)
-            sys.exit(0 if label=='Continue with Google' else 1)
+            sys.exit(0 if 'Continue with Google' in label else 1)
 sys.exit(1)
 PYTAP
   then break; fi
