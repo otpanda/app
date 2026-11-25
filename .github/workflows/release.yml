@@ -114,6 +114,13 @@ jobs:
             bash .github/scripts/verify-apk-signature.sh "$apk"
             cp "$apk" "dist/otpanda-android-$flavor-${GITHUB_REF_NAME}.apk"
           done
+      - name: Verify merged release backup exclusions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t manifests < <(find build/app/intermediates/merged_manifests -name AndroidManifest.xml -type f)
+          test "${#manifests[@]}" -ge 2
+          python3 tool/check-android-backup.py "${manifests[@]}" --res android/app/src/main/res
       - uses: actions/upload-artifact@v4
         with:
           name: release-android
