@@ -83,7 +83,12 @@ class _State extends State<NativeSessionPage> {
   // Only the signup stages change the shared screen; everything else is the
   // plain welcome screen.
   String _authStatus(String s) =>
-      const {'email-code', 'code-invalid', 'signup-ready'}.contains(s)
+      const {
+        'email-code',
+        'code-invalid',
+        'signup-ready',
+        'google-link',
+      }.contains(s)
       ? s
       : 'sign-in-required';
 
@@ -98,6 +103,9 @@ class _State extends State<NativeSessionPage> {
     'unavailable' => 'OTPanda could not be reached. Try again later.',
     'network' => 'No connection. Check your network and try again.',
     'busy' => null,
+    'continue_required' => null,
+    'google_link_unconfirmed' =>
+      'Google may now be connected. Sign in with your passkey.',
     'browser_required' => 'This account needs sign-in in the browser.',
     _ => 'Sign-in did not complete. Try again.',
   };

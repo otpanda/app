@@ -40,6 +40,16 @@ class _AuthEntryState extends State<AuthEntry> {
   }
 
   @override
+  void didUpdateWidget(AuthEntry old) {
+    super.didUpdateWidget(old);
+    if (old.status != widget.status &&
+        widget.status == 'google-link' &&
+        widget.bridge is AuthEntryBridge) {
+      email.text = (widget.bridge as AuthEntryBridge).email;
+    }
+  }
+
+  @override
   void dispose() {
     email.dispose();
     proof.dispose();

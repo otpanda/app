@@ -41,10 +41,14 @@ jobs:
           target: google_apis
           profile: pixel_6
           disable-animations: true
-          script: bash tool/android-emulator-smoke.sh build/app/outputs/flutter-apk/app-google-debug.apk smoke-out
+          script: |
+            bash tool/android-emulator-smoke.sh build/app/outputs/flutter-apk/app-google-debug.apk smoke-out
+            bash tool/android-os-qualify.sh os-qualify-out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: emulator-smoke
-          path: smoke-out
+          path: |
+            smoke-out
+            os-qualify-out
           retention-days: 7

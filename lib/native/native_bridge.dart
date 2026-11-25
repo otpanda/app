@@ -190,7 +190,9 @@ class NativeSessionBridge
           controller.phase == NativeSessionPhase.offline ||
           controller.phase == NativeSessionPhase.unknown
       ? _sessionStatus
-      : (controller.auth.signupStage ?? _sessionStatus);
+      : (controller.auth.signupStage ??
+            controller.auth.googleLinkStage ??
+            _sessionStatus);
 
   String get _sessionStatus => switch (controller.phase) {
     NativeSessionPhase.signedIn => 'restored',
@@ -264,7 +266,7 @@ class NativeSessionBridge
   // Shared sign-in screen (AuthEntry). Same screen as web; only the platform
   // action differs. Failures land in controller.lastError.
   @override
-  String get email => '';
+  String get email => controller.auth.googleLinkEmail;
   @override
   String get pendingLabel => '';
 
@@ -286,9 +288,20 @@ class NativeSessionBridge
     return controller.signupBegin(a, proof.replaceAll(RegExp(r'[\s-]'), ''));
   }
 
+  /// Only kind "link" exists natively: an OS passkey step-up by the owner of
+  /// the existing account. No email step.
   @override
-  Future<void> googleContinue(String action, [String proof = '']) =>
-      throw UnsupportedError('Not available on this device.');
+  Future<void> googleContinue(String action, [String proof = '']) async {
+    if (action == 'link-cancel') return controller.googleLinkAbort();
+    final p = passkeys;
+    if (action != 'link' ||
+        p == null ||
+        controller.auth.googleLinkStage == null) {
+      throw StateError('Start Google sign-in again.');
+    }
+    await controller.googleLinkFinish(p);
+  }
+
   @override
   Future<String> protectionContinue(String action) =>
       throw UnsupportedError('Not available on this device.');
@@ -323,7 +336,10 @@ class NativeSessionBridge
 
   /// "Other ways to continue": drops any signup in progress and its pending key.
   @override
-  void clear() => unawaited(controller.signupAbort());
+  void clear() {
+    unawaited(controller.signupAbort());
+    unawaited(controller.googleLinkAbort());
+  }
 
   @override
   void logout() {

@@ -299,6 +299,12 @@ class NativeAuth {
         if (known != null && known.isNotEmpty && known.length <= 200)
           'recognition': known,
       });
+      if (r.status == 200 && r.body?['status'] == 'continue_required') {
+        if (!_holdGoogleLink(r.body!, key)) {
+          throw const NativeAuthException('protocol');
+        }
+        throw const NativeAuthException('continue_required');
+      }
       final n = r.body?['recognition'];
       if (r.status == 200 && n is String && n.isNotEmpty && n.length <= 200) {
         issued = n;
@@ -315,9 +321,152 @@ class NativeAuth {
     return session;
   }
 
+  // ---- Google continue (existing account, kind "link"). Install-bound: the
+  // same renewal key goes to complete, begin and finish, so the pending key is
+  // held (sign-in 'busy') until finish succeeds or the attempt is dropped.
+  // Contract: native-google-continue-CONTRACT-05a958d8. There is no email
+  // step natively; only kind "link" exists.
+  String? _glKey, _glContinuation, _glEmail;
+  int _glExpires = 0;
+  static final _glToken = RegExp(r'^otpda_[A-Za-z0-9_-]{55}$');
+
+  /// 'google-link' while a continuation is held, else null.
+  String? get googleLinkStage => _glKey == null ? null : 'google-link';
+  String get googleLinkEmail => _glEmail ?? '';
+
+  bool _holdGoogleLink(Map<String, dynamic> b, String key) {
+    final c = b['continuation'], e = b['email'], x = b['expires_at'];
+    if (b['kind'] != 'link' ||
+        c is! String ||
+        !_glToken.hasMatch(c) ||
+        e is! String ||
+        e.isEmpty ||
+        e.length > 254 ||
+        x is! int ||
+        x <= _now() ||
+        x > _now() + 660000) {
+      return false;
+    }
+    _glKey = key;
+    _glContinuation = c;
+    _glEmail = e;
+    _glExpires = x;
+    _keepPending = true;
+    return true;
+  }
+
+  /// Drops the continuation and its pending key. Nothing was created.
+  Future<void> googleLinkAbort() async {
+    final held = _glKey != null;
+    _glKey = null;
+    _glContinuation = null;
+    _glEmail = null;
+    _glExpires = 0;
+    if (held) {
+      _keepPending = false;
+      try {
+        await keystore.discardNewKey();
+      } finally {
+        _signingIn = false;
+      }
+    }
+  }
+
+  /// OS passkey step-up for the owner of the mailbox, then the finish call.
+  /// A dismissed prompt keeps the continuation so the person can retry or
+  /// cancel. A refused begin ends it. Once finish is sent, any failure ends it
+  /// as google_link_unconfirmed (never a blind retry).
+  Future<NativeSession> googleLinkFinish(PasskeyAssertionSource source) async {
+    final key = _glKey, cont = _glContinuation;
+    if (key == null || cont == null) {
+      throw const NativeAuthException('protocol');
+    }
+    if (!source.available) throw const NativeAuthException('unavailable');
+    if (_glExpires <= _now()) {
+      await googleLinkAbort();
+      throw const NativeAuthException('invalid_grant');
+    }
+    final b = await _post('/auth/native/google/continue/begin', {
+      'continuation': cont,
+      'renewal_key': key,
+    });
+    if (b.status != 200 || b.body == null) {
+      if (b.status == 401 || b.status == 409) await googleLinkAbort();
+      throw _fail(b.status, b.body);
+    }
+    final String request;
+    try {
+      request = passkeyStepUpRequestJson(b.body!, nowMs: _now());
+    } on PasskeyException {
+      await googleLinkAbort();
+      throw const NativeAuthException('protocol');
+    }
+    final String? raw;
+    try {
+      raw = await source.get(request);
+    } on PasskeyException catch (e) {
+      throw NativeAuthException(
+        e.code == 'cancelled' ? 'cancelled' : 'passkey_failed',
+      );
+    }
+    if (raw == null) throw const NativeAuthException('cancelled');
+    final Map<String, dynamic> response;
+    try {
+      response = passkeyAssertionBody(raw);
+    } on PasskeyException {
+      await googleLinkAbort();
+      throw const NativeAuthException('protocol');
+    }
+    String? known;
+    try {
+      known = await recognition?.read();
+    } catch (_) {
+      known = null;
+    }
+    ({int status, Map<String, dynamic>? body}) r;
+    try {
+      r = await post('/auth/native/google/continue/finish', {
+        'continuation': cont,
+        'renewal_key': key,
+        'token': b.body!['token'],
+        'response': response,
+        if (known != null && known.isNotEmpty && known.length <= 200)
+          'recognition': known,
+      });
+    } catch (_) {
+      // Outcome unknown: the continuation is single use. Start over.
+      await googleLinkAbort();
+      throw const NativeAuthException('google_link_unconfirmed');
+    }
+    if (r.status != 200) {
+      // The identity may be linked even when session issue failed. Never
+      // retry the link blindly: point to passkey sign-in.
+      await googleLinkAbort();
+      throw const NativeAuthException('google_link_unconfirmed');
+    }
+    final s = _session(r.body, null, false);
+    final n = r.body?['recognition'];
+    await store.writeDeviceId(s.deviceId);
+    await keystore.commitNewKey();
+    _glKey = null;
+    _glContinuation = null;
+    _glEmail = null;
+    _keepPending = false;
+    _signingIn = false;
+    if (n is String && n.isNotEmpty && n.length <= 200) {
+      try {
+        await recognition?.write(n);
+      } catch (_) {}
+    }
+    return s;
+  }
+
   /// New-key sign-in: the previous valid key survives until the server
   /// answers 200; any failure or cancel discards only the pending key.
   bool _signingIn = false;
+
+  /// Set by a step that keeps the pending key for a continuation.
+  bool _keepPending = false;
 
   Future<NativeSession> _withNewKey(
     Future<({int status, Map<String, dynamic>? body})> Function(String key)
@@ -342,11 +491,11 @@ class NativeAuth {
         await keystore.commitNewKey();
         return s;
       } catch (_) {
-        if (!accepted) await keystore.discardNewKey();
+        if (!accepted && !_keepPending) await keystore.discardNewKey();
         rethrow;
       }
     } finally {
-      _signingIn = false;
+      if (!_keepPending) _signingIn = false;
     }
   }
 

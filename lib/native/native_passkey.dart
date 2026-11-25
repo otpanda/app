@@ -181,6 +181,52 @@ String passkeyLoginRequestJson(
   });
 }
 
+/// Validates /auth/native/google/continue/begin ({token, options, expires_at},
+/// an owner-bound step-up) and returns the Credential Manager get request
+/// JSON. Unlike sign-in it names the owner's credentials (at most 20).
+String passkeyStepUpRequestJson(
+  Map<String, dynamic> begin, {
+  required int nowMs,
+  String rpId = 'otpanda.github.io',
+}) {
+  final o = begin['options'];
+  final token = begin['token'];
+  final exp = begin['expires_at'];
+  if (token is! String ||
+      token.isEmpty ||
+      token.length > 512 ||
+      o is! Map ||
+      o['rpId'] != rpId ||
+      o['userVerification'] != 'required' ||
+      o['challenge'] is! String ||
+      !RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(o['challenge'] as String) ||
+      o['allowCredentials'] is! List ||
+      (o['allowCredentials'] as List).length > 20 ||
+      exp is! int ||
+      exp <= nowMs ||
+      exp > nowMs + 300000) {
+    throw const PasskeyException('invalid');
+  }
+  final allow = <Map<String, String>>[];
+  for (final v in o['allowCredentials'] as List) {
+    final id = v is Map ? v['id'] : null;
+    if (v is! Map ||
+        (v['type'] != null && v['type'] != 'public-key') ||
+        id is! String ||
+        !RegExp(r'^[A-Za-z0-9_-]{1,1400}$').hasMatch(id)) {
+      throw const PasskeyException('invalid');
+    }
+    allow.add({'type': 'public-key', 'id': id});
+  }
+  return jsonEncode({
+    'rpId': rpId,
+    'challenge': o['challenge'],
+    'userVerification': 'required',
+    'timeout': (exp - nowMs).clamp(1, 120000),
+    'allowCredentials': allow,
+  });
+}
+
 final _otpToken = RegExp(r'^otpda_[A-Za-z0-9_-]{55}$');
 
 /// Validates a register-begin / first-passkey begin response exactly like

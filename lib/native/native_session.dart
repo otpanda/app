@@ -82,6 +82,10 @@ class NativeSessionController extends ChangeNotifier {
   Future<void> signupFinish(PasskeyCreationSource source) =>
       _signIn(() => auth.signupFinish(source));
 
+  Future<void> googleLinkAbort() => _step(auth.googleLinkAbort);
+  Future<void> googleLinkFinish(PasskeyAssertionSource source) =>
+      _signIn(() => auth.googleLinkFinish(source));
+
   Future<void> _step(Future<void> Function() f) async {
     try {
       lastError = null;
