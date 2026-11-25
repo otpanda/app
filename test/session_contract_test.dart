@@ -39,12 +39,14 @@ void main() {
       };
       final store = CodeStore(
         FakeTransport((path) async {
-          if (path.endsWith('/session'))
+          if (path.endsWith('/session')) {
             return ok({'ownerId': 'owner', 'expiresAt': 9999999999999});
-          if (path.endsWith('/entries'))
+          }
+          if (path.endsWith('/entries')) {
             return ok({
               'entries': [row],
             });
+          }
           if (path.endsWith('/active-codes')) return ok({'records': []});
           if (path.endsWith('/sources')) return ok({'sources': []});
           return ok({'codes': []});
