@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -27,6 +29,9 @@ class ReadWorkspaceController extends ChangeNotifier {
   bool rateLimited = false, sessionEnded = false, hasLoaded = false;
   int publishedRevision = 0;
   int _epoch = 0, _nextRefreshAt = 0, _nextAutomaticAt = 0;
+  void Function()? _unsubscribeRealtime;
+  Timer? _hintTimer;
+  bool _hintPending = false;
   ReadWorkspaceController({required this.bridge, int Function()? clock})
     : clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -36,6 +41,56 @@ class ReadWorkspaceController extends ChangeNotifier {
   bool get canRefresh =>
       !loading && !suspended && signedIn && clock() >= _nextRefreshAt;
   int get refreshWaitMs => (_nextRefreshAt - clock()).clamp(0, 60000);
+
+  /// Subscribes to content-free realtime hints while signed in and visible.
+  /// Idempotent. A hint only asks for the ordinary refresh, so every existing
+  /// rule (15 s gate, epoch guard, 401 handling) still applies.
+  void _ensureRealtime() {
+    if (_unsubscribeRealtime != null || _disposed || suspended || !signedIn) {
+      return;
+    }
+    if (bridge is! RealtimeBridge) return;
+    _unsubscribeRealtime = (bridge as RealtimeBridge).realtimeSubscribe(
+      _onHint,
+    );
+  }
+
+  void _stopRealtime() {
+    final stop = _unsubscribeRealtime;
+    _unsubscribeRealtime = null;
+    _hintTimer?.cancel();
+    _hintTimer = null;
+    _hintPending = false;
+    stop?.call();
+  }
+
+  void _onHint(String reason) {
+    if (_disposed || suspended || !signedIn) return;
+    _hintPending = true;
+    _drainHint();
+  }
+
+  /// One trailing refresh: runs now if the gate is open, otherwise once when
+  /// it opens. Many hints collapse into one request.
+  void _drainHint() {
+    if (!_hintPending || _disposed) return;
+    if (suspended || !signedIn) {
+      _hintPending = false;
+      return;
+    }
+    if (loading) return; // refresh() drains again when it finishes
+    final wait = _nextRefreshAt - clock();
+    if (wait <= 0) {
+      _hintPending = false;
+      refresh();
+    } else {
+      _hintTimer ??= Timer(Duration(milliseconds: wait), () {
+        _hintTimer = null;
+        _drainHint();
+      });
+    }
+  }
+
   void _notify() {
     if (!_disposed) notifyListeners();
   }
@@ -74,6 +129,7 @@ class ReadWorkspaceController extends ChangeNotifier {
         store.clear();
         hasLoaded = false;
         sessionEnded = true;
+        _stopRealtime();
         bridge.clear();
       }
       rateLimited = error.status == 429;
@@ -87,6 +143,7 @@ class ReadWorkspaceController extends ChangeNotifier {
       if (!_disposed && epoch == _epoch) {
         loading = false;
         _notify();
+        _drainHint();
       }
     }
   }
@@ -107,10 +164,12 @@ class ReadWorkspaceController extends ChangeNotifier {
     }
     if (store.sessionExpired(clock())) {
       sessionEnded = true;
+      _stopRealtime();
       bridge.clear();
       clear();
       message = 'Your session ended. Sign in again.';
     }
+    _ensureRealtime();
     if (canRefresh && (!hasLoaded || clock() >= _nextAutomaticAt)) {
       refresh();
     }
@@ -127,6 +186,7 @@ class ReadWorkspaceController extends ChangeNotifier {
 
   void suspend({bool preserve = false}) {
     suspended = true;
+    _stopRealtime();
     if (preserve) {
       ++_epoch;
       loading = false;
@@ -154,6 +214,7 @@ class ReadWorkspaceController extends ChangeNotifier {
       );
     }
     if (!signedIn) clear();
+    _ensureRealtime();
     _notify();
   }
 
@@ -176,6 +237,7 @@ class ReadWorkspaceController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _stopRealtime();
     _disposed = true;
     ++_epoch;
     store.clear();
