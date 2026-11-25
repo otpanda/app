@@ -7,7 +7,7 @@
   'use strict';
   const TOKEN = /^otpda_[A-Za-z0-9_-]{55}$/, CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
   const BINDING_KEY = 'otpanda.recovery.binding.v1.', BINDING_TTL = 30 * 60 * 1000; // matches the server's mailbox code lifetime (30 min);
-  const KINDS = ['email-escape-on', 'email-escape-off', 'passkey-revoke', 'session-revoke'];
+  const KINDS = ['email-escape-on', 'email-escape-off', 'passkey-revoke', 'session-revoke', 'google-unlink'];
   globalThis.OTPandaRecoveryFactory = caps => {
     const { api, access, generation, readBounded, encode, decode, random, fetchImpl, credentials, storage } = caps;
     const canonical = email => {
