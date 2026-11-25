@@ -689,11 +689,11 @@ void main() {
           'capabilities': {'manage': true},
           'service_id': id,
         };
-        expect(ManagedEntry.fromJson(j('github.com')).serviceId, 'github.com');
-        expect(ManagedEntry.fromJson(j('custom-totp')).serviceId, isNull);
+        expect(ManagedEntry.fromJson(j('github.com')).catalogId, 'github.com');
+        expect(ManagedEntry.fromJson(j('custom-totp')).catalogId, isNull);
         expect(ManagedEntry.fromJson(j('custom-totp')).totp, true);
-        expect(ManagedEntry.fromJson(j('http://x')).serviceId, isNull);
-        expect(ManagedEntry.fromJson(j(7)).serviceId, isNull);
+        expect(ManagedEntry.fromJson(j('http://x')).catalogId, isNull);
+        expect(ManagedEntry.fromJson(j(7)).catalogId, isNull);
       },
     );
     testWidgets('a renamed entry keeps its logo', (t) async {

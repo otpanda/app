@@ -381,7 +381,7 @@ class _ProductShellState extends State<ProductShell> {
                   true,
                   true,
                   null,
-                  e.serviceId,
+                  e.catalogId,
                 ),
               ),
             for (final e in withCode)
@@ -395,7 +395,7 @@ class _ProductShellState extends State<ProductShell> {
                   true,
                   false,
                   null,
-                  e.serviceId,
+                  e.catalogId,
                 ),
               ),
             for (final e in rest)
@@ -420,7 +420,7 @@ class _ProductShellState extends State<ProductShell> {
                     true,
                     false,
                     null,
-                    e.serviceId,
+                    e.catalogId,
                   ),
                 ),
               ),
@@ -526,7 +526,7 @@ class _ProductShellState extends State<ProductShell> {
                           icon: const Icon(Icons.edit_outlined, size: 20),
                         )
                       : null,
-                  e.serviceId,
+                  e.catalogId,
                 ),
               ),
           ],

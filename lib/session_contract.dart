@@ -36,14 +36,14 @@ class ManagedEntry {
 
   /// The catalogue service id the server stores (its primary domain), kept
   /// for cosmetic logo identity only. Null for custom entries.
-  final String? serviceId;
+  final String? catalogId;
   const ManagedEntry(
     this.id,
     this.service,
     this.account,
     this.manage, [
     this.totp = false,
-    this.serviceId,
+    this.catalogId,
   ]);
   factory ManagedEntry.fromJson(Map<String, dynamic> json) {
     final capabilities = json['capabilities'];
@@ -194,7 +194,7 @@ class CodeStore {
                 account ?? e.account,
                 e.manage,
                 e.totp,
-                e.serviceId,
+                e.catalogId,
               )
             : e,
     ];
