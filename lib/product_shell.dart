@@ -474,7 +474,7 @@ class _ProductShellState extends State<ProductShell> {
                 backgroundColor: green,
                 foregroundColor: Colors.white,
                 icon: const Icon(Icons.add),
-                label: const Text('Add TOTP'),
+                label: const Text('Add authenticator'),
                 onPressed: addAuthenticator,
               )
             : null,
