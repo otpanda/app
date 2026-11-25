@@ -86,6 +86,7 @@ const _asserted =
     '{"id":"i","rawId":"i","type":"public-key","response":{"clientDataJSON":"c","authenticatorData":"a","signature":"s","userHandle":"u"}}';
 
 void main() {
+  signupTests();
   final now = DateTime.now().millisecondsSinceEpoch;
 
   test('request JSON: rp, UV, resident key, exclusions limits', () {
@@ -182,7 +183,10 @@ void main() {
       calls = [];
       headersSeen = [];
       statuses = {};
-      bodies = {};
+      bodies = {
+        '/v1/manage/first-passkey/finish': '{"status":"registered"}',
+        '/v1/manage/passkey/add/register-finish': '{"status":"registered"}',
+      };
       pk = _Pk(created: _created, asserted: _asserted);
     });
 
@@ -256,6 +260,145 @@ void main() {
         headersSeen.every((h) => h['X-OTPanda-Enrollment'] == tok('Z')),
         isTrue,
       );
+    });
+  });
+}
+
+void signupTests() {
+  group('native signup', () {
+    late List<String> paths;
+    late List<Map<String, dynamic>> bodies;
+    late int beginStatus, finishStatus;
+    late bool existing;
+    late _St st;
+    late _Pk pk;
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    NativeSessionController ctl() => NativeSessionController(
+      NativeAuth(
+        post: (p, b) async {
+          paths.add(p);
+          bodies.add(Map<String, dynamic>.from(b));
+          if (p == '/auth/native/signup/email') {
+            return (status: 202, body: {'status': 'accepted'});
+          }
+          if (p == '/auth/native/signup/begin') {
+            if (beginStatus != 200) return (status: beginStatus, body: null);
+            return existing
+                ? (status: 200, body: {'existing': true})
+                : (
+                    status: 200,
+                    body: {
+                      'token': 'signup-token',
+                      'options': beginBody(now)['options'],
+                      'expires_at': now + 100000,
+                    },
+                  );
+          }
+          if (p == '/auth/native/signup/finish') {
+            return finishStatus == 200
+                ? (
+                    status: 200,
+                    body: {
+                      'device_id': 'DEV',
+                      'access': 'a',
+                      'access_expires_at': 9999999999999,
+                    },
+                  )
+                : (status: finishStatus, body: null);
+          }
+          return (status: 404, body: null);
+        },
+        keystore: _Ks(),
+        browser: _Br(),
+        google: _G(),
+        store: st,
+        apiOrigin: 'https://api.example',
+        launchUrl: (c, s) => Uri.parse('https://x/#$c$s'),
+      ),
+    );
+
+    setUp(() {
+      paths = [];
+      bodies = [];
+      beginStatus = 200;
+      finishStatus = 200;
+      existing = false;
+      st = _St();
+      pk = _Pk(created: _created);
+    });
+
+    test('email, code, passkey: same renewal key, session stored', () async {
+      final c = ctl();
+      await c.signupEmail('a@b.co');
+      expect(c.auth.signupStage, 'email-code');
+      await c.signupBegin('a@b.co', 'ABCD2345');
+      expect(c.auth.signupStage, 'signup-ready');
+      await c.signupFinish(pk);
+      expect(c.phase, NativeSessionPhase.signedIn);
+      expect(st.id, 'DEV');
+      expect(paths, [
+        '/auth/native/signup/email',
+        '/auth/native/signup/begin',
+        '/auth/native/signup/finish',
+      ]);
+      final keys = bodies.map((b) => b['renewal_key']).toSet();
+      expect(keys.length, 1);
+      expect(bodies[1]['email_code'], 'ABCD2345');
+      expect(bodies[2]['token'], 'signup-token');
+      expect(c.auth.signupStage, isNull);
+    });
+
+    test('wrong code stays on the code step', () async {
+      final c = ctl();
+      await c.signupEmail('a@b.co');
+      beginStatus = 401;
+      await c.signupBegin('a@b.co', 'WRONG222');
+      expect(c.auth.signupStage, 'code-invalid');
+    });
+
+    test('existing account ends signup with the sign-in message', () async {
+      final c = ctl();
+      await c.signupEmail('a@b.co');
+      existing = true;
+      await c.signupBegin('a@b.co', 'ABCD2345');
+      expect(c.lastError, 'signup_existing');
+      expect(c.auth.signupStage, isNull);
+    });
+
+    test(
+      'cancel at the OS sheet keeps the ceremony and never finishes',
+      () async {
+        final c = ctl();
+        await c.signupEmail('a@b.co');
+        await c.signupBegin('a@b.co', 'ABCD2345');
+        pk.created = null;
+        await c.signupFinish(pk);
+        expect(paths.contains('/auth/native/signup/finish'), isFalse);
+        expect(c.auth.signupStage, 'signup-ready');
+      },
+    );
+
+    test('finish failure never repeats creation and shows recovery', () async {
+      final c = ctl();
+      await c.signupEmail('a@b.co');
+      await c.signupBegin('a@b.co', 'ABCD2345');
+      finishStatus = 503;
+      await c.signupFinish(pk);
+      expect(c.lastError, 'signup_unconfirmed');
+      expect(c.auth.signupStage, isNull);
+      expect(c.phase, isNot(NativeSessionPhase.signedIn));
+      expect(st.id, isNull);
+      expect(paths.where((p) => p.endsWith('/finish')).length, 1);
+    });
+
+    test('abort releases sign-in so Google works again', () async {
+      final c = ctl();
+      await c.signupEmail('a@b.co');
+      await c.signupAbort();
+      expect(c.auth.signupStage, isNull);
+      await c.signupEmail('a@b.co');
+      expect(c.auth.signupStage, 'email-code');
     });
   });
 }

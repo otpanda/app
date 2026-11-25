@@ -185,7 +185,14 @@ class NativeSessionBridge
   Future<void> get ready async {}
 
   @override
-  String get status => switch (controller.phase) {
+  String get status =>
+      controller.phase == NativeSessionPhase.signedIn ||
+          controller.phase == NativeSessionPhase.offline ||
+          controller.phase == NativeSessionPhase.unknown
+      ? _sessionStatus
+      : (controller.auth.signupStage ?? _sessionStatus);
+
+  String get _sessionStatus => switch (controller.phase) {
     NativeSessionPhase.signedIn => 'restored',
     NativeSessionPhase.offline => 'session-paused',
     NativeSessionPhase.unknown => 'restoring',
@@ -270,9 +277,15 @@ class NativeSessionBridge
 
   /// INTERIM for account creation: no native register route exists, so it
   /// uses the browser handoff.
+  /// Native signup: no proof sends the code; with a code it verifies it and
+  /// prepares the passkey ceremony (status then becomes 'signup-ready').
   @override
-  Future<void> signupEmail(String email, [String proof = '']) =>
-      controller.signInWithBrowser();
+  Future<void> signupEmail(String email, [String proof = '']) async {
+    final a = email.trim();
+    if (proof.isEmpty) return controller.signupEmail(a);
+    return controller.signupBegin(a, proof.replaceAll(RegExp(r'[\s-]'), ''));
+  }
+
   @override
   Future<void> googleContinue(String action, [String proof = '']) =>
       throw UnsupportedError('Not available on this device.');
@@ -298,13 +311,19 @@ class NativeSessionBridge
     }
   }
 
+  /// 'signup-ready': create the passkey through the OS and finish signup.
   @override
   Future<void> passkey() async {
-    throw StateError('Passkeys are managed in the browser for now.');
+    final c = creation;
+    if (controller.auth.signupStage != 'signup-ready' || c == null) {
+      throw StateError('Start sign-up again.');
+    }
+    await controller.signupFinish(c);
   }
 
+  /// "Other ways to continue": drops any signup in progress and its pending key.
   @override
-  void clear() {}
+  void clear() => unawaited(controller.signupAbort());
 
   @override
   void logout() {
@@ -501,6 +520,8 @@ class NativeSessionBridge
   // ---- Passkey creation (same URLs and bodies as tool/session-bootstrap.js).
   // Nothing here is a completed enrollment until the server answers 200.
 
+  bool _finishSent = false;
+
   bool get _canCreate => creation?.available ?? false;
 
   /// The one-time Google enrollment grant, only while it is fresh.
@@ -535,6 +556,7 @@ class NativeSessionBridge
     );
     final raw = await source.create(request);
     if (raw == null) throw StateError('Passkey setup cancelled');
+    _finishSent = true;
     final done = await _call(
       'POST',
       finishPath,
@@ -544,8 +566,10 @@ class NativeSessionBridge
       }),
       headers: headers,
     );
-    if (done.status != 200 && done.status != 201 && done.status != 204) {
-      throw ClientFailure(done.status);
+    if (done.status != 200) throw ClientFailure(done.status);
+    final d = jsonDecode(done.body);
+    if (d is! Map || d['status'] != 'registered') {
+      throw StateError('Passkey setup was not confirmed.');
     }
   }
 
@@ -564,12 +588,19 @@ class NativeSessionBridge
         headers: h,
       ),
     );
-    await _createAndFinish(
-      begin: begin,
-      first: true,
-      finishPath: '/v1/manage/first-passkey/finish',
-      headers: h,
-    );
+    try {
+      await _createAndFinish(
+        begin: begin,
+        first: true,
+        finishPath: '/v1/manage/first-passkey/finish',
+        headers: h,
+      );
+    } finally {
+      // The one-time grant is spent once finish was sent (the server consumes
+      // it on finish). A cancel before finish keeps it.
+      if (_finishSent) controller.consumeEnrollGrant();
+      _finishSent = false;
+    }
   }
 
   @override

@@ -434,6 +434,149 @@ class NativeAuth {
     return _session(r.body, id);
   }
 
+  // ---- Native signup (email code, then a new passkey). Install-bound: the
+  // same renewal key goes to all three calls, so one pending key is held for
+  // the whole flow and sign-in is blocked ('busy') until it ends.
+  String? _signupKey;
+  String? _signupToken;
+  Map<String, dynamic>? _signupOptions;
+  int _signupExpires = 0;
+  bool _signupCodeInvalid = false;
+
+  /// 'email-code', 'code-invalid', 'signup-ready' or null (not signing up).
+  String? get signupStage {
+    if (_signupKey == null) return null;
+    if (_signupToken != null) return 'signup-ready';
+    return _signupCodeInvalid ? 'code-invalid' : 'email-code';
+  }
+
+  Future<void> signupAbort() async {
+    final held = _signupKey != null;
+    _signupKey = null;
+    _signupToken = null;
+    _signupOptions = null;
+    _signupCodeInvalid = false;
+    if (held) {
+      try {
+        await keystore.discardNewKey();
+      } finally {
+        _signingIn = false;
+      }
+    }
+  }
+
+  /// Sends the code. The server always answers 202 (no existence oracle).
+  Future<void> signupEmail(String email) async {
+    if (_signupKey == null) {
+      if (_signingIn) throw const NativeAuthException('busy');
+      _signingIn = true;
+      try {
+        _signupKey = await _newRenewalKey();
+      } catch (_) {
+        _signingIn = false;
+        rethrow;
+      }
+    }
+    final r = await _post('/auth/native/signup/email', {
+      'email': email,
+      'renewal_key': _signupKey,
+    });
+    if (r.status != 202) throw _fail(r.status, r.body);
+    _signupToken = null;
+    _signupCodeInvalid = false;
+  }
+
+  /// Verifies the emailed code. An existing account ends the flow and says so.
+  Future<void> signupBegin(String email, String code) async {
+    final key = _signupKey;
+    if (key == null) throw const NativeAuthException('protocol');
+    final r = await _post('/auth/native/signup/begin', {
+      'email': email,
+      'email_code': code,
+      'renewal_key': key,
+    });
+    if (r.status == 401) {
+      _signupCodeInvalid = true;
+      return;
+    }
+    if (r.status != 200 || r.body == null) throw _fail(r.status, r.body);
+    if (r.body!['existing'] == true) {
+      await signupAbort();
+      throw const NativeAuthException('signup_existing');
+    }
+    final t = r.body!['token'],
+        o = r.body!['options'],
+        x = r.body!['expires_at'];
+    if (t is! String || o is! Map<String, dynamic> || x is! int) {
+      await signupAbort();
+      throw const NativeAuthException('protocol');
+    }
+    _signupToken = t;
+    _signupOptions = o;
+    _signupExpires = x;
+    _signupCodeInvalid = false;
+  }
+
+  /// OS passkey creation, then the finish call. Cancel keeps the ceremony.
+  Future<NativeSession> signupFinish(PasskeyCreationSource source) async {
+    final key = _signupKey, token = _signupToken, options = _signupOptions;
+    if (key == null || token == null || options == null) {
+      throw const NativeAuthException('protocol');
+    }
+    if (!source.available) throw const NativeAuthException('unavailable');
+    final String request;
+    try {
+      request = passkeyCreationRequestJson(
+        {'token': token, 'options': options, 'expiresAt': _signupExpires},
+        nowMs: _now(),
+        first: true,
+        strictToken: false,
+      );
+    } on PasskeyException {
+      await signupAbort();
+      throw const NativeAuthException('protocol');
+    }
+    final String? raw;
+    try {
+      raw = await source.create(request);
+    } on PasskeyException {
+      throw const NativeAuthException('passkey_failed');
+    }
+    if (raw == null) throw const NativeAuthException('cancelled');
+    final Map<String, dynamic> response;
+    try {
+      response = passkeyRegistrationBody(raw);
+    } on PasskeyException {
+      await signupAbort();
+      throw const NativeAuthException('protocol');
+    }
+    // Once finish is sent the account may exist even if the answer is lost or
+    // refused (for example a session issue failed after creation). Never
+    // repeat creation: end the attempt and point to passkey sign-in.
+    ({int status, Map<String, dynamic>? body}) r;
+    try {
+      r = await post('/auth/native/signup/finish', {
+        'renewal_key': key,
+        'token': token,
+        'response': response,
+      });
+    } catch (_) {
+      r = (status: 0, body: null);
+    }
+    if (r.status != 200) {
+      await signupAbort();
+      throw const NativeAuthException('signup_unconfirmed');
+    }
+    final s = _session(r.body, null, false);
+    await store.writeDeviceId(s.deviceId);
+    await keystore.commitNewKey();
+    _signupKey = null;
+    _signupToken = null;
+    _signupOptions = null;
+    _signingIn = false;
+    return s;
+  }
+
   /// Local material is removed only after the server confirmed with 204.
   /// Any other answer, including 401, leaves it so logout can be retried.
   Future<void> logout() async {

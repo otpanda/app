@@ -191,13 +191,16 @@ String passkeyCreationRequestJson(
   Map<String, dynamic> begin, {
   required int nowMs,
   required bool first,
+  bool strictToken = true,
   String rpId = 'otpanda.github.io',
 }) {
   final o = begin['options'];
   final token = begin['token'];
   final exp = begin['expiresAt'];
   if (token is! String ||
-      !_otpToken.hasMatch(token) ||
+      (strictToken
+          ? !_otpToken.hasMatch(token)
+          : token.isEmpty || token.length > 512) ||
       o is! Map ||
       o['rp'] is! Map ||
       (o['rp'] as Map)['id'] != rpId ||

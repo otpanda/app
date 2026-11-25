@@ -80,7 +80,18 @@ class _State extends State<NativeSessionPage> {
     }
   }
 
+  // Only the signup stages change the shared screen; everything else is the
+  // plain welcome screen.
+  String _authStatus(String s) =>
+      const {'email-code', 'code-invalid', 'signup-ready'}.contains(s)
+      ? s
+      : 'sign-in-required';
+
   String? _error(String? k) => switch (k) {
+    'signup_existing' =>
+      'An account already uses this email. Sign in with your passkey instead.',
+    'signup_unconfirmed' => 'Sign-up did not finish. If your account was created, sign in with your passkey.',
+    'passkey_failed' => 'The passkey could not be created. Try again.',
     null => null,
     'cancelled' => null,
     'rate_limited' => 'Too many attempts. Try again in a minute.',
@@ -109,7 +120,7 @@ class _State extends State<NativeSessionPage> {
           appBar: AppBar(title: const Text('OTPanda')),
           body: AuthEntry(
             bridge: shared,
-            status: 'sign-in-required',
+            status: _authStatus(shared.status),
             message: err ?? '',
             busy: busy,
             run: _run,

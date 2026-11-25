@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'native_auth.dart';
+import 'native_passkey.dart';
 
 enum NativeSessionPhase {
   unknown,
@@ -72,6 +73,32 @@ class NativeSessionController extends ChangeNotifier {
   Future<void> signInWithBrowser({String? provider, bool? remember}) => _signIn(
     () => auth.signInWithBrowser(provider: provider, remember: remember),
   );
+
+  Future<void> signupEmail(String email) =>
+      _step(() => auth.signupEmail(email));
+  Future<void> signupBegin(String email, String code) =>
+      _step(() => auth.signupBegin(email, code));
+  Future<void> signupAbort() => _step(auth.signupAbort);
+  Future<void> signupFinish(PasskeyCreationSource source) =>
+      _signIn(() => auth.signupFinish(source));
+
+  Future<void> _step(Future<void> Function() f) async {
+    try {
+      lastError = null;
+      await f();
+    } on NativeAuthException catch (e) {
+      lastError = e.kind;
+    }
+    notifyListeners();
+  }
+
+  /// The first passkey or device key used the one-time grant: stop offering it.
+  void consumeEnrollGrant() {
+    final s = _session;
+    if (s == null || s.enrollGrant == null) return;
+    _session = NativeSession(s.deviceId, s.access, s.accessExpiresAt);
+    notifyListeners();
+  }
 
   Future<void> signInWithPasskey() => _signIn(auth.signInWithPasskey);
 
