@@ -69,14 +69,20 @@ class NativeSessionController extends ChangeNotifier {
     return _phase == NativeSessionPhase.signedIn ? _session?.access : null;
   }
 
-  Future<void> signInWithBrowser() => _signIn(auth.signInWithBrowser);
+  Future<void> signInWithBrowser({String? provider, bool? remember}) => _signIn(
+    () => auth.signInWithBrowser(provider: provider, remember: remember),
+  );
+
+  Future<void> signInWithPasskey() => _signIn(auth.signInWithPasskey);
 
   /// Falls back to the browser when the account needs it (409).
-  Future<void> signInWithGoogle() => _signIn(() async {
+  Future<void> signInWithGoogle({bool? remember}) => _signIn(() async {
     try {
       return await auth.signInWithGoogle();
     } on NativeAuthException catch (e) {
-      if (e.kind == 'browser_required') return auth.signInWithBrowser();
+      if (e.kind == 'browser_required') {
+        return auth.signInWithBrowser(provider: 'google', remember: remember);
+      }
       rethrow;
     }
   });

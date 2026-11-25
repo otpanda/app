@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'native_handoff.dart';
+import 'native_passkey.dart';
 import 'native_signing.dart';
 
 /// Platform adapters. Real implementations (AndroidKeystore EC P-256 key,
@@ -93,7 +94,9 @@ class NativeAuth {
     required this.store,
     required this.apiOrigin,
     required this.launchUrl,
-  });
+    this.passkeys,
+    int Function()? now,
+  }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final JsonPost post;
   final NativeKeystore keystore;
@@ -101,6 +104,10 @@ class NativeAuth {
   final GoogleIdTokenSource google;
   final NativeSecureStore store;
   final String apiOrigin;
+
+  /// OS passkey (Credential Manager). Null or unavailable: no OS passkey.
+  final PasskeyAssertionSource? passkeys;
+  final int Function() _now;
 
   /// Builds the URL the Custom Tab opens (the Pages app, which signs in and
   /// continues to /auth/native/approve) for a PKCE challenge and state.
@@ -168,11 +175,24 @@ class NativeAuth {
   }
 
   /// Browser path (the only path on the F-Droid flavor).
-  Future<NativeSession> signInWithBrowser() async {
+  /// [provider] 'google' asks Pages to start Google directly; [remember]
+  /// carries the shared screen's checkbox. Both are optional fragment params.
+  Future<NativeSession> signInWithBrowser({
+    String? provider,
+    bool? remember,
+  }) async {
     final pkce = PkcePair.generate();
     final state = generateState();
     return _withNewKey((key) async {
-      final ret = await browser.run(launchUrl(pkce.challenge, state));
+      var url = launchUrl(pkce.challenge, state);
+      if (provider != null || remember != null) {
+        final extra = [
+          if (provider != null) 'provider=$provider',
+          if (remember != null) 'remember=${remember ? 1 : 0}',
+        ].join('&');
+        url = url.replace(fragment: '${url.fragment}&$extra');
+      }
+      final ret = await browser.run(url);
       if (ret == null) throw const NativeAuthException('cancelled');
       final parsed = parseAppReturn(
         ret,
@@ -185,6 +205,50 @@ class NativeAuth {
         'verifier': pkce.verifier,
         'redirect_uri': _redirect.toString(),
         'renewal_key': key,
+      });
+    });
+  }
+
+  /// OS passkey sign-in (discoverable, user-verified). The ceremony is bound
+  /// to the new renewal key. Cancel leaves everything as it was. Every server
+  /// verification failure is an opaque 401 (invalid_grant).
+  Future<NativeSession> signInWithPasskey() async {
+    final source = passkeys;
+    if (source == null || !source.available) {
+      throw const NativeAuthException('unavailable');
+    }
+    return _withNewKey((key) async {
+      final b = await _post('/auth/native/passkey/begin', {'renewal_key': key});
+      if (b.status != 200 || b.body == null) throw _fail(b.status, b.body);
+      final String request;
+      try {
+        request = passkeyLoginRequestJson(b.body!, nowMs: _now());
+      } on PasskeyException {
+        throw const NativeAuthException('protocol');
+      }
+      final String? raw;
+      try {
+        raw = await source.get(request);
+      } on PasskeyException catch (e) {
+        throw NativeAuthException(
+          e.code == 'cancelled' ? 'cancelled' : 'passkey_failed',
+        );
+      }
+      if (raw == null) throw const NativeAuthException('cancelled');
+      final Map<String, dynamic> response;
+      try {
+        response = passkeyAssertionBody(raw);
+      } on PasskeyException {
+        throw const NativeAuthException('protocol');
+      }
+      // Discoverable sign-in must carry the user handle.
+      if ((response['response'] as Map)['userHandle'] is! String) {
+        throw const NativeAuthException('protocol');
+      }
+      return _post('/auth/native/passkey/complete', {
+        'renewal_key': key,
+        'token': b.body!['token'],
+        'response': response,
       });
     });
   }

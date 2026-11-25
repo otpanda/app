@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -156,10 +157,14 @@ void main() {
       expect(calls, contains('GET /v1/manage/active-codes'));
       expect(calls.every((s) => s.startsWith('GET ')), isTrue);
       expect(find.byTooltip('Add authenticator'), findsNothing);
-      await expectLater(
-        find.byType(MaterialApp),
-        matchesGoldenFile('goldens/native_codes_390.png'),
-      );
+      // Pixel baseline is the Linux CI render; font rasterization differs on
+      // Windows and macOS. Every functional assertion above runs on all OSes.
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile('goldens/native_codes_390.png'),
+        );
+      }
       await t.pumpWidget(const SizedBox.shrink());
     },
   );

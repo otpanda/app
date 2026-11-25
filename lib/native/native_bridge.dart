@@ -44,6 +44,7 @@ class NativeSessionBridge
         TotpCreationCapability,
         AssignmentBridge,
         EntryManagementBridge,
+        AuthEntryBridge,
         RealtimeBridge {
   /// Set once after construction (the driver needs this bridge's transport).
   NativeAssignmentDriver? assignment;
@@ -54,6 +55,7 @@ class NativeSessionBridge
     this.onLogout,
     this.passkeys,
     this.deviceLabel,
+    this.googleAvailable = false,
     RealtimeConnector? realtimeConnector,
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch) {
@@ -231,8 +233,52 @@ class NativeSessionBridge
     }
   }
 
+  /// True on the Google flavor with Play Services (OS Google sign-in).
+  final bool googleAvailable;
+
+  // Shared sign-in screen (AuthEntry). Same screen as web; only the platform
+  // action differs. Failures land in controller.lastError.
   @override
-  Future<void> start(String mode) async {}
+  String get email => '';
+  @override
+  String get pendingLabel => '';
+
+  /// Google: the OS account sheet when the SDK is there, otherwise the
+  /// browser handoff (also what controller does on browser_required).
+  @override
+  Future<void> googleStart(bool remember) => googleAvailable
+      ? controller.signInWithGoogle(remember: remember)
+      : controller.signInWithBrowser(provider: 'google', remember: remember);
+
+  /// INTERIM for account creation: no native register route exists, so it
+  /// uses the browser handoff.
+  @override
+  Future<void> signupEmail(String email, [String proof = '']) =>
+      controller.signInWithBrowser();
+  @override
+  Future<void> googleContinue(String action, [String proof = '']) =>
+      throw UnsupportedError('Not available on this device.');
+  @override
+  Future<String> protectionContinue(String action) =>
+      throw UnsupportedError('Not available on this device.');
+  @override
+  Future<String> security(
+    String action, [
+    bool enabled = false,
+    String pendingId = '',
+  ]) => throw UnsupportedError('Not available on this device.');
+
+  @override
+  Future<void> start(String mode) async {
+    if (mode == 'google') return googleStart(true);
+    if (mode == 'login') {
+      // OS passkey when Credential Manager is available (google flavor);
+      // otherwise the browser handoff (fdroid has no native passkey).
+      return (passkeys?.available ?? false)
+          ? controller.signInWithPasskey()
+          : controller.signInWithBrowser();
+    }
+  }
   @override
   Future<void> passkey() async {
     throw StateError('Passkeys are managed in the browser for now.');

@@ -62,6 +62,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
         store: _PrefsDeviceStore(),
         apiOrigin: apiOrigin,
         launchUrl: pagesNativeLaunchUrl,
+        passkeys: passkeys,
       ),
     );
     _bearer = androidBearerRequest(apiOrigin);
@@ -88,6 +89,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       _bearer,
       onLogout: () => controller.signOut(),
       passkeys: passkeys,
+      googleAvailable: widget.google.available,
       deviceLabel: androidDeviceLabel,
       realtimeConnector: androidRealtimeConnector(apiOrigin),
     );
@@ -160,6 +162,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
           controller: controller,
           googleAvailable: widget.google.available,
           version: const String.fromEnvironment('APP_VERSION'),
+          authBridge: bridge,
           signedInBuilder: (context) => StatefulBuilder(
             builder: (context, set) {
               final page = BrowserAccountPage(

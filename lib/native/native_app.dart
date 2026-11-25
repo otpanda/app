@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 
 import '../branding.dart';
 import '../main.dart' show green, ink, line, muted, otpandaTheme;
+import '../auth_entry.dart';
+import '../browser_session_contract.dart';
 import 'native_session.dart';
 
 /// Native shell: renews at start, then shows sign-in, an honest signed-in
@@ -14,10 +16,15 @@ class NativeApp extends StatelessWidget {
     required this.googleAvailable,
     this.version = '',
     this.signedInBuilder,
+    this.authBridge,
   });
   final NativeSessionController controller;
   final bool googleAvailable;
   final String version;
+
+  /// The shared sign-in screen's bridge. When set, signed-out phases show the
+  /// same AuthEntry screen as web.
+  final BrowserSessionBridge? authBridge;
 
   /// Replaces the status page when signed in (the shared account UI).
   final WidgetBuilder? signedInBuilder;
@@ -32,6 +39,7 @@ class NativeApp extends StatelessWidget {
       googleAvailable: googleAvailable,
       version: version,
       signedInBuilder: signedInBuilder,
+      authBridge: authBridge,
     ),
   );
 }
@@ -43,11 +51,13 @@ class NativeSessionPage extends StatefulWidget {
     required this.googleAvailable,
     this.version = '',
     this.signedInBuilder,
+    this.authBridge,
   });
   final NativeSessionController controller;
   final bool googleAvailable;
   final String version;
   final WidgetBuilder? signedInBuilder;
+  final BrowserSessionBridge? authBridge;
   @override
   State<NativeSessionPage> createState() => _State();
 }
@@ -91,6 +101,21 @@ class _State extends State<NativeSessionPage> {
         return widget.signedInBuilder!(context);
       }
       final err = _error(c.lastError);
+      final shared = widget.authBridge;
+      if (shared != null &&
+          (c.phase == NativeSessionPhase.signedOut ||
+              c.phase == NativeSessionPhase.signInRequired)) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('OTPanda')),
+          body: AuthEntry(
+            bridge: shared,
+            status: 'sign-in-required',
+            message: err ?? '',
+            busy: busy,
+            run: _run,
+          ),
+        );
+      }
       final (title, body) = switch (c.phase) {
         NativeSessionPhase.unknown => ('OTPanda', 'Checking your session...'),
         NativeSessionPhase.signedIn => (

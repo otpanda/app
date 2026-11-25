@@ -68,13 +68,34 @@
   const NATIVE_KEY='otpanda.native.intent.v1',nativeLaunch=!routeHash&&location.hash.startsWith('#native=');
   if(nativeLaunch){
     const intent=location.origin+location.pathname===REDIRECT&&!location.search?globalThis.OTPandaNativeIntent?.parseNativeIntent(location.hash):null;
-    try{if(intent)sessionStorage.setItem(NATIVE_KEY,JSON.stringify({challenge:intent.challenge,state:intent.state,created:Date.now()}));else sessionStorage.removeItem(NATIVE_KEY);}catch{}
+    try{if(intent)sessionStorage.setItem(NATIVE_KEY,JSON.stringify({challenge:intent.challenge,state:intent.state,...(intent.provider?{provider:intent.provider}:{}),...(intent.remember!==undefined?{remember:intent.remember}:{}),created:Date.now()}));else sessionStorage.removeItem(NATIVE_KEY);}catch{}
   }
+  // A stored intent counts only with the exact stored shape, 10 minutes of age and a strict re-parse.
+  const readNativeIntent=(m,now)=>{
+    const lib=globalThis.OTPandaNativeIntent;
+    if(!lib||!m||typeof m!=='object'||Array.isArray(m)||!Number.isSafeInteger(m.created)||now<m.created||now-m.created>600000)return null;
+    const keys=Object.keys(m);
+    if(!['challenge','created','state'].every(k=>keys.includes(k))||keys.some(k=>!['challenge','created','state','provider','remember','autostarted'].includes(k)))return null;
+    if((m.remember!==undefined||m.autostarted!==undefined)&&m.provider===undefined)return null;
+    if(m.autostarted!==undefined&&m.autostarted!==true)return null;
+    if(m.remember!==undefined&&typeof m.remember!=='boolean')return null;
+    return lib.parseNativeIntent('#native=1&challenge='+m.challenge+'&state='+m.state+(m.provider!==undefined?'&provider='+m.provider:'')+(m.remember!==undefined?'&remember='+(m.remember?'1':'0'):''));
+  };
+  // The native app has no Google services: go straight to the web Google sign-in, once. The attempt is
+  // marked before navigating, so a failed or cancelled sign-in lands on the normal chooser, not a loop.
+  const nativeGoogleAutostart=async()=>{
+    let m;try{m=JSON.parse(sessionStorage.getItem(NATIVE_KEY)??'null');}catch{return false;}
+    const intent=readNativeIntent(m,Date.now());
+    if(!intent||intent.provider!=='google'||m.autostarted)return false;
+    try{sessionStorage.setItem(NATIVE_KEY,JSON.stringify({...m,autostarted:true}));}catch{return false;}
+    await Promise.resolve();
+    try{await globalThis.OTPandaSession.start('google',intent.remember!==false);}catch{return false;}
+    return true;
+  };
   const continueNative=()=>{
     let m;try{m=JSON.parse(sessionStorage.getItem(NATIVE_KEY)??'null');sessionStorage.removeItem(NATIVE_KEY);}catch{return false;}
     const lib=globalThis.OTPandaNativeIntent,now=Date.now();
-    if(!lib||!m||typeof m!=='object'||Object.keys(m).sort().join(',')!=='challenge,created,state'||!Number.isSafeInteger(m.created)||now<m.created||now-m.created>600000)return false;
-    const intent=lib.parseNativeIntent('#native=1&challenge='+m.challenge+'&state='+m.state);
+    const intent=readNativeIntent(m,now);
     if(!intent)return false;
     location.assign(lib.nativeApproveUrl(intent));return true;
   };
@@ -126,6 +147,7 @@
       // This hint describes an active session, not remembered-device recognition.
       let sessionPresent=false;try{sessionPresent=localStorage.getItem('otpanda-session-present')==='yes';}catch{}
       if(sessionPresent&&!route?.startsWith('recovery')&&route!=='demo'){const verifier=random(),state=random(),attempt=generation;status='restoring';const challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now()}));location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));}
+      if(!sessionPresent&&!route?.startsWith('recovery')&&route!=='demo'&&await nativeGoogleAutostart())return;
       return;
     }
     if(pending==='#auth=logout-incomplete&state='){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='logout-incomplete';return;}
@@ -153,6 +175,8 @@
         }
         if(['restart','retry','sign-in'].includes(value)){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}}
         status=value==='email-sent'?'email-code':value==='sign-in'?'sign-in-required':value;
+        // A remembered restore that found no session: the native app asked for Google, so try it once.
+        if(['sign-in','restart'].includes(value)&&attempt===generation&&await nativeGoogleAutostart())return;
         return;
       }
       if([...values.keys()].sort().join(',')==='protection,state'){
@@ -199,7 +223,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       if(candidateKey&&validRenewal(result.renewal,result.access)&&result.renewal.firstPartyExpiresAt!==undefined) {signingKey=candidateKey;renewal=result.renewal;}
       const grant=values.get('enrollment');if(grant&&/^otpda_[A-Za-z0-9_-]{55}$/.test(grant))enrollment=grant;
       continueNative();
-    } catch { if(attempt===generation){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='sign-in-required';} }
+    } catch { if(attempt===generation){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='sign-in-required';if(await nativeGoogleAutostart())return;} }
   })();
   function validateAccess(result,tabKey=false) {
     const clock=result?.renewal?.serverTime;

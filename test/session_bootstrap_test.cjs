@@ -530,3 +530,69 @@ test('native fragment on another path or with a query is stripped and ignored',a
     const sv=new Map(),e=env({hash:launchHash,sessionValues:sv,lib:true,...o});assert.ok(e.cleaned);assert.equal(sv.has(NKEY),false);
   }
 });
+
+// Native Google fallback: the app has no Google services, so Pages starts the web Google sign-in itself, once.
+const gHash=(extra='')=>`#native=1&challenge=${NC}&state=${NS}&provider=google${extra}`;
+test('provider=google with no remembered session starts the web Google sign-in once and keeps the intent',async()=>{
+  const sv=new Map(),e=env({hash:gHash(),sessionValues:sv,lib:true});
+  await e.context.OTPandaSession.ready;
+  const u=new URL(e.context.location.assigned);
+  assert.equal(u.origin+u.pathname,'https://otpanda-api.abrahammurciano.workers.dev/auth/google/start');
+  assert.equal(u.searchParams.get('remember'),'yes');assert.equal(u.searchParams.get('redirect_uri'),'https://otpanda.github.io/app/');
+  assert.deepEqual(JSON.parse(sv.get(NKEY)),{challenge:NC,state:NS,provider:'google',created:NOW,autostarted:true});
+  assert.equal(e.context.location.hash,'');
+  // A return that fails does not loop: the intent is marked, so the next load does not autostart again.
+  const again=env({hash:'',sessionValues:sv,lib:true});await again.context.OTPandaSession.ready;assert.equal(again.context.location.assigned,undefined);
+});
+test('remember=0 and remember=1 are carried to the Google start; anything else drops the intent',async()=>{
+  for(const [x,want] of [['&remember=0','no'],['&remember=1','yes']]){
+    const e=env({hash:gHash(x),lib:true});await e.context.OTPandaSession.ready;assert.equal(new URL(e.context.location.assigned).searchParams.get('remember'),want);
+  }
+  for(const h of [gHash('&remember=2'),gHash('&remember='),gHash('&remember=0&remember=0'),`#native=1&challenge=${NC}&state=${NS}&remember=1`,`#native=1&challenge=${NC}&state=${NS}&provider=apple`,`#native=1&challenge=${NC}&state=${NS}&provider=google&provider=google`]){
+    const sv=new Map(),e=env({hash:h,sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;
+    assert.equal(sv.has(NKEY),false,h);assert.equal(e.context.location.assigned,undefined,h);
+  }
+});
+test('provider=google with a remembered session uses the unchanged restore, never a fresh Google login',async()=>{
+  const e=env({hash:gHash(),hint:true,lib:true});await e.context.OTPandaSession.ready;
+  assert.ok(e.context.location.assigned.startsWith('https://otpanda-api.abrahammurciano.workers.dev/auth/restore?'));
+});
+test('Google fallback round trip ends at the approve page; provider never changes the approve parameters',async()=>{
+  const sv=new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,provider:'google',created:NOW,autostarted:true})]]);
+  const back=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues:sv,lib:true});
+  await back.context.OTPandaSession.ready;assert.equal(back.context.location.assigned,APPROVE);assert.equal(sv.has(NKEY),false);
+});
+test('stored intent with autostarted or remember but no provider is refused',async()=>{
+  for(const m of [{challenge:NC,state:NS,created:NOW,autostarted:true},{challenge:NC,state:NS,created:NOW,remember:true},{challenge:NC,state:NS,provider:'google',created:NOW,remember:'1'}]){
+    const sv=new Map([[NKEY,JSON.stringify(m)]]),e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues:sv,lib:true});
+    await e.context.OTPandaSession.ready;assert.equal(e.context.location.assigned,undefined,JSON.stringify(m));
+  }
+});
+test('a failed remembered restore starts the Google fallback once with the chosen remember value, then never again',async()=>{
+  const rec=()=>JSON.stringify({state,verifier:'v'.repeat(43),created:NOW});
+  for(const [extra,want] of [['','yes'],['&remember=0','no'],['&remember=1','yes']]){
+    for(const value of ['sign-in','restart']){
+      const sv=new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,provider:'google',...(extra?{remember:extra==='&remember=1'}:{}),created:NOW})]]);
+      const e=env({hash:`#auth=${value}&state=${state}`,saved:rec(),sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;
+      const u=new URL(e.context.location.assigned);
+      assert.equal(u.origin+u.pathname,'https://otpanda-api.abrahammurciano.workers.dev/auth/google/start',value+extra);assert.equal(u.searchParams.get('remember'),want);
+      assert.equal(JSON.parse(sv.get(NKEY)).autostarted,true);
+      // The Google attempt itself failing returns here and must not start another.
+      const again=env({hash:`#auth=${value}&state=${state}`,saved:rec(),sessionValues:sv,lib:true});await again.context.OTPandaSession.ready;
+      assert.equal(again.context.location.assigned,undefined);assert.equal(again.context.OTPandaSession.status(),value==='sign-in'?'sign-in-required':'restart');
+    }
+  }
+});
+test('a failed restore without a Google intent, or with a plain native intent, goes to the normal chooser',async()=>{
+  const rec=JSON.stringify({state,verifier:'v'.repeat(43),created:NOW});
+  for(const sv of [new Map(),new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,created:NOW})]])]){
+    const e=env({hash:`#auth=sign-in&state=${state}`,saved:rec,sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;
+    assert.equal(e.context.location.assigned,undefined);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');
+  }
+});
+test('an invalid restore callback (bad state) also falls back to Google once for a Google intent',async()=>{
+  const sv=new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,provider:'google',created:NOW})]]);
+  const e=env({hash:'#code='+token+'&state=wrong',saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;
+  assert.ok(e.context.location.assigned.startsWith('https://otpanda-api.abrahammurciano.workers.dev/auth/google/start?'));
+  assert.equal(e.calls,0);
+});

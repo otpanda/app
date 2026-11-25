@@ -21,3 +21,11 @@ test('refuses extras, duplicates, bad lengths and wrong flag', () => {
     `#native=1&challenge&state=${S}`,
   ]) assert.equal(parseNativeIntent(h), null, h);
 });
+test('provider=google and remember are optional, strict and never reach the approve URL', () => {
+  assert.deepStrictEqual(parseNativeIntent(`#native=1&challenge=${C}&state=${S}&provider=google`), { challenge: C, state: S, provider: 'google' });
+  assert.deepStrictEqual(parseNativeIntent(`#native=1&challenge=${C}&state=${S}&provider=google&remember=0`), { challenge: C, state: S, provider: 'google', remember: false });
+  assert.deepStrictEqual(parseNativeIntent(`#native=1&challenge=${C}&state=${S}&provider=google&remember=1`), { challenge: C, state: S, provider: 'google', remember: true });
+  for (const h of [`#native=1&challenge=${C}&state=${S}&provider=apple`, `#native=1&challenge=${C}&state=${S}&remember=1`, `#native=1&challenge=${C}&state=${S}&provider=google&remember=yes`, `#native=1&challenge=${C}&state=${S}&provider=Google`, `#native=1&challenge=${C}&state=${S}&provider=google&x=1`]) assert.equal(parseNativeIntent(h), null, h);
+  const u = new URL(nativeApproveUrl(parseNativeIntent(`#native=1&challenge=${C}&state=${S}&provider=google&remember=0`)));
+  assert.equal([...u.searchParams.keys()].sort().join(), 'challenge,redirect_uri,state');
+});
