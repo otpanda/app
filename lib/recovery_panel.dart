@@ -1,7 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 
 import 'recovery_contract.dart';
-import 'settings_hub.dart' show RedactedText, StableText;
+import 'settings_hub.dart'
+    show RedactedText, StableText, settingsDialogConstraints;
 
 const _emailCopy = [
   'On. If you lose every passkey and device, you can regain access with only your email after a 7-day wait.',
@@ -125,6 +126,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
     final r = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
+        constraints: settingsDialogConstraints,
         title: Text(title),
         content: Text(body),
         actions: [
@@ -148,6 +150,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, set) => AlertDialog(
+          constraints: settingsDialogConstraints,
           title: const Text('Allow email-only recovery?'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
