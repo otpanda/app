@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/browser_account_page.dart';
@@ -9,6 +10,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:otpanda_client/browser_session_contract.dart';
 import 'package:otpanda_client/google_link.dart';
 import 'package:otpanda_client/recovery_contract.dart';
+import 'package:otpanda_client/session_contract.dart';
 import 'package:otpanda_client/settings_hub.dart';
 
 import 'settings_hub_test.dart' show AccountBridge, pump;
@@ -16,6 +18,22 @@ import 'settings_hub_test.dart' show AccountBridge, pump;
 class RefusingBridge extends LinkBridge {
   @override
   Future<void> disconnectGoogle() async => throw const RecoveryRefused();
+}
+
+class NoPasskeyBridge extends LinkBridge {
+  @override
+  Future<SessionResponse> read(String path) async =>
+      path == '/v1/manage/account'
+      ? SessionResponse(
+          200,
+          jsonEncode({
+            'email': 'person@example.com',
+            'passkeys': 0,
+            'google': true,
+            'recoveryDevices': 0,
+          }),
+        )
+      : super.read(path);
 }
 
 class LinkBridge extends AccountBridge
@@ -108,6 +126,71 @@ void main() {
     );
     await t.pumpAndSettle();
     expect(find.textContaining('Google was not disconnected'), findsOneWidget);
+  });
+
+  testWidgets('Disconnect is disabled with no passkeys and never calls out', (
+    t,
+  ) async {
+    final b = NoPasskeyBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings/account-security');
+    final button = find.widgetWithText(OutlinedButton, 'Disconnect');
+    expect(button, findsOneWidget);
+    expect(t.widget<OutlinedButton>(button).onPressed, isNull);
+    expect(find.textContaining('Add a passkey to disconnect'), findsOneWidget);
+    await t.tap(button, warnIfMissed: false);
+    await t.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(b.unlinks, 0);
+  });
+
+  testWidgets('confirmation stays compact on a wide screen', (t) async {
+    await pump(
+      t,
+      linked(),
+      navigation: 'settings/account-security',
+      size: const Size(1600, 900),
+    );
+    await t.tap(find.text('Disconnect'));
+    await t.pumpAndSettle();
+    final w = t
+        .getSize(
+          find
+              .descendant(
+                of: find.byType(AlertDialog),
+                matching: find.byType(Material),
+              )
+              .first,
+        )
+        .width;
+    expect(w, lessThanOrEqualTo(400));
+    expect(w, greaterThan(250));
+  });
+
+  testWidgets('confirmation fits a narrow phone', (t) async {
+    await pump(
+      t,
+      linked(),
+      navigation: 'settings/account-security',
+      size: const Size(320, 640),
+    );
+    await t.tap(find.text('Disconnect'));
+    await t.pumpAndSettle();
+    expect(
+      t
+          .getSize(
+            find
+                .descendant(
+                  of: find.byType(AlertDialog),
+                  matching: find.byType(Material),
+                )
+                .first,
+          )
+          .width,
+      lessThanOrEqualTo(320),
+    );
+    expect(t.takeException(), isNull);
   });
 
   testWidgets('no Disconnect without a bridge capability', (t) async {

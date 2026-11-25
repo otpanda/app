@@ -49,6 +49,11 @@ bool isSettingsRoute(String? route) =>
 
 const settingsWideBreakpoint = 700.0;
 
+/// Confirmation dialogs in settings stay compact on wide screens instead of
+/// stretching to the viewport. Narrow screens are unaffected (the dialog is
+/// already narrower than this).
+const settingsDialogConstraints = BoxConstraints(maxWidth: 400);
+
 /// Stands in for text that has not loaded. It lays out a sample of the real
 /// text, so it wraps and takes the same height the loaded text will, and
 /// paints it as grey bars instead of letters. Nothing is hard-coded: the
