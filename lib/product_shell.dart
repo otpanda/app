@@ -611,6 +611,11 @@ class _ProductShellState extends State<ProductShell> {
       builder: (_) => EntryManageDialog(
         bridge: widget.controller.bridge as EntryManagementBridge,
         entry: e,
+        onConfirmed: ({service, account}) => widget.controller.applyEntryEdit(
+          e.id,
+          service: service,
+          account: account,
+        ),
       ),
     );
     if (changed == true && mounted) {
