@@ -6,7 +6,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'browser_session_contract.dart';
 import 'otpauth.dart';
-import 'qr_scanner.dart';
+import 'qr_camera.dart';
 import 'session_contract.dart';
 import 'totp_read_contract.dart';
 
@@ -208,19 +208,31 @@ Future<bool> totpPrerequisite(
   return false;
 }
 
+typedef QrCameraBuilder = Widget Function(
+  void Function(String text) onText,
+  void Function(QrCameraProblem problem) onError,
+);
+
+Widget _defaultCamera(
+  void Function(String text) onText,
+  void Function(QrCameraProblem problem) onError,
+) => QrCameraView(onText: onText, onError: onError);
+
+/// Two stages. 1: camera opens at once (or a key field after the toggle) and
+/// the first valid key advances. 2: name and account, prefilled from the key.
 Future<String?> addTotpDialog(
   BuildContext context,
   TotpManagementBridge bridge, {
-  OtpauthScan scan = scanOtpauth,
+  QrCameraBuilder camera = _defaultCamera,
 }) async => showDialog<String>(
   context: context,
-  builder: (_) => _AddTotp(bridge: bridge, scan: scan),
+  builder: (_) => _AddTotp(bridge: bridge, camera: camera),
 );
 
 class _AddTotp extends StatefulWidget {
   final TotpManagementBridge bridge;
-  final OtpauthScan scan;
-  const _AddTotp({required this.bridge, required this.scan});
+  final QrCameraBuilder camera;
+  const _AddTotp({required this.bridge, required this.camera});
   @override
   State<_AddTotp> createState() => _AddTotpState();
 }
@@ -228,45 +240,52 @@ class _AddTotp extends StatefulWidget {
 class _AddTotpState extends State<_AddTotp> {
   final label = TextEditingController(),
       account = TextEditingController(),
-      secret = TextEditingController();
-  bool busy = false;
-  String error = '';
+      key = TextEditingController();
+  OtpauthImport? found;
+  bool manual = false, busy = false, showKey = false;
+  QrCameraProblem? problem;
+  String scanError = '', error = '';
+
   @override
   void dispose() {
-    secret.clear();
+    key.clear();
     label.dispose();
     account.dispose();
-    secret.dispose();
+    key.dispose();
     super.dispose();
   }
 
-  Future<void> scanQr() async {
-    if (busy) return;
-    OtpauthImport? found;
-    try {
-      found = await widget.scan(context);
-    } catch (_) {
-      if (mounted) {
-        setState(
-          () =>
-              error = 'Could not open the camera. Enter the setup key by hand.',
-        );
-      }
-      return;
-    }
-    if (found == null || !mounted) return;
+  void advance(OtpauthImport v) {
+    if (found != null || !mounted) return;
+    key.clear();
     setState(() {
-      label.text = found!.name;
-      account.text = found.account;
-      secret.text = found.uri;
+      found = v;
+      label.text = v.name;
+      account.text = v.account;
       error = '';
     });
   }
 
+  void onScan(String text) {
+    if (found != null) return;
+    try {
+      advance(parseOtpauth(text));
+    } on OtpauthException catch (e) {
+      if (mounted && scanError != e.message) {
+        setState(() => scanError = e.message);
+      }
+    }
+  }
+
+  void onProblem(QrCameraProblem p) {
+    if (mounted) setState(() => problem = p);
+  }
+
   Future<void> save() async {
-    if (busy) return;
-    if (label.text.trim().isEmpty || secret.text.trim().isEmpty) {
-      setState(() => error = 'Enter a name and setup key.');
+    final v = found;
+    if (busy || v == null) return;
+    if (label.text.trim().isEmpty) {
+      setState(() => error = 'Enter a name.');
       return;
     }
     setState(() {
@@ -277,14 +296,13 @@ class _AddTotpState extends State<_AddTotp> {
       final id = await widget.bridge.addTotp(
         label.text.trim(),
         account.text.trim(),
-        secret.text.trim(),
+        v.uri,
       );
-      secret.clear();
       if (mounted) Navigator.pop(context, id);
     } catch (_) {
       if (mounted) {
         setState(
-          () => error = 'Could not add authenticator. Check the setup key and verify with an existing passkey.',
+          () => error = 'Could not add authenticator. Check the key and verify with an existing passkey.',
         );
       }
     } finally {
@@ -292,65 +310,135 @@ class _AddTotpState extends State<_AddTotp> {
     }
   }
 
+  Widget stageOne() {
+    final valid = parseSetupKey(key.text) != null;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!manual)
+          SizedBox(
+            height: 260,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: problem == null
+                  ? widget.camera(onScan, onProblem)
+                  : Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          problem == QrCameraProblem.permissionDenied
+                              ? 'Camera permission is off. Allow camera access in settings, or enter the key manually.'
+                              : 'The camera is not available. Enter the key manually.',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+            ),
+          )
+        else
+          TextField(
+            controller: key,
+            autofocus: true,
+            obscureText: !showKey,
+            autocorrect: false,
+            enableSuggestions: false,
+            maxLength: 2048,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: 'Setup key',
+              helperText: 'Key from the service, or an otpauth link',
+              suffixIcon: IconButton(
+                tooltip: showKey ? 'Hide key' : 'Show key',
+                icon: Icon(showKey ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => showKey = !showKey),
+              ),
+            ),
+            onSubmitted: (_) {
+              final v = parseSetupKey(key.text);
+              if (v != null) advance(v);
+            },
+          ),
+        if (!manual && scanError.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(scanError),
+          ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: () => setState(() {
+            manual = !manual;
+            problem = null;
+            scanError = '';
+            showKey = false;
+            key.clear();
+          }),
+          child: Text(manual ? 'Scan QR code' : 'Enter key manually'),
+        ),
+        if (manual) ...[
+          const SizedBox(height: 4),
+          FilledButton(
+            onPressed: valid
+                ? () {
+                    final v = parseSetupKey(key.text);
+                    if (v != null) advance(v);
+                  }
+                : null,
+            child: const Text('Next'),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget stageTwo() => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text(
+        'The key is encrypted in your cloud account so OTPanda can generate codes. Verify with a passkey to save.',
+      ),
+      TextField(
+        controller: label,
+        maxLength: 120,
+        enabled: !busy,
+        decoration: const InputDecoration(labelText: 'Name'),
+      ),
+      TextField(
+        controller: account,
+        maxLength: 120,
+        enabled: !busy,
+        decoration: const InputDecoration(labelText: 'Account (optional)'),
+      ),
+      if (error.isNotEmpty) Text(error),
+      if (busy) const LinearProgressIndicator(),
+    ],
+  );
+
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Add authenticator'),
-    content: SizedBox(
-      width: 420,
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Scan the QR code, or enter a setup key or otpauth URI. The key is encrypted in your cloud account so OTPanda can generate codes. Verify with a passkey to save.',
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: busy ? null : scanQr,
-              icon: const Icon(Icons.qr_code_scanner),
-              label: const Text('Scan QR code'),
-            ),
-            TextField(
-              controller: label,
-              maxLength: 120,
-              enabled: !busy,
-              decoration: const InputDecoration(labelText: 'Name'),
-            ),
-            TextField(
-              controller: account,
-              maxLength: 120,
-              enabled: !busy,
-              decoration: const InputDecoration(
-                labelText: 'Account (optional)',
-              ),
-            ),
-            TextField(
-              controller: secret,
-              enabled: !busy,
-              maxLength: 2048,
-              obscureText: true,
-              enableSuggestions: false,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'Setup key or URI',
-              ),
-            ),
-            if (error.isNotEmpty) Text(error),
-            if (busy) const LinearProgressIndicator(),
-          ],
+  Widget build(BuildContext context) => PopScope(
+    // No dismissal (outside tap, back, route pop) while saving or verifying:
+    // a finished add must always return its entry id so the shell can refresh.
+    canPop: !busy,
+    child: AlertDialog(
+      title: const Text('Add authenticator'),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: found == null ? stageOne() : stageTwo(),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: busy ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        if (found != null)
+          FilledButton(
+            onPressed: busy ? null : save,
+            child: const Text('Verify and add'),
+          ),
+      ],
     ),
-    actions: [
-      TextButton(
-        onPressed: busy ? null : () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: busy ? null : save,
-        child: const Text('Verify and add'),
-      ),
-    ],
   );
 }
