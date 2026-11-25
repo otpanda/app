@@ -191,7 +191,10 @@ void main() {
       await t.pump();
       expect(find.byTooltip('Copy code'), findsOneWidget);
       expect(find.textContaining('Connection interrupted'), findsNothing);
-      expect(find.textContaining('Connection to the server was lost'), findsNothing);
+      expect(
+        find.textContaining('Connection to the server was lost'),
+        findsNothing,
+      );
       c.dispose();
     },
   );
@@ -601,5 +604,86 @@ void main() {
     expect(tr.prepared, hasLength(1));
     final sent = jsonDecode(tr.prepared.single) as Map;
     expect(sent, {'sourceId': 's', 'eventId': 'v', 'entryId': 'a'});
+  });
+
+  testWidgets('search lives in the top bar; no in-page title', (t) async {
+    final semantics = t.ensureSemantics();
+    await pump(
+      t,
+      FakeTransport(
+        routes(
+          entries: [
+            {
+              'entry_id': 'e1',
+              'service_name': 'Acme',
+              'account_name': 'me',
+              'capabilities': {'manage': true},
+            },
+            {
+              'entry_id': 'e2',
+              'service_name': 'Zed',
+              'account_name': 'me',
+              'capabilities': {'manage': true},
+            },
+          ],
+        ),
+      ),
+    );
+    final bar = find.byKey(const Key('product-top-bar'));
+    final field = find.descendant(of: bar, matching: find.byType(TextField));
+    expect(field, findsOneWidget);
+    expect(find.text('Your codes'), findsNothing);
+    // Mobile: icon, search, account only.
+    expect(
+      find.descendant(of: bar, matching: find.text('OTPanda')),
+      findsNothing,
+    );
+    expect(find.text('Search'), findsOneWidget);
+    expect(find.text('Search services or accounts'), findsNothing);
+    expect(
+      find.bySemanticsLabel(RegExp('Search services or accounts')),
+      findsOneWidget,
+    );
+    await t.enterText(field, 'acme');
+    await t.pumpAndSettle();
+    expect(find.text('Acme'), findsOneWidget);
+    expect(find.text('Zed'), findsNothing);
+    await t.tap(find.byKey(const Key('search-clear')));
+    await t.pumpAndSettle();
+    expect(find.text('Zed'), findsOneWidget);
+    expect(t.widget<TextField>(field).controller!.text, '');
+    // Typed query clears on tab change; search hidden on Sources.
+    await t.enterText(field, 'zed');
+    await t.pumpAndSettle();
+    await t.tap(find.text('Sources'));
+    await t.pumpAndSettle();
+    expect(
+      find.descendant(of: bar, matching: find.byType(TextField)),
+      findsNothing,
+    );
+    await t.tap(find.text('Entries'));
+    await t.pumpAndSettle();
+    final f2 = find.descendant(of: bar, matching: find.byType(TextField));
+    expect(f2, findsOneWidget);
+    expect(t.widget<TextField>(f2).controller!.text, '');
+    expect(find.text('Acme'), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('desktop top bar keeps the wordmark beside the search', (
+    t,
+  ) async {
+    await pump(t, FakeTransport(routes()));
+    t.view.physicalSize = const Size(1280, 720);
+    await t.pumpAndSettle();
+    final bar = find.byKey(const Key('product-top-bar'));
+    expect(
+      find.descendant(of: bar, matching: find.text('OTPanda')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: bar, matching: find.byType(TextField)),
+      findsOneWidget,
+    );
   });
 }
