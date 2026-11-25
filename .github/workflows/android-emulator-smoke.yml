@@ -1,27 +1,14 @@
-name: Android emulator smoke
-# Boots a hardware-accelerated emulator on a standard GitHub-hosted Linux runner
-# (KVM, per GitHub's runner docs), installs the google-flavor debug APK built
-# with NATIVE_SIGNIN=true, and checks that it starts and shows the native
-# signed-out screen. Not Keystore, passkey, Google, camera or live-API proof.
+name: Native verified AppLink lifecycle qualification
 on:
-  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  emulator:
+  verified-link:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: otpanda/api
-          ref: native-roundtrip-harness-current
-          path: api-qualification
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -29,14 +16,12 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
+      - uses: actions/download-artifact@v4
         with:
-          flutter-version: '3.50.1'
-          channel: stable
-          cache: true
-      - run: flutter --disable-analytics
-      - run: bash tool/bootstrap.sh
-      - run: flutter build apk --debug --flavor google --target-platform android-x64 --dart-define=NATIVE_SIGNIN=true
+          name: release-android
+          run-id: 45706205621
+          github-token: ${{ github.token }}
+          path: candidate
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -50,17 +35,11 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            bash tool/android-emulator-smoke.sh build/app/outputs/flutter-apk/app-google-debug.apk smoke-out
-            bash tool/android-os-qualify.sh os-qualify-out
-            API_DIR="$PWD/api-qualification" bash tool/android-roundtrip.sh roundtrip-out
-            API_DIR="$PWD/api-qualification" bash tool/android-signed-in-ui.sh signed-in-ui-out
+            export PATH="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1):$PATH"
+            bash tool/android-applink-lifecycle.sh candidate/otpanda-android-fdroid-native-candidate.apk applink-out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: emulator-smoke
-          path: |
-            smoke-out
-            os-qualify-out
-            roundtrip-out
-            signed-in-ui-out
+          name: native-applink-qualification
+          path: applink-out
           retention-days: 7
