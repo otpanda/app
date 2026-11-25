@@ -17,6 +17,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'browser_session.dart';
 import 'browser_session_contract.dart';
+import 'extension_connect.dart';
 import 'google_link.dart';
 import 'lost_access_page.dart';
 import 'recovery_contract.dart';
@@ -315,6 +316,16 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         }
         await refresh();
         if (mounted) setState(showGoogleLinkResult);
+        // A browser extension waiting for approval gets one explicit
+        // confirmation. The bridge sends nothing until the user presses Connect.
+        if (mounted && bridge is ExtensionConnectBridge) {
+          unawaited(
+            showExtensionConnectDialog(
+              context,
+              bridge as ExtensionConnectBridge,
+            ),
+          );
+        }
         if (view == 5 && mounted && bridge.status == 'restored') {
           await loadSecurity();
         }

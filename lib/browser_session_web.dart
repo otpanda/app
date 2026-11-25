@@ -3,6 +3,7 @@ import 'dart:js_interop';
 
 import 'browser_session_contract.dart';
 import 'entry_domains.dart';
+import 'extension_connect.dart';
 import 'google_link.dart';
 import 'gmail_source.dart';
 import 'recovery_contract.dart';
@@ -64,6 +65,9 @@ extension type _Session(JSObject _) implements JSObject {
   external JSPromise<JSAny?> googleStart(JSBoolean remember);
   external JSPromise<JSString> connectGoogle();
   external JSString googleLinkResult();
+  external JSString extensionIntent();
+  external JSPromise<JSString> extensionConnect();
+  external void extensionCancel();
   external JSBoolean firstPasskeyAvailable();
   external JSPromise<JSAny?> firstPasskey();
   external JSPromise<JSAny?> addPasskey();
@@ -125,7 +129,15 @@ class _Browser
         TotpManagementBridge,
         GmailSourceBridge,
         GoogleLinkBridge,
-        GoogleConnectBridge {
+        GoogleConnectBridge,
+        ExtensionConnectBridge {
+  @override
+  String get extensionIntent => _session.extensionIntent().toDart;
+  @override
+  Future<String> connectExtension() async =>
+      (await _session.extensionConnect().toDart).toDart;
+  @override
+  void cancelExtension() => _session.extensionCancel();
   @override
   bool get googleConnectAvailable => true;
   @override
