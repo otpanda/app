@@ -129,7 +129,6 @@ void main() {
             child: Container(
               color: Colors.white,
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   ServiceAvatar(
                     service: 'Totally renamed label',
@@ -138,8 +137,7 @@ void main() {
                     ink: Colors.black,
                     directory: cold,
                   ),
-                  SizedBox(
-                    height: 420,
+                  Expanded(
                     child: PublicServicePicker(directory: cold),
                   ),
                 ],
