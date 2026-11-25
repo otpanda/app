@@ -44,6 +44,7 @@ class BrowserAccountPage extends StatefulWidget {
   final BrowserSessionBridge? bridge;
   final bool loginEnabled;
   final bool assignmentEnabled;
+  final bool entryEditEnabled;
   final bool accountOnly;
   final bool workspaceEnabled;
   final int Function()? clock;
@@ -62,6 +63,7 @@ class BrowserAccountPage extends StatefulWidget {
     this.bridge,
     this.loginEnabled = false,
     this.assignmentEnabled = false,
+    this.entryEditEnabled = false,
     this.accountOnly = false,
     this.workspaceEnabled = false,
     this.clock,
@@ -489,8 +491,11 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
     if (widget.workspaceEnabled && !accountOpen) {
       await workspace.refresh();
-      if (workspace.sessionEnded) status = 'sign-in-required';
-      return;
+      if (workspace.sessionEnded) {
+        status = 'sign-in-required';
+        resetIdentity();
+        return;
+      }
     }
     if (!mounted || attempt != revision || bridge.status != 'restored') return;
     final response = await bridge.read('/v1/manage/session');
@@ -500,7 +505,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       status = 'sign-in-required';
       return;
     }
-    if (response.status != 200) throw const ClientFailure();
+    if (response.status != 200) {
+      if (widget.workspaceEnabled && !accountOpen) return;
+      throw const ClientFailure();
+    }
     final value = jsonDecode(response.body);
     if (value is! Map<String, dynamic> ||
         value.keys.length != 2 ||
@@ -557,7 +565,17 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         overview == null &&
         accountPagesShown == 0 &&
         cachedProfile?.isFresh(DateTime.now().millisecondsSinceEpoch) == true;
-    if (!skip) await fetchOverview(attempt);
+    if (!skip) {
+      if (widget.workspaceEnabled && !accountOpen) {
+        try {
+          await fetchOverview(attempt);
+        } catch (_) {
+          // The avatar is optional; keep the usable workspace on read failure.
+        }
+      } else {
+        await fetchOverview(attempt);
+      }
+    }
     forceOverview = false;
     if (!mounted || attempt != revision || status != 'restored') return;
     if (widget.navigation != null && accountOpen) {
@@ -810,7 +828,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
           entryId: '',
         ),
       );
-      if (mounted && assigned == true) await refresh();
+      if (mounted && assigned == true) workspace.refreshAfterMutation();
       return;
     }
     final epoch = revision;
@@ -849,7 +867,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         entryId: target,
       ),
     );
-    if (mounted && assigned == true) await refresh();
+    if (mounted && assigned == true) workspace.refreshAfterMutation();
   }
 
   Future<void> copyPrivate(UnassignedCode code) async {
@@ -1527,6 +1545,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         ['restored', 'session-paused', 'restoring'].contains(status) &&
         !accountOpen) {
       return ProductShell(
+        profileEmail: overview?['email'] as String? ?? cachedProfile?.email,
+        profilePicture: overview != null
+            ? (overview!['picture'] is String
+                  ? overview!['picture'] as String
+                  : null)
+            : cachedProfile?.picture,
+        assignmentEnabled: widget.assignmentEnabled,
+        entryEditEnabled: widget.entryEditEnabled,
         controller: workspace,
         initialTab: productTab,
         onTabChanged: (tab) {

@@ -8,11 +8,11 @@ export class AssignmentController {
     this.busy=true;const attempt=this.generation;
     try{
       const b=await this.begin(target),s=b?.summary;
-      if(!b||typeof b.intentId!=='string'||!b.intentId||typeof b.token!=='string'||typeof b.action!=='string'||!Number.isSafeInteger(b.expiresAt)||b.expiresAt<=this.now()||b.expiresAt>this.now()+120000||s?.operation!=='assign-code'||s.entryId!==target.entryId||typeof s.label!=='string'||(s.accountName!==null&&typeof s.accountName!=='string')||typeof s.serviceId!=='string'||!Number.isSafeInteger(s.activeRecipients)||s.activeRecipients<0||!Number.isSafeInteger(s.automationRecipients)||s.automationRecipients<0||s.automationRecipients>s.activeRecipients||s.irreversible!==true)throw Error('Invalid assignment summary');
+      if(!b||typeof b.intentId!=='string'||!b.intentId||(b.proofRequired===false?(b.token!==undefined||b.options!==undefined||!s||s.activeRecipients!==0||s.automationRecipients!==0):typeof b.token!=='string')||typeof b.action!=='string'||!Number.isSafeInteger(b.expiresAt)||b.expiresAt<=this.now()||b.expiresAt>this.now()+120000||s?.operation!=='assign-code'||s.entryId!==target.entryId||typeof s.label!=='string'||(s.accountName!==null&&typeof s.accountName!=='string')||typeof s.serviceId!=='string'||!Number.isSafeInteger(s.activeRecipients)||s.activeRecipients<0||!Number.isSafeInteger(s.automationRecipients)||s.automationRecipients<0||s.irreversible!==true)throw Error('Invalid assignment summary');
       const action=JSON.parse(b.action);
       if(!Array.isArray(action)||action.length!==16||action[0]!=='otpanda-assignment'||action[1]!==1||action[2]!==b.intentId||action[6]!==target.sourceId||action[7]!==target.eventId||action[8]!==s.entryId||action[13]!==s.activeRecipients||action[14]!==s.automationRecipients||action[15]!==true)throw Error('Assignment summary/action mismatch');
       if(attempt!==this.generation)return;
-      this.pending=b;this.state='confirm';return Object.freeze({...s});
+      this.pending=b;this.state='confirm';return Object.freeze({...s,proofRequired:b.proofRequired!==false});
     }catch(e){if(attempt===this.generation)this.state='unavailable';throw e;}finally{if(attempt===this.generation)this.busy=false;}
   }
   // Must be called by a deliberate user gesture after showing the summary.
@@ -20,11 +20,11 @@ export class AssignmentController {
     if(this.busy||this.state!=='confirm'||!this.pending)throw Error('Confirmation unavailable');
     const b=this.pending;if(this.now()>=b.expiresAt){this.state='expired';return this.state;}
     this.busy=true;this.state='authenticating';const attempt=this.generation;let response;
-    try{response=await this.prove(b.options);}catch{if(attempt!==this.generation)return this.state;this.state='cancelled';this.pending=null;this.busy=false;return this.state;}
+    try{response=b.proofRequired===false?undefined:await this.prove(b.options);}catch{if(attempt!==this.generation)return this.state;this.state='cancelled';this.pending=null;this.busy=false;return this.state;}
     if(attempt!==this.generation)return this.state;
     this.state='submitting';
     try{
-      const result=await this.finish({intentId:b.intentId,token:b.token,action:b.action,response});
+      const result=await this.finish(b.proofRequired===false?{intentId:b.intentId,action:b.action}:{intentId:b.intentId,token:b.token,action:b.action,response});
       if(attempt!==this.generation)return this.state;
         if(['assigned','not-assigned'].includes(result?.status)){this.state=result.status;this.pending=null;return this.state;}
     }catch{}

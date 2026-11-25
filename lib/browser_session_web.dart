@@ -28,6 +28,12 @@ extension type _Recovery(JSObject _) implements JSObject {
 
 extension type _Session(JSObject _) implements JSObject {
   external _Recovery? get recovery;
+  external JSPromise<JSString> entryEdit(
+    JSString kind,
+    JSString entryId,
+    JSString value, [
+    JSBoolean? clear,
+  ]);
   external JSPromise<JSString> assignmentPrepare(JSString target);
   external JSPromise<JSString> assignmentConfirm();
   external JSPromise<JSString> assignmentReconcile();
@@ -102,6 +108,7 @@ class _Browser
         SessionContinuityBridge,
         RealtimeBridge,
         AssignmentBridge,
+        EntryManagementBridge,
         AuthEntryBridge,
         FirstPasskeyBridge,
         AdditionalPasskeyBridge,
@@ -305,6 +312,33 @@ class _Browser
   @override
   Future<void> signupEmail(String email, [String proof = '']) async {
     await _session.signupEmail(email.toJS, proof.toJS).toDart;
+  }
+
+  @override
+  Future<void> renameEntry(String entryId, String label) async {
+    if ((await _session
+                .entryEdit('rename'.toJS, entryId.toJS, label.toJS)
+                .toDart)
+            .toDart !=
+        'ok') {
+      throw StateError('Not confirmed');
+    }
+  }
+
+  @override
+  Future<void> updateAccount(String entryId, String? account) async {
+    if ((await _session
+                .entryEdit(
+                  'account'.toJS,
+                  entryId.toJS,
+                  (account ?? '').toJS,
+                  (account == null).toJS,
+                )
+                .toDart)
+            .toDart !=
+        'ok') {
+      throw StateError('Not confirmed');
+    }
   }
 
   @override

@@ -85,6 +85,24 @@ Future<void> settle() async {
 }
 
 void main() {
+  testWidgets('local mutation queues one refresh behind the gate', (
+    tester,
+  ) async {
+    var now = 100;
+    final b = Bridge();
+    final c = ReadWorkspaceController(bridge: b, clock: () => now);
+    await c.refresh();
+    c.refreshAfterMutation();
+    c.refreshAfterMutation();
+    expect(b.paths.length, 5);
+    now += 15000;
+    await tester.pump(const Duration(seconds: 15));
+    expect(b.paths.length, 10);
+    now += 60000;
+    await tester.pump(const Duration(seconds: 60));
+    expect(b.paths.length, 10);
+    c.dispose();
+  });
   testWidgets('transport loss clears across preserved settings lifecycle', (
     tester,
   ) async {

@@ -180,6 +180,8 @@ class _AccountEntryRouterState extends State<AccountEntryRouter>
           loginEnabled: true,
           accountOnly: true,
           workspaceEnabled: true,
+          assignmentEnabled: kIsWeb,
+          entryEditEnabled: kIsWeb,
         );
 }
 

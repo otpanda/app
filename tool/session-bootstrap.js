@@ -378,6 +378,21 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const body=await readBounded(r,4096);if(attempt!==generation)return {status:401,body:'{}'};
       if(r.status===401){await restoreAfterUnauthorized();return {status:503,body:'{}'};}return {status:r.status,body};
     },
+    entryEdit:async(kind,entryId,value,clear)=>{
+      // Exact-field, bearer-only. Never retried: the server may have committed.
+      if(!['rename','account'].includes(kind)||typeof entryId!=='string'||!entryId||entryId.length>256||typeof value!=='string')throw Error('Entry change required');
+      const label=value.trim();
+      if(kind==='rename'&&(!label||label.length>120))throw Error('Entry change required');
+      if(kind==='account'&&!clear&&(!label||label.length>120))throw Error('Entry change required');
+      if(!await maintainSession(true))throw Error('Not confirmed');
+      const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)throw Error('Not confirmed');
+      const body=kind==='rename'?{entryId,label}:{entryId,accountName:clear?null:label};
+      const r=await fetch(API+'/v1/manage/entry/'+kind,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const text=await readBounded(r,1024);if(attempt!==generation)throw Error('Not confirmed');
+      if(r.status===401){await restoreAfterUnauthorized();throw Error('Not confirmed');}
+      let ok=false;try{ok=r.status===200&&JSON.parse(text)?.ok===true;}catch{}
+      if(!ok)throw Error('Not confirmed');return 'ok';
+    },
     pendingLabel:()=>protectionPending?.pendingId.slice(0,6).toUpperCase()??'',
     protectionContinue:async action=>{
       const p=protectionPending,attempt=generation;if(!p||p.expiresAt<=Date.now()||!['passkey','check'].includes(action))throw Error('Start sign-in again.');
