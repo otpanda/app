@@ -3,6 +3,8 @@
   'use strict';
   const API = 'https://otpanda-api.abrahammurciano.workers.dev';
   const REDIRECT = 'https://otpanda.github.io/app/';
+  const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.labels', 'https://www.googleapis.com/auth/gmail.settings.basic'];
+  const sameScopes = v => { if (typeof v !== 'string') return false; const p = v.split(' '); return p.length === GMAIL_SCOPES.length && new Set(p).size === p.length && GMAIL_SCOPES.every(x => p.includes(x)); };
   const KEY = 'otpanda.restore.tab.v1';
   const READ_RESTORE_KEY = 'otpanda.read.restore.v1';
   const resetReadRestore=()=>{try{sessionStorage.removeItem(READ_RESTORE_KEY);}catch{}};
@@ -31,7 +33,7 @@
   // No bearer or ceremony is persisted or passed to Flutter.
   const assignment=typeof globalThis.OTPandaAssignmentController==='function'&&typeof globalThis.OTPandaAssignmentTransport==='function'?new globalThis.OTPandaAssignmentController(globalThis.OTPandaAssignmentTransport({access:()=>serverNow()<expires?access:undefined,generation:()=>generation,fetchImpl:(...args)=>fetch(...args),credentials:{get:options=>globalThis.navigator.credentials.get(options)}})):null;
   // Route identifiers contain no record ids, query, proof or free-form return URL.
-  const ROUTES=['codes','sources','unassigned','entries','settings','settings/account-security','settings/devices','settings/organization','recovery','recovery/start','recovery/finish','demo'];
+  const ROUTES=['codes','sources','unassigned','entries','settings','settings/account-security','settings/devices','settings/organization','settings/account-security/passkeys','recovery','recovery/start','recovery/finish','demo'];
   const ROUTE_KEY='otpanda.route.tab.v1',validRoute=r=>ROUTES.includes(r);
   let route;const routeListeners=new Set();
   const persistentRoute=r=>validRoute(r)&&!r.startsWith('recovery')&&r!=='demo';
@@ -313,6 +315,36 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
         value={ceremony:c.token,emailProof:null,response:{id:credential.id,rawId:encode(new Uint8Array(credential.rawId)),type:credential.type,clientExtensionResults:credential.getClientExtensionResults(),response:{clientDataJSON:encode(new Uint8Array(credential.response.clientDataJSON)),authenticatorData:encode(new Uint8Array(credential.response.authenticatorData)),signature:encode(new Uint8Array(credential.response.signature)),userHandle:credential.response.userHandle?encode(new Uint8Array(credential.response.userHandle)):null}}};
       }
       await post('verify',value);if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({...g.saved,created:Date.now()}));googlePending=undefined;location.assign(API+'/auth/google/continue/complete#'+new URLSearchParams({token:g.token}));
+    },
+    gmailSourceStatus:async()=>{
+      if(!await maintainSession(true))return {status:401,body:'{}'};
+      const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)return {status:401,body:'{}'};
+      const r=await boundedRead(API+'/v1/manage/gmail-source/status',{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},2048);
+      if(attempt!==generation)return {status:401,body:'{}'};
+      if(r.response.status===404||r.response.status===503)return {status:200,body:JSON.stringify({ready:false,passkeyRequired:false})};
+      return {status:r.response.status,body:r.body};
+    },
+    connectGmail:async()=>{
+      if(!await maintainSession(true))throw Error('Sign in again');
+      const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)throw Error('Sign in again');
+      const post=async(suffix,value)=>{const r=await fetch(API+'/v1/manage/gmail-source'+suffix,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,16384));if(!r.ok||attempt!==generation)throw Error('Gmail was not connected');return v;};
+      const value={action:'connect',sourceId:''},c=await post('/begin',value),response=await assertion(c);if(attempt!==generation)throw Error('Cancelled');
+      const r=await post('',{...value,token:c.token,response});
+      if(r.ok!==true||typeof r.authorizationUrl!=='string'||r.authorizationUrl.length>8192)throw Error('Invalid Google authorization');
+      const u=new URL(r.authorizationUrl);
+      const allowed=['client_id','redirect_uri','response_type','scope','access_type','prompt','include_granted_scopes','state','code_challenge','code_challenge_method'];
+      if([...u.searchParams.keys()].some(k=>!allowed.includes(k))||allowed.some(k=>u.searchParams.getAll(k).length!==1)||u.searchParams.get('access_type')!=='offline'||u.searchParams.get('prompt')!=='consent'||u.searchParams.get('include_granted_scopes')!=='false')throw Error('Invalid Google authorization');
+      if(u.origin!=='https://accounts.google.com'||u.pathname!=='/o/oauth2/v2/auth'||u.username||u.password||u.hash||!sameScopes(u.searchParams.get('scope'))||u.searchParams.get('redirect_uri')!==API+'/sources/gmail/oauth/callback'||u.searchParams.get('client_id')!=='367143149550-cu61adcdqclntipnl84e096kp35vduvk.apps.googleusercontent.com'||u.searchParams.get('response_type')!=='code'||u.searchParams.get('code_challenge_method')!=='S256'||!/^[0-9a-f]{64}$/.test(u.searchParams.get('state')??'')||!/^[A-Za-z0-9_-]{43}$/.test(u.searchParams.get('code_challenge')??''))throw Error('Invalid Google authorization');
+      if(attempt!==generation)throw Error('Cancelled');location.assign(u.href);
+    },
+    disconnectGmail:async sourceId=>{
+      if(typeof sourceId!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(sourceId))throw Error('Source required');
+      if(!await maintainSession(true))throw Error('Sign in again');
+      const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)throw Error('Sign in again');
+      const post=async(suffix,value)=>{const r=await fetch(API+'/v1/manage/gmail-source'+suffix,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,16384));if(!r.ok||attempt!==generation)throw Error('Gmail was not disconnected');return v;};
+      const value={action:'disconnect',sourceId},c=await post('/begin',value),response=await assertion(c);if(attempt!==generation)throw Error('Cancelled');const r=await post('',{...value,token:c.token,response});
+      if(r.disconnected!==true&&!(r.disconnected===false&&r.lifecycleBlocked===true))throw Error('Gmail was not disconnected');
+      return JSON.stringify({disconnected:r.disconnected===true,googlePermissionRemains:r.googlePermissionRemains!==false,lifecycleBlocked:r.lifecycleBlocked===true,...(typeof r.artifactsRemoved==='boolean'?{artifactsRemoved:r.artifactsRemoved}:{})});
     },
     addTotp:async(label,account,secret)=>{
       if(typeof label!=='string'||!label.trim()||label.length>120||typeof account!=='string'||account.length>120||typeof secret!=='string'||secret.length>2048)throw Error('Invalid authenticator details');
