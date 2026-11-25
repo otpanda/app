@@ -103,6 +103,7 @@ class _AuthEntryState extends State<AuthEntry> {
                   ? 'Check your email.'
                   : 'Welcome to OTPanda.',
               style: const TextStyle(
+                fontFamily: 'BricolageGrotesque',
                 fontSize: 29,
                 fontWeight: FontWeight.w800,
                 letterSpacing: -.8,
