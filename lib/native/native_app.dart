@@ -4,6 +4,8 @@ import '../branding.dart';
 import '../main.dart' show green, ink, line, muted, otpandaTheme;
 import '../auth_entry.dart';
 import '../browser_session_contract.dart';
+import '../lost_access_page.dart';
+import '../recovery_contract.dart';
 import 'native_session.dart';
 
 /// Native shell: renews at start, then shows sign-in, an honest signed-in
@@ -132,6 +134,21 @@ class _State extends State<NativeSessionPage> {
             message: err ?? '',
             busy: busy,
             showRemember: false,
+            onLostAccess:
+                shared is RecoveryBridge &&
+                    (shared as RecoveryBridge).recoveryAvailable
+                ? () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => Scaffold(
+                        appBar: AppBar(title: const Text('OTPanda')),
+                        body: LostAccessPage(
+                          bridge: shared as RecoveryBridge,
+                          onExit: () => Navigator.of(context).maybePop(),
+                        ),
+                      ),
+                    ),
+                  )
+                : null,
             run: _run,
           ),
         );

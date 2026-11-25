@@ -3,9 +3,12 @@ import 'dart:convert';
 import 'dart:math';
 
 import '../browser_session_contract.dart';
+import '../recovery_contract.dart';
 import '../session_contract.dart';
 import 'native_assignment.dart';
 import 'native_device_routes.dart';
+import 'native_email_recovery.dart';
+import 'native_manage_settings.dart';
 import 'native_passkey.dart';
 import 'native_realtime.dart';
 import 'native_session.dart';
@@ -57,6 +60,8 @@ class NativeSessionBridge
         AuthEntryBridge,
         FirstPasskeyBridge,
         AdditionalPasskeyBridge,
+        RecoveryBridge,
+        PasskeyLabelBridge,
         RealtimeBridge {
   /// Set once after construction (the driver needs this bridge's transport).
   NativeAssignmentDriver? assignment;
@@ -70,6 +75,7 @@ class NativeSessionBridge
     this.googleAvailable = false,
     this.creation,
     this.headerRequest,
+    this.settingsEnabled = false,
     RealtimeConnector? realtimeConnector,
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch) {
@@ -270,6 +276,77 @@ class NativeSessionBridge
   @override
   String get pendingLabel => '';
 
+  // ---- Recovery, security settings, passkey rename, Google link. Contract:
+  // native-settings-parity-CONTRACT-ef156abe. OFF unless [settingsEnabled]
+  // (activation is primary's, after deployment and qualification). Approval
+  // of new-device sign-ins is never offered: it answers 503
+  // local_verification_unavailable. Deny works.
+  final bool settingsEnabled;
+
+  late final NativeManageSettings? _manage = settingsEnabled && passkeys != null
+      ? NativeManageSettings(
+          passkeys: passkeys!,
+          nowMs: _now,
+          request: (m, p, b) async {
+            final r = await _call(m, p, body: b == null ? null : jsonEncode(b));
+            Map<String, dynamic>? body;
+            try {
+              final j = jsonDecode(r.body);
+              if (j is Map<String, dynamic>) body = j;
+            } catch (_) {}
+            return (status: r.status, body: body);
+          },
+        )
+      : null;
+
+  late final NativeEmailRecovery? _email = settingsEnabled && creation != null
+      ? NativeEmailRecovery(
+          post: controller.auth.post,
+          creation: creation!,
+          nowMs: _now,
+        )
+      : null;
+
+  NativeManageSettings get _m =>
+      _manage ?? (throw UnsupportedError('Not available on this device.'));
+  NativeEmailRecovery get _e =>
+      _email ?? (throw UnsupportedError('Not available on this device.'));
+
+  @override
+  bool get recoveryAvailable => _manage != null;
+
+  /// Local-verification approval is not available on any client.
+  @override
+  bool get enrolledClientApprovalAvailable => false;
+
+  @override
+  Future<RecoveryStatus> recoveryStatus() async =>
+      RecoveryStatus.fromJson(await _m.recoveryStatus());
+
+  @override
+  Future<void> recoveryChange(RecoveryChange change) async =>
+      _m.recoveryChange(change);
+
+  @override
+  Future<void> recoveryCancelRequest(String requestId) async =>
+      _m.cancelRequest(requestId);
+
+  @override
+  Future<void> renamePasskey(String credentialId, String? label) async =>
+      _m.renamePasskey(credentialId, label);
+
+  @override
+  Future<void> emailRecoveryStart(String email) async => _e.start(email);
+  @override
+  Future<DateTime> emailRecoveryVerify(String email, String code) async =>
+      _e.verify(email, code);
+  @override
+  Future<void> emailRecoverySendCompletionCode(String email) async =>
+      _e.sendCompletionCode(email);
+  @override
+  Future<void> emailRecoveryComplete(String email, String code) async =>
+      _e.complete(email, code);
+
   /// Google: the OS account sheet when the SDK is there, otherwise the
   /// browser handoff (also what controller does on browser_required).
   @override
@@ -305,12 +382,33 @@ class NativeSessionBridge
   @override
   Future<String> protectionContinue(String action) =>
       throw UnsupportedError('Not available on this device.');
+
+  /// Same actions as the web bridge. approve and approve-change are never
+  /// available (503 on every client); deny is.
   @override
   Future<String> security(
     String action, [
     bool enabled = false,
     String pendingId = '',
-  ]) => throw UnsupportedError('Not available on this device.');
+  ]) async {
+    final m = _m;
+    switch (action) {
+      case 'status':
+        return jsonEncode(await m.securityStatus());
+      case 'toggle':
+        await m.setExtraVerification(enabled);
+        return '{}';
+      case 'request-change':
+        return jsonEncode(await m.requestSecurityChange(enabled));
+      case 'consume-change':
+        return jsonEncode(await m.consumeSecurityChange(pendingId));
+      case 'deny':
+        await m.denyPending(pendingId);
+        return '{}';
+      default:
+        throw UnsupportedError('Not available on this device.');
+    }
+  }
 
   @override
   Future<void> start(String mode) async {
