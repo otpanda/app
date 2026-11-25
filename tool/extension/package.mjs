@@ -14,14 +14,15 @@ const source=await readFile(path.join(build,'index.html'),'utf8');
 if(!source.includes('session-bootstrap.js'))throw Error('Expected reviewed web preview bootstrap');
 const out=await mkdtemp(path.join(root,'build/.extension-stage-'));try{await cp(build,out,{recursive:true});
 // Extension sign-in is intentionally unsupported. No web cookie/session bridge.
-let html=source.replace('<script src="session-bootstrap.js"></script>','').replace(/<link rel="manifest"[^>]*>/,'');
+let html=source.replace('<script src="session-bootstrap.js"></script>','').replace('<script src="realtime-client.js"></script>','').replace(/<link rel="manifest"[^>]*>/,'');
 html=html.replace('<script src="flutter_bootstrap.js"', '<script src="extension-session.js"></script><script src="flutter_bootstrap.js"');
 html=html.replace('</head>','<link rel="stylesheet" href="extension-host.css"></head>');
 if(!html.includes('<script src="extension-session.js"></script><script src="flutter_bootstrap.js"'))throw Error('Unsupported bridge injection failed');
-if(html.includes('session-bootstrap'))throw Error('Web session removal failed');
+if(html.includes('session-bootstrap')||html.includes('realtime-client'))throw Error('Web session removal failed');
 await writeFile(path.join(out,'index.html'),html);
 await writeFile(path.join(out,'extension-session.js'),"'use strict';const unsupported=async()=>({status:503,body:JSON.stringify({error:'unsupported'})});Object.defineProperty(globalThis,'OTPandaSession',{value:Object.freeze({ready:Promise.resolve(),status:()=> 'unsupported',start:async()=>{throw Error('unsupported')},passkey:async()=>{throw Error('unsupported')},clear:()=>{},logout:()=>{},read:unsupported,organize:unsupported,copied:unsupported}),writable:false,configurable:false});\n");
 await rm(path.join(out,'session-bootstrap.js'),{force:true});
+await rm(path.join(out,'realtime-client.js'),{force:true});
 await rm(path.join(out,'flutter_service_worker.js'),{force:true});
 let bootstrap=await readFile(path.join(out,'flutter_bootstrap.js'),'utf8');
 bootstrap=bootstrap.replace(/_flutter\.loader\.load\(\{[\s\S]*?\}\);\s*$/,'_flutter.loader.load({});');
