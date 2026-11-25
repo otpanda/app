@@ -74,7 +74,24 @@ sys.exit(1)
 PYTAP
   then break; fi
 done
-sleep 8; shot b1_actual_google_button
+# Wait for a rendered page or provider instead of treating an 8s blank tab as ready.
+for render_try in $(seq 1 12); do
+ sleep 5
+ adb shell uiautomator dump /sdcard/applink-render.xml >/dev/null 2>&1 || true
+ adb pull /sdcard/applink-render.xml "$OUT/browser-render-$render_try.xml" >/dev/null 2>&1 || true
+ if grep -qiE 'accounts.google.com|Sign in with Google|Choose an account|Welcome to OTPanda|Continue with Google|Could not|unavailable|ERR_' "$OUT/browser-render-$render_try.xml"; then break; fi
+ # Flutter web may expose only an accessibility activation control until enabled.
+ python3 - "$OUT/browser-render-$render_try.xml" <<'PYA11Y'
+import sys,re,subprocess,xml.etree.ElementTree as ET
+try:nodes=ET.parse(sys.argv[1]).iter('node')
+except Exception:sys.exit(0)
+for n in nodes:
+ if 'Enable accessibility' in n.get('text','')+' '+n.get('content-desc',''):
+  b=list(map(int,re.findall(r'\d+',n.get('bounds',''))))
+  if len(b)==4:subprocess.run(['adb','shell','input','tap',str((b[0]+b[2])//2),str((b[1]+b[3])//2)])
+PYA11Y
+done
+shot b1_actual_google_button
 adb shell dumpsys activity activities > "$OUT/button-activities.txt" 2>&1
 adb shell uiautomator dump /sdcard/applink-ui.xml >/dev/null 2>&1 || true
 adb pull /sdcard/applink-ui.xml "$OUT/browser-ui.xml" >/dev/null 2>&1 || true
