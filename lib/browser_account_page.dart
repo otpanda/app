@@ -789,6 +789,23 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
               ),
               subtitle: Text('Connected'),
             ),
+          if (o['google'] == false)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'Google',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: const Text(
+                'Choose the Google account with the same email as this OTPanda account. Your passkeys will keep working.',
+              ),
+              trailing: TextButton(
+                onPressed: busy
+                    ? null
+                    : () => run(() => bridge.start('google')),
+                child: const Text('Connect'),
+              ),
+            ),
           if (o['passkeys'] == 0 &&
               o['google'] == true &&
               (bridge is! FirstPasskeyBridge ||
