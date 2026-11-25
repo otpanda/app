@@ -53,7 +53,7 @@ void main() {
         expect(find.text('Connected'), findsOneWidget);
         expect(find.text('Connect'), findsNothing);
       } else {
-        expect(find.textContaining('same email'), findsOneWidget);
+        expect(find.text('Not connected'), findsOneWidget);
         expect(b.starts, isEmpty);
         await t.tap(find.text('Connect'));
         await t.pumpAndSettle();
