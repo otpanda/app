@@ -1229,7 +1229,11 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
             children: [
               const Text(
                 'Your account',
-                style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+                style: TextStyle(
+                  fontFamily: 'BricolageGrotesque',
+                  fontSize: 25,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 12),
               const Text('Your sign-in methods and security, in one place.'),
