@@ -298,4 +298,4 @@ class _Browser
     final response = await _session.read(path.toJS).toDart;
     return SessionResponse(response.status.toDartInt, response.body.toDart);
   }
-        }
+}
