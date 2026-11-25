@@ -250,7 +250,7 @@ void main() {
     await t.tap(find.byTooltip('Back to codes'));
     await t.pumpAndSettle();
     expect(log, ['settings', 'codes']);
-    expect(find.text('Your codes'), findsOneWidget);
+    expect(find.byKey(const Key('product-top-bar')), findsOneWidget);
     log.clear();
     await t.pumpWidget(app('settings/account-security'));
     await t.pumpAndSettle();
