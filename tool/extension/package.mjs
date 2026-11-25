@@ -18,7 +18,9 @@ const source=await readFile(path.join(build,'index.html'),'utf8');
 if(!source.includes('session-bootstrap.js'))throw Error('Expected reviewed web preview bootstrap');
 const out=await mkdtemp(path.join(root,'build/.extension-stage-'));try{await cp(build,out,{recursive:true});
 // Extension sign-in is intentionally unsupported. No web cookie/session bridge.
-let html=source.replace('<script src="session-bootstrap.js"></script>','').replace('<script src="realtime-client.js"></script>','').replace(/<link rel="manifest"[^>]*>/,'');
+let html=source.replace(/<base href="[^"]*">/, '<base href="./">').replace('<script src="session-bootstrap.js"></script>','').replace('<script src="realtime-client.js"></script>','').replace(/<link rel="manifest"[^>]*>/,'');
+if(/<base\b[^>]*href=/i.test(html)&&!html.includes('<base href="./">'))throw Error('Unsupported base tag');
+if(/(?:src|href)="\/(?!\/)/.test(html))throw Error('Root-absolute packaged asset');
 html=html.replace('<script src="flutter_bootstrap.js"', '<script src="extension-session.js"></script><script src="flutter_bootstrap.js"');
 html=html.replace('</head>','<link rel="stylesheet" href="extension-host.css"></head>');
 if(!html.includes('<script src="extension-session.js"></script><script src="flutter_bootstrap.js"'))throw Error('Unsupported bridge injection failed');
