@@ -1,7 +1,9 @@
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
-import 'package:material_ui/material_ui.dart' show Checkbox;
+import 'package:material_ui/material_ui.dart'
+    show Checkbox, MaterialApp, Scaffold;
+import 'package:otpanda_client/auth_entry.dart';
 import 'package:flutter/widgets.dart' show Key, Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/native/native_app.dart';
@@ -217,6 +219,131 @@ void main() {
     });
   });
 
+  group('native always remembers (user policy)', () {
+    late List<(String, Map<String, dynamic>)> posts;
+    late _Br b2;
+    NativeSessionController cap({bool googleOk = true}) {
+      posts = [];
+      b2 = _Br();
+      return NativeSessionController(
+        NativeAuth(
+          post: (p, body) async {
+            posts.add((p, Map<String, dynamic>.from(body)));
+            if (p == '/auth/native/challenge') {
+              return (
+                status: 200,
+                body: {'device_id': 'DEV', 'nonce': 'n', 'expires_at': 5},
+              );
+            }
+            if (p == '/auth/native/google/begin') {
+              return (status: 200, body: {'nonce': 'N', 'expires_at': 9});
+            }
+            if (p == '/auth/native/google/complete') {
+              return (
+                status: 200,
+                body: {
+                  'device_id': 'DEV',
+                  'access': 'a',
+                  'access_expires_at': 9999999999999,
+                },
+              );
+            }
+            return (status: 404, body: null);
+          },
+          keystore: _Ks(),
+          browser: b2,
+          google: _GTok(),
+          store: _St(),
+          apiOrigin: 'https://api.example',
+          launchUrl: (c, s) => Uri.parse('https://x/#$c$s'),
+        ),
+      );
+    }
+
+    Map<String, dynamic> complete() =>
+        posts.firstWhere((e) => e.$1 == '/auth/native/google/complete').$2;
+
+    for (final r in <bool?>[null, false]) {
+      test('controller Google, remember=$r, sends remember true', () async {
+        await cap().signInWithGoogle(remember: r);
+        expect(complete()['remember'], true);
+      });
+      test(
+        'controller browser Google, remember=$r, fragment remember=1',
+        () async {
+          await cap().signInWithBrowser(provider: 'google', remember: r);
+          expect(b2.last!.fragment, endsWith('&provider=google&remember=1'));
+        },
+      );
+    }
+
+    testWidgets('legacy entry Google button sends remember true', (t) async {
+      final c = cap();
+      t.view.physicalSize = const Size(390, 780);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(NativeApp(controller: c, googleAvailable: true));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('native-google')));
+      await t.pumpAndSettle();
+      expect(complete()['remember'], true);
+    });
+
+    testWidgets(
+      'shared entry without SDK: browser fallback remember=1, no checkbox',
+      (t) async {
+        final c = cap();
+        t.view.physicalSize = const Size(390, 900);
+        t.view.devicePixelRatio = 1;
+        addTearDown(t.view.reset);
+        final bridge = NativeSessionBridge(
+          c,
+          (m, p, {body, query, required bearer}) async =>
+              const SessionResponse(401, '{}'),
+          googleAvailable: false,
+        );
+        await t.pumpWidget(
+          NativeApp(controller: c, googleAvailable: false, authBridge: bridge),
+        );
+        await t.pumpAndSettle();
+        expect(find.byType(Checkbox), findsNothing);
+        await t.tap(find.textContaining('Google').first);
+        await t.pumpAndSettle();
+        expect(b2.last!.fragment, endsWith('&provider=google&remember=1'));
+      },
+    );
+
+    testWidgets('web AuthEntry (default) keeps a working remember checkbox', (
+      t,
+    ) async {
+      final bridge = NativeSessionBridge(
+        cap(),
+        (m, p, {body, query, required bearer}) async =>
+            const SessionResponse(401, '{}'),
+        googleAvailable: false,
+      );
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AuthEntry(
+              bridge: bridge,
+              status: 'signed-out',
+              message: '',
+              busy: false,
+              run: (f) async {},
+            ),
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(find.text('Remember this device'), findsOneWidget);
+      expect(t.widget<Checkbox>(find.byType(Checkbox)).value, true);
+      await t.tap(find.byType(Checkbox));
+      await t.pumpAndSettle();
+      expect(t.widget<Checkbox>(find.byType(Checkbox)).value, false);
+    });
+  });
+
   group('OS passkey sign-in', () {
     final good = {
       'token': 'tok',
@@ -391,11 +518,16 @@ void googleRecognitionTests() {
       expect(sent['recognition'], 'REC');
       expect(sent['id_token'], 'IDTOK');
     });
-    test('native always remembers even when called with false; none stored sends no key', () async {
-      final (sent, _) = await run(remember: false);
-      expect(sent['remember'], false);
-      expect(sent.containsKey('recognition'), isFalse);
-    });
+    test(
+      'native always remembers: false or omitted still sends true',
+      () async {
+        for (final r in <bool?>[false, null]) {
+          final (sent, _) = await run(remember: r);
+          expect(sent['remember'], true, reason: 'remember arg $r');
+          expect(sent.containsKey('recognition'), isFalse);
+        }
+      },
+    );
     test(
       'an issued recognition is stored; a storage failure keeps sign-in',
       () async {
