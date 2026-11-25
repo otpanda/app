@@ -104,7 +104,11 @@ class _AccountSecurityPreviewState extends State<AccountSecurityPreview> {
               const SizedBox(height: 20),
               const Text(
                 'Your account, your way',
-                style: TextStyle(fontSize: 25, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  fontFamily: 'BricolageGrotesque',
+                  fontSize: 25,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -119,7 +123,11 @@ class _AccountSecurityPreviewState extends State<AccountSecurityPreview> {
               const SizedBox(height: 10),
               const Text(
                 'Explore recovery readiness',
-                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  fontFamily: 'BricolageGrotesque',
+                  fontSize: 21,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
