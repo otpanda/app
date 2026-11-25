@@ -127,16 +127,16 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const grant=values.get('enrollment');if(grant&&/^otpda_[A-Za-z0-9_-]{55}$/.test(grant))enrollment=grant;
     } catch { if(attempt===generation){try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='sign-in-required';} }
   })();
-  function validateAccess(result) {
+  function validateAccess(result,tabKey=false) {
     const clock=result?.renewal?.serverTime;
     if(clock!==undefined&&(!Number.isSafeInteger(clock)||clock<0))throw Error('Invalid server clock');
     const now=clock??serverNow();
     if(!result||!['access,accessExpiresAt','access,accessExpiresAt,renewal'].includes(Object.keys(result).sort().join(','))||!/^otpda_[A-Za-z0-9_-]{55}$/.test(result.access)||!Number.isSafeInteger(result.accessExpiresAt)||result.accessExpiresAt<=now||result.accessExpiresAt>now+300000)throw Error('Invalid session response');
-    if(result.renewal!==undefined&&(result.accessExpiresAt-clock!==300000||!validRenewal(result.renewal,result.access,now)))throw Error('Invalid renewal response');
+    if(result.renewal!==undefined&&(result.accessExpiresAt-clock!==300000||!validRenewal(result.renewal,result.access,now,tabKey)))throw Error('Invalid renewal response');
     return clock===undefined?serverOffset:clock-Date.now();
   }
-  function validRenewal(value,token,now=serverNow()) {
-    return value&&Number.isSafeInteger(value.serverTime)&&value.serverTime>=0&&['firstPartyExpiresAt,handleId,lineageId,serverTime','handleId,lineageId,serverTime'].includes(Object.keys(value).sort().join(','))&&/^[A-Za-z0-9_-]{8,64}$/.test(value.lineageId)&&/^[A-Za-z0-9_-]{8,64}$/.test(value.handleId)&&token.slice(6,18)===value.handleId&&(value.firstPartyExpiresAt===undefined||(Number.isSafeInteger(value.firstPartyExpiresAt)&&value.firstPartyExpiresAt>now&&value.firstPartyExpiresAt<=now+30*86400000));
+  function validRenewal(value,token,now=serverNow(),tabKey=false) {
+    return value&&Number.isSafeInteger(value.serverTime)&&value.serverTime>=0&&['firstPartyExpiresAt,handleId,lineageId,serverTime','handleId,lineageId,serverTime'].includes(Object.keys(value).sort().join(','))&&/^[A-Za-z0-9_-]{8,64}$/.test(value.lineageId)&&/^[A-Za-z0-9_-]{8,64}$/.test(value.handleId)&&token.slice(6,18)===value.handleId&&(value.firstPartyExpiresAt===undefined||(Number.isSafeInteger(value.firstPartyExpiresAt)&&(tabKey?value.firstPartyExpiresAt>0:value.firstPartyExpiresAt>now)&&value.firstPartyExpiresAt<=now+30*86400000));
   }
   async function restoreAfterUnauthorized() {
     clear();status='session-paused';
@@ -184,29 +184,36 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     if(!access||!['restored','session-paused','restoring'].includes(status))return false;
     if(restoring)return restoring;
     const now=serverNow(),visible=globalThis.document?.visibilityState==='visible',active=userRequest||visible;
-    if(now>=expires){if(active&&Date.now()>=renewalRetryAt)return restoreSession();status='session-paused';return false;}
-    if(!active||expires-now>60000)return true;
+    const lapsed=now>=expires;
+    // Returning after the 5-minute access life: the tab's memory-only key signs the lineage head (no bearer, no
+    // navigation). Without a key/lineage the existing first-party redirect remains the fallback.
+    if(lapsed&&!(active&&signingKey&&renewal)){if(active&&Date.now()>=renewalRetryAt)return restoreSession();status='session-paused';return false;}
+    if(!active||(!lapsed&&expires-now>60000))return true;
     if(!signingKey||!renewal)return true;
     // A signed cross-site response cannot extend the first-party cookie lifetime.
-    if(Date.now()<renewalRetryAt)return true;
-    if(renewal.firstPartyExpiresAt-now<86400000)return restoreSession();
+    if(Date.now()<renewalRetryAt)return !lapsed;
+    // The signed key, not the first-party cookie, authorizes a live tab: cookie expiry alone never navigates.
+    // It only matters on reload, a new tab or a lost key (those still use the first-party restore).
     if(renewing)return renewing;
     const attempt=generation,oldAccess=access,oldRenewal=renewal,key=signingKey;
     renewing=(async()=>{
+      let responded=false;
       try {
         const expiresAt=serverNow()+30000;
-        const message=new TextEncoder().encode(['otpanda-renew-v1','POST /auth/renew',oldRenewal.lineageId,oldRenewal.handleId,String(expiresAt)].join('\n'));
+        const message=new TextEncoder().encode([lapsed?'otpanda-renew-resume-v1':'otpanda-renew-v1','POST /auth/renew',oldRenewal.lineageId,oldRenewal.handleId,String(expiresAt)].join('\n'));
         const signature=encode(new Uint8Array(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},key,message)));
         if(attempt!==generation)return false;
-        const renewalRead=await boundedRead(API+'/auth/renew',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+oldAccess},body:JSON.stringify({lineage_id:oldRenewal.lineageId,expires_at:expiresAt,signature})},4096);const response=renewalRead.response;
+        const renewalRead=await boundedRead(API+'/auth/renew',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:lapsed?{'Content-Type':'application/json'}:{'Content-Type':'application/json',Authorization:'Bearer '+oldAccess},body:JSON.stringify(lapsed?{lineage_id:oldRenewal.lineageId,handle_id:oldRenewal.handleId,expires_at:expiresAt,signature}:{lineage_id:oldRenewal.lineageId,expires_at:expiresAt,signature})},4096);const response=renewalRead.response;responded=true;
         if(response.status===429){renewalRetryAt=Date.now()+60000;return serverNow()<expires;}
         if(!response.ok)throw Error('Renewal refused');
-        const result=JSON.parse(renewalRead.body);const nextOffset=validateAccess(result);
+        const result=JSON.parse(renewalRead.body);const nextOffset=validateAccess(result,true);
         if(!result.renewal||result.renewal.lineageId!==oldRenewal.lineageId||result.renewal.handleId===oldRenewal.handleId||(result.renewal.firstPartyExpiresAt===undefined||result.renewal.firstPartyExpiresAt<oldRenewal.firstPartyExpiresAt))throw Error('Invalid successor');
         if(attempt!==generation||oldAccess!==access)return false;
         serverOffset=nextOffset;access=result.access;expires=result.accessExpiresAt;renewal=result.renewal;status='restored';return true;
       } catch {
         if(attempt!==generation)return false;
+        // Away-and-back with no server answer at all (offline): keep the key and retry shortly, never navigate.
+        if(lapsed&&!responded){renewalRetryAt=Date.now()+10000;return false;}
         // A lost response may have spent this handle. Keep its existing read
         // authority until expiry, but never retry it or navigate on a blip.
         signingKey=undefined;renewal=undefined;
