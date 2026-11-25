@@ -55,7 +55,7 @@ jobs:
           # Android versionName can carry the prerelease suffix, so alphas are identifiable.
           mkdir -p dist
           for flavor in google fdroid; do
-            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$version" --dart-define=NATIVE_SIGNIN=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
+            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$version" --dart-define=NATIVE_SIGNIN=true --dart-define=NATIVE_ENTRY_EDIT_ENABLED=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
             apk="build/app/outputs/flutter-apk/app-$flavor-release.apk"
             bash .github/scripts/verify-apk-signature.sh "$apk"
             cp "$apk" "dist/otpanda-android-$flavor-native-candidate.apk"
