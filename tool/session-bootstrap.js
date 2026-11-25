@@ -293,12 +293,13 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
   ready.then(()=>{if(typeof history.pushState==='function'&&(status==='restored'||(!pending&&status==='idle')))showRoute(route??ROUTES[Math.min(view,4)],true);},()=>{});
   // Optional realtime change hints. Inert unless realtime-client.js was loaded first. The hint carries no data:
   // listeners only re-read through the normal authorized reads. The ticket 401 path reuses the ordinary session read.
-  const realtimeListeners=new Set();
+  const realtimeListeners=new Set(),connectionListeners=new Set();let lostShown=false;
   if(typeof globalThis.OTPandaRealtime?.create==='function'&&typeof globalThis.WebSocket==='function'){
     realtime=globalThis.OTPandaRealtime.create({api:API,fetch:(...a)=>fetch(...a),WebSocket:globalThis.WebSocket,document:globalThis.document,window:globalThis,epoch:()=>generation,
       getAccess:async()=>{if(!['restored','session-paused','restoring'].includes(status))return undefined;if(!await maintainSession(false))return undefined;return serverNow()<expires?access:undefined;},
       onUnauthorized:async()=>{await globalThis.OTPandaSession.read('/v1/manage/session');},
-      onChanged:reason=>{for(const f of [...realtimeListeners]){try{f(reason);}catch{}}}});
+      onChanged:reason=>{for(const f of [...realtimeListeners]){try{f(reason);}catch{}}},
+      onConnection:c=>{for(const f of [...connectionListeners]){try{f(c);}catch{}}const lost=c.status==='lost';if(lost===lostShown)return;lostShown=lost;for(const f of [...realtimeListeners]){try{f(lost?'connection-lost':'connection-restored');}catch{}}}});
   }
   Object.defineProperty(globalThis,'OTPandaSession',{value:Object.freeze({
     ready,
@@ -310,7 +311,9 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     assignmentDismiss:()=>assignment?.dismiss(),
     status:()=>status,
     realtimeState:()=>realtime?.state()??'unsupported',
-    realtimeSubscribe:listener=>{if(typeof listener!=='function')throw Error('Listener required');realtimeListeners.add(listener);if(realtime&&realtimeListeners.size===1)realtime.start();return()=>{realtimeListeners.delete(listener);if(realtime&&realtimeListeners.size===0)realtime.stop();};},
+    realtimeConnection:()=>realtime?.connection()??Object.freeze({status:'ok',reason:undefined,retrying:false,since:0}),
+    realtimeConnectionSubscribe:listener=>{if(typeof listener!=='function')throw Error('Listener required');connectionListeners.add(listener);return()=>{connectionListeners.delete(listener);};},
+    realtimeSubscribe:listener=>{if(typeof listener!=='function')throw Error('Listener required');realtimeListeners.add(listener);if(lostShown){try{listener('connection-lost');}catch{}}if(realtime&&realtimeListeners.size===1)realtime.start();return()=>{realtimeListeners.delete(listener);if(realtime&&realtimeListeners.size===0)realtime.stop();};},
     maintain:()=>maintainSession(),
     accessExpiresAt:()=>expires-serverOffset,
     view:()=>view,
@@ -349,7 +352,13 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const result=await boundedRead(API+path,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},524288);const r=result.response,body=result.body;
       if(attempt!==generation)return {status:401,body:'{}'};
       if(r.status===401){await restoreAfterUnauthorized();return {status:503,body:'{}'};}
-      return {status:r.status,body};
+      const raw=r.headers?.get('Retry-After');
+      let retryAfterSeconds=null;
+      if(raw){
+        const seconds=/^\d+$/.test(raw.trim())?Number(raw):Math.ceil((Date.parse(raw)-Date.now())/1000);
+        if(Number.isSafeInteger(seconds)&&seconds>=0)retryAfterSeconds=seconds;
+      }
+      return {status:r.status,body,retryAfterSeconds};
     },
     organize:async(method,body='')=>{
       if(!['GET','PUT'].includes(method)||typeof body!=='string'||new TextEncoder().encode(body).byteLength>131072||(method==='GET'&&body))throw Error('Organization request required');

@@ -93,7 +93,7 @@ Future<void> pump(
 
 void main() {
   testWidgets(
-    'background poll never removes a visible code, even on transient failure',
+    'hint refresh failure retains visible code without transient warning',
     (t) async {
       var time = now;
       final tr = FakeTransport(
@@ -140,7 +140,8 @@ void main() {
       await poll;
       await t.pump();
       expect(find.byTooltip('Copy code'), findsOneWidget);
-      expect(find.textContaining('Connection interrupted'), findsOneWidget);
+      expect(find.textContaining('Connection interrupted'), findsNothing);
+      expect(find.textContaining('Connection to the server was lost'), findsNothing);
       c.dispose();
     },
   );
