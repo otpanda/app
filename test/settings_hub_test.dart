@@ -95,7 +95,7 @@ void main() {
     await t.tap(find.text('Devices & sessions'));
     await t.pumpAndSettle();
     expect(log.last, 'settings/devices');
-    expect(find.text('This browser'), findsOneWidget);
+    expect(find.text('This browser'), findsNothing);
     expect(find.widgetWithText(OutlinedButton, 'Sign out'), findsOneWidget);
     expect(find.text('Clear local access'), findsNothing);
     await t.tap(find.text('Sign out'));
@@ -133,7 +133,7 @@ void main() {
     expect(find.text('Devices & sessions'), findsOneWidget);
     await t.tap(find.text('Devices & sessions'));
     await t.pumpAndSettle();
-    expect(find.text('This browser'), findsOneWidget);
+    expect(find.text('This browser'), findsNothing);
     expect(find.text('Sign-in methods'), findsNothing);
     expect(log, ['settings/devices']);
   });
@@ -144,7 +144,7 @@ void main() {
     final log = <String>[];
     final b = restored();
     await pump(t, b, navigation: 'settings/devices', log: log);
-    expect(find.text('This browser'), findsOneWidget);
+    expect(find.text('This browser'), findsNothing);
     // An unknown id changes nothing.
     t.view.physicalSize = const Size(420, 800);
     await t.pumpWidget(
@@ -160,7 +160,7 @@ void main() {
       ),
     );
     await t.pumpAndSettle();
-    expect(find.text('This browser'), findsOneWidget);
+    expect(find.text('This browser'), findsNothing);
     expect(log, isEmpty);
   });
 
@@ -190,7 +190,7 @@ void main() {
     expect(find.text('Sign-in methods'), findsOneWidget);
     await t.pumpWidget(app('settings/devices'));
     await t.pumpAndSettle();
-    expect(find.text('This browser'), findsOneWidget);
+    expect(find.text('This browser'), findsNothing);
     expect(log, isEmpty);
   });
 
@@ -215,7 +215,7 @@ void main() {
     addTearDown(t.view.reset);
     await t.pumpWidget(app('settings/devices'));
     await t.pumpAndSettle();
-    expect(find.text('This browser'), findsOneWidget);
+    expect(find.text('This browser'), findsNothing);
     await t.tap(find.byTooltip('Back to settings'));
     await t.pumpAndSettle();
     await t.tap(find.byTooltip('Back to codes'));
