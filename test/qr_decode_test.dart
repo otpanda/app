@@ -10,7 +10,9 @@ import 'package:otpanda_client/qr_decode.dart';
 void main() {
   // Fixture: a real QR rendering of a valid otpauth URI, 640x480.
   final png = img.decodePng(
-    base64Decode(File('test/fixtures/qr-otpauth.png.b64').readAsStringSync().trim()),
+    base64Decode(
+      File('test/fixtures/qr-otpauth.png.b64').readAsStringSync().trim(),
+    ),
   )!;
   Uint8List luma(int stride) {
     final out = Uint8List(stride * png.height);
