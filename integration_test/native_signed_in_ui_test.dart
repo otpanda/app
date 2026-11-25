@@ -117,7 +117,11 @@ Future<void> _until(WidgetTester t, Finder f, {int secs = 20}) async {
     await t.pump(const Duration(milliseconds: 100));
     if (f.evaluate().isNotEmpty) return;
   }
-  await _shot(t, 'failure');
+  try {
+    if (_shotKey.currentContext != null) await _shot(t, 'failure');
+  } catch (_) {
+    /* Diagnostics must never hide the original test failure. */
+  }
   // Synthetic fixture only: include visible text to diagnose the failed stage.
   // ignore: avoid_print
   print(
