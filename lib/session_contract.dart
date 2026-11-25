@@ -48,7 +48,7 @@ class ManagedEntry {
     }
     return ManagedEntry(
       _text(json, 'entry_id'),
-      _text(json, 'service_name'),
+      _text(json, json.containsKey('label') ? 'label' : 'service_name'),
       json['account_name'] == null || json['account_name'] == ''
           ? ''
           : _text(json, 'account_name'),
