@@ -7,6 +7,15 @@
   const sameScopes = v => { if (typeof v !== 'string') return false; const p = v.split(' '); return p.length === GMAIL_SCOPES.length && new Set(p).size === p.length && GMAIL_SCOPES.every(x => p.includes(x)); };
   const KEY = 'otpanda.restore.tab.v1';
   const READ_RESTORE_KEY = 'otpanda.read.restore.v1';
+  // Static identity (email, picture) cached for this sign-in only. It dies with the
+  // session-present flag and is never read without matching owner and session ids.
+  const PROFILE_KEY = 'otpanda-profile-v1';
+  const forgetProfile=()=>{try{localStorage.removeItem(PROFILE_KEY);}catch{}};
+  // Another tab ended or replaced the sign-in: this tab stops using and showing
+  // the cached identity until it starts a sign-in itself.
+  let profileRevoked=false;const revokeListeners=new Set();
+  const revokeProfile=()=>{if(profileRevoked)return;profileRevoked=true;forgetProfile();for(const f of [...revokeListeners]){try{f();}catch{}}};
+  try{globalThis.addEventListener?.('storage',e=>{if(e.key===null||(e.key==='otpanda-session-present'&&e.newValue!=='yes')||(e.key===PROFILE_KEY&&e.newValue===null))revokeProfile();});}catch{}
   const resetReadRestore=()=>{try{sessionStorage.removeItem(READ_RESTORE_KEY);}catch{}};
   const VIEW_KEY = 'otpanda.view.tab.v1';
   // Signed-in "Connect Google": one tab-scoped marker holding only an opaque
@@ -101,7 +110,7 @@
       if(sessionPresent&&!route?.startsWith('recovery')&&route!=='demo'){const verifier=random(),state=random(),attempt=generation;status='restoring';const challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now()}));location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));}
       return;
     }
-    if(pending==='#auth=logout-incomplete&state='){try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='logout-incomplete';return;}
+    if(pending==='#auth=logout-incomplete&state='){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='logout-incomplete';return;}
     if(/^#(google|link|auth)=/.test(pending)&&await linkReturn(pending,Boolean(saved)))return;
     status = 'restoring';const attempt=generation;
     try {
@@ -124,7 +133,7 @@
           sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),view,restoreRetried:true,...(p.linkNotice?{linkNotice:p.linkNotice}:{})}));
           location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));return;
         }
-        if(['restart','retry','sign-in'].includes(value))try{localStorage.removeItem('otpanda-session-present');}catch{}
+        if(['restart','retry','sign-in'].includes(value)){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}}
         status=value==='email-sent'?'email-code':value==='sign-in'?'sign-in-required':value;
         return;
       }
@@ -171,7 +180,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       serverOffset=nextOffset;access=result.access;expires=result.accessExpiresAt;status='restored';if(p.linkNotice)linkResult=p.linkNotice;
       if(candidateKey&&validRenewal(result.renewal,result.access)&&result.renewal.firstPartyExpiresAt!==undefined) {signingKey=candidateKey;renewal=result.renewal;}
       const grant=values.get('enrollment');if(grant&&/^otpda_[A-Za-z0-9_-]{55}$/.test(grant))enrollment=grant;
-    } catch { if(attempt===generation){try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='sign-in-required';} }
+    } catch { if(attempt===generation){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='sign-in-required';} }
   })();
   function validateAccess(result,tabKey=false) {
     const clock=result?.renewal?.serverTime;
@@ -319,10 +328,10 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const u=new URL(API+'/auth/signup/app');u.search=new URLSearchParams({challenge,state,redirect_uri:REDIRECT});u.hash=new URLSearchParams({action:proof?'begin':'email',email,...(proof?{email_token:proof}:{})});location.assign(u.href);
     },
     access:()=>{if(access!==undefined&&serverNow()>=expires){status='session-paused';return undefined;}return access;},
-    clear:()=>{showRoute('codes',true);resetReadRestore();forgetView();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
-    logout:()=>{showRoute('codes',true);resetReadRestore();forgetView();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}location.assign(API+'/auth/device/logout');},
+    clear:()=>{showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
+    logout:()=>{showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}location.assign(API+'/auth/device/logout');},
     read:async path=>{
-      if(!['/v1/manage/account','/v1/manage/session','/v1/manage/entries','/v1/manage/active-codes','/v1/manage/sources','/v1/manage/unassigned'].includes(path))throw Error('Read path required');
+      if(!['/v1/manage/account','/v1/manage/session','/v1/manage/session?view=cache-v1','/v1/manage/entries','/v1/manage/active-codes','/v1/manage/sources','/v1/manage/unassigned'].includes(path))throw Error('Read path required');
       if(!await maintainSession(true))return {status:access||status==='restoring'||status==='session-paused'?503:401,body:'{}'};
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)return {status:401,body:'{}'};
       const result=await boundedRead(API+path,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},524288);const r=result.response,body=result.body;
@@ -443,6 +452,27 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)return {status:401,body:'{}'};
       const result=await boundedRead(API+'/v1/manage/totp-code?'+new URLSearchParams({entry:entryId}),{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},4096);if(attempt!==generation)return {status:401,body:'{}'};return {status:result.response.status,body:result.body};
     },
+    profileRead:(ownerId,sessionId)=>{
+      try{
+        if(profileRevoked||status!=='restored'||localStorage.getItem('otpanda-session-present')!=='yes'||typeof ownerId!=='string'||!/^[0-9a-f]{64}$/.test(sessionId))return '';
+        const raw=localStorage.getItem(PROFILE_KEY);if(raw===null)return '';
+        const v=raw.length<=4096?JSON.parse(raw):null,keys=v&&typeof v==='object'?Object.keys(v).sort().join(','):'';
+        if(!['email,ownerId,savedAt,sessionId','email,ownerId,picture,savedAt,sessionId'].includes(keys)||v.ownerId!==ownerId||v.sessionId!==sessionId||typeof v.email!=='string'||!v.email||v.email.length>254||!Number.isSafeInteger(v.savedAt)||(v.picture!==undefined&&(typeof v.picture!=='string'||v.picture.length>2048))){forgetProfile();return '';}
+        return JSON.stringify({email:v.email,...(v.picture===undefined?{}:{picture:v.picture}),savedAt:v.savedAt});
+      }catch{forgetProfile();return '';}
+    },
+    profileWrite:(ownerId,sessionId,email,picture)=>{
+      try{
+        // A late response after sign-out finds the flag gone and writes nothing.
+        if(profileRevoked||status!=='restored'||localStorage.getItem('otpanda-session-present')!=='yes')return;
+        if(typeof ownerId!=='string'||!ownerId||ownerId.length>256||!/^[0-9a-f]{64}$/.test(sessionId)||typeof email!=='string'||!email||email.length>254||/[\u0000-\u001f\u007f]/.test(email))return;
+        let pic;if(typeof picture==='string'&&picture.length<=2048){try{const u=new URL(picture);if(u.protocol==='https:'&&!u.username&&!u.password&&(u.hostname==='googleusercontent.com'||u.hostname.endsWith('.googleusercontent.com')))pic=picture;}catch{}}
+        localStorage.setItem(PROFILE_KEY,JSON.stringify({ownerId,sessionId,email,...(pic===undefined?{}:{picture:pic}),savedAt:Date.now()}));
+      }catch{}
+    },
+    profileClear:forgetProfile,
+    profileRevoked:()=>profileRevoked,
+    onProfileRevoked:f=>{if(typeof f!=='function')return;revokeListeners.add(f);},
     addPasskey:async()=>{
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)throw Error('Sign in again.');
       const post=async(step,value,grant)=>{const r=await fetch(API+'/v1/manage/passkey/add/'+step,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',...(grant?{'X-OTPanda-Enrollment':grant}:{})},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,24576));if(!r.ok||attempt!==generation)throw Error('Passkey setup could not finish. Start again.');return v;};
@@ -482,7 +512,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     start:async(mode='restore',remember=true)=>{
       if(location.origin+location.pathname!==REDIRECT||location.search)throw Error('Canonical app URL required');
       if(!['restore','login','signup','google'].includes(mode))throw Error('Known session flow required');
-      if(mode!=='restore')forgetView();
+      if(mode!=='restore'){forgetView();forgetProfile();profileRevoked=false;}
       clear();const attempt=generation,verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
       if(attempt!==generation)return;
       sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),...(mode==='restore'?{view}:{})}));
