@@ -15,7 +15,7 @@ jobs:
           java-version: '21'
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools
+          packages: platform-tools build-tools;36.0.0
       - uses: actions/download-artifact@v4
         with:
           name: release-android
