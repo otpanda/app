@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/browser_account_page.dart';
 import 'package:otpanda_client/browser_session_contract.dart';
+import 'package:otpanda_client/extension_connect.dart';
 import 'package:otpanda_client/session_contract.dart';
 
 class Bridge implements BrowserSessionBridge, SessionViewBridge {
@@ -110,7 +111,72 @@ class Bridge implements BrowserSessionBridge, SessionViewBridge {
   }
 }
 
+class ExtensionBridge extends Bridge implements ExtensionConnectBridge {
+  @override
+  String extensionIntent = 'chrome';
+  int connects = 0, cancels = 0;
+  String reason = '';
+  @override
+  Future<String> connectExtension() async {
+    connects++;
+    return reason;
+  }
+
+  @override
+  void cancelExtension() {
+    cancels++;
+    extensionIntent = '';
+  }
+}
+
 void main() {
+  testWidgets('a pending extension intent needs one explicit Connect press', (
+    t,
+  ) async {
+    final b = ExtensionBridge()
+      ..status = 'restored'
+      ..reason = 'retry';
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          workspaceEnabled: true,
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(find.text('Connect browser extension?'), findsOneWidget);
+    expect(b.connects, 0, reason: 'showing the dialog never calls begin');
+    await t.tap(find.byKey(const Key('extension-connect-confirm')));
+    await t.pumpAndSettle();
+    expect(b.connects, 1);
+    expect(find.byKey(const Key('extension-connect-message')), findsOneWidget);
+    await t.tap(find.byKey(const Key('extension-connect-cancel')));
+    await t.pumpAndSettle();
+    expect(b.cancels, 1);
+    expect(b.connects, 1);
+    expect(find.text('Connect browser extension?'), findsNothing);
+    await t.pumpWidget(const SizedBox.shrink());
+    expect(t.takeException(), isNull);
+  });
+  testWidgets('no extension intent shows no dialog', (t) async {
+    final b = ExtensionBridge()
+      ..status = 'restored'
+      ..extensionIntent = '';
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          workspaceEnabled: true,
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(find.text('Connect browser extension?'), findsNothing);
+    expect(b.connects, 0);
+  });
   testWidgets('account restore opens account without storing account content', (
     t,
   ) async {
