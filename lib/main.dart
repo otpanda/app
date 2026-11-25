@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show LicenseRegistry, LicenseEntryWithLineBreaks;
 import 'package:flutter/services.dart';
 
 import 'models.dart';
@@ -37,10 +39,38 @@ Color avatarTint(String name) {
 
 // Web hosts the real account flow. Other platforms have no native sign-in yet
 // and show an honest page that opens the web app in the system browser.
-void main() =>
-    runApp(kIsWeb ? const OTPandaApp() : const NativeBrowserFallbackApp());
+void _registerFontLicenses() {
+  LicenseRegistry.addLicense(() async* {
+    for (final (name, path) in const [
+      ('Figtree', 'assets/fonts/Figtree-OFL.txt'),
+      ('Bricolage Grotesque', 'assets/fonts/BricolageGrotesque-OFL.txt'),
+      ('@zxing/library', 'assets/zxing/zxing-library-LICENSE.txt'),
+    ]) {
+      yield LicenseEntryWithLineBreaks([
+        name,
+      ], await rootBundle.loadString(path));
+    }
+  });
+}
+
+void main() {
+  _registerFontLicenses();
+  runApp(kIsWeb ? const OTPandaApp() : const NativeBrowserFallbackApp());
+}
 
 ThemeData otpandaTheme() => ThemeData(
+  fontFamily: 'Figtree',
+  appBarTheme: const AppBarTheme(
+    centerTitle: false,
+    backgroundColor: Colors.white,
+    surfaceTintColor: Colors.transparent,
+    titleTextStyle: TextStyle(
+      fontFamily: 'BricolageGrotesque',
+      fontSize: 20,
+      fontWeight: FontWeight.w800,
+      color: ink,
+    ),
+  ),
   navigationBarTheme: NavigationBarThemeData(
     backgroundColor: Colors.white,
     indicatorColor: pale,
@@ -50,6 +80,12 @@ ThemeData otpandaTheme() => ThemeData(
     ),
   ),
   dialogTheme: DialogThemeData(
+    titleTextStyle: const TextStyle(
+      fontFamily: 'BricolageGrotesque',
+      fontSize: 22,
+      fontWeight: FontWeight.w700,
+      color: ink,
+    ),
     backgroundColor: Colors.white,
     surfaceTintColor: Colors.transparent,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -539,7 +575,8 @@ class _ClientHomeState extends State<ClientHome> {
         Text(
           code == null ? '' : '${code.substring(0, 3)} ${code.substring(3)}',
           style: TextStyle(
-            fontFamily: 'monospace',
+            fontFamily: 'Figtree',
+            fontFeatures: const [FontFeature.tabularFigures()],
             fontSize: compact ? 22 : 26,
             fontWeight: FontWeight.w600,
             color: ink,
@@ -661,7 +698,8 @@ class _ClientHomeState extends State<ClientHome> {
             Text(
               '654 321',
               style: TextStyle(
-                fontFamily: 'monospace',
+                fontFamily: 'Figtree',
+                fontFeatures: [FontFeature.tabularFigures()],
                 fontSize: 23,
                 letterSpacing: 1,
               ),
@@ -709,6 +747,7 @@ class _ClientHomeState extends State<ClientHome> {
             tab == 0 ? 'Your codes' : names[tab],
             style: const TextStyle(
               fontWeight: FontWeight.w700,
+              fontFamily: 'BricolageGrotesque',
               fontSize: 28,
               letterSpacing: -0.8,
               color: ink,
@@ -881,6 +920,7 @@ class _ClientHomeState extends State<ClientHome> {
                       'OTPanda',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
+                        fontFamily: 'BricolageGrotesque',
                         fontSize: 23,
                         letterSpacing: -1,
                         color: ink,
