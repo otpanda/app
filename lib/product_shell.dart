@@ -8,6 +8,7 @@ import 'branding.dart';
 import 'page_reload_stub.dart'
     if (dart.library.js_interop) 'page_reload_web.dart'
     as platform;
+import 'main.dart' show green;
 import 'pull_to_refresh.dart';
 import 'session_contract.dart';
 
@@ -163,7 +164,8 @@ class _ProductShellState extends State<ProductShell> {
             Text(
               spaced(code),
               style: const TextStyle(
-                fontFamily: 'monospace',
+                fontFamily: 'Figtree',
+                fontFeatures: [FontFeature.tabularFigures()],
                 fontSize: 22,
                 fontWeight: FontWeight.w600,
               ),
@@ -372,6 +374,30 @@ class _ProductShellState extends State<ProductShell> {
     }
   }
 
+  Future<void> addAuthenticator() async {
+    if (!await totpPrerequisite(
+          context,
+          widget.controller.bridge,
+          widget.onOpenAccount,
+        ) ||
+        !mounted) {
+      return;
+    }
+    final id = await addTotpDialog(
+      context,
+      widget.controller.bridge as TotpManagementBridge,
+    );
+    if (id != null && mounted) {
+      await showDialog<void>(
+        context: context,
+        builder: (_) =>
+            TotpEntryDialog(bridge: widget.controller.bridge, entryId: id),
+      );
+      widget.controller.resume();
+      await widget.controller.refresh();
+    }
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, size) {
@@ -392,6 +418,7 @@ class _ProductShellState extends State<ProductShell> {
                   tab == 0 ? 'Your codes' : names[tab],
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
+                    fontFamily: 'BricolageGrotesque',
                     fontSize: 28,
                     letterSpacing: -0.8,
                     color: ink,
@@ -427,10 +454,22 @@ class _ProductShellState extends State<ProductShell> {
                 : 'Updates arrive automatically.',
             style: TextStyle(fontSize: 12, color: muted),
           ),
+          if (widget.controller.bridge is TotpManagementBridge)
+            const SizedBox(height: 80),
         ],
       );
       final content = PullToRefresh(onRefresh: pull, child: list);
       return Scaffold(
+        floatingActionButton: widget.controller.bridge is TotpManagementBridge
+            ? FloatingActionButton.extended(
+                tooltip: 'Add authenticator',
+                backgroundColor: green,
+                foregroundColor: Colors.white,
+                icon: const Icon(Icons.add),
+                label: const Text('Add TOTP'),
+                onPressed: addAuthenticator,
+              )
+            : null,
         body: SafeArea(
           child: Column(
             children: [
@@ -449,42 +488,13 @@ class _ProductShellState extends State<ProductShell> {
                       'OTPanda',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
+                        fontFamily: 'BricolageGrotesque',
                         fontSize: 23,
                         letterSpacing: -1,
                         color: ink,
                       ),
                     ),
                     const Spacer(),
-                    if (widget.controller.bridge is TotpManagementBridge)
-                      IconButton(
-                        tooltip: 'Add authenticator',
-                        icon: const Icon(Icons.add),
-                        onPressed: () async {
-                          if (!await totpPrerequisite(
-                                context,
-                                widget.controller.bridge,
-                                widget.onOpenAccount,
-                              ) ||
-                              !context.mounted) {
-                            return;
-                          }
-                          final id = await addTotpDialog(
-                            context,
-                            widget.controller.bridge as TotpManagementBridge,
-                          );
-                          if (id != null && context.mounted) {
-                            await showDialog<void>(
-                              context: context,
-                              builder: (_) => TotpEntryDialog(
-                                bridge: widget.controller.bridge,
-                                entryId: id,
-                              ),
-                            );
-                            widget.controller.resume();
-                            await widget.controller.refresh();
-                          }
-                        },
-                      ),
                     IconButton(
                       tooltip: 'Account & security',
                       onPressed: widget.onOpenAccount,
