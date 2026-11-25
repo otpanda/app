@@ -39,7 +39,7 @@ jobs:
         continue-on-error: true
         run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter test
-      - run: flutter build web --base-href /app/ --no-wasm-dry-run
+      - run: flutter build web --base-href /app/ --no-wasm-dry-run --dart-define=APP_VERSION=dev-${{ github.sha }}
       - uses: actions/upload-artifact@v4
         with:
           name: fictional-web-preview
