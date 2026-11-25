@@ -149,11 +149,15 @@ class SettingsHub extends StatelessWidget {
   final ValueChanged<SettingsCategory> onSelect;
   final Map<SettingsCategory, Widget> pages;
 
+  /// Shown at the bottom of the category list (Sign out).
+  final Widget? footer;
+
   /// Pages that lay themselves out to the full height of the screen instead
   /// of scrolling as a whole (they scroll an inner list and pin a footer).
   final Set<SettingsCategory> fillPages;
   const SettingsHub({
     this.fillPages = const {},
+    this.footer,
     super.key,
     required this.selected,
     required this.onSelect,
@@ -205,6 +209,30 @@ class SettingsHub extends StatelessWidget {
               ),
             ),
           ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: ListTile(
+            key: const Key('settings-licenses'),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: line),
+            ),
+            tileColor: Colors.white,
+            leading: const Icon(Icons.description_outlined, color: green),
+            title: const Text(
+              'Licenses',
+              style: TextStyle(fontWeight: FontWeight.w700, color: ink),
+            ),
+            subtitle: const Text(
+              'Open-source and icon licenses',
+              style: TextStyle(color: muted),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () =>
+                showLicensePage(context: context, applicationName: 'OTPanda'),
+          ),
+        ),
+        ?footer,
       ],
     );
   }
