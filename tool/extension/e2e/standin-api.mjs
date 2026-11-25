@@ -135,6 +135,7 @@ export async function startStandin({ pagesRoot, cert, key, ttlMs = 300000, redir
     if (!ok) { sock.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return; }
     const acc = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
     sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + acc + '\r\nSec-WebSocket-Protocol: otpanda.v1\r\n\r\n');
+    if (st.rt.flap) { sock.end(frame(8, Buffer.from([0x03, 0xf3]))); return; }
     st.rt.sockets.add(sock); sock.on('close', () => st.rt.sockets.delete(sock)); sock.on('error', () => {}); sock.on('data', d => { if ((d[0] & 0x0f) === 8) sock.end(frame(8, Buffer.alloc(2))); });
   });
   st.rt.hint = (text = '{"v":1,"t":"changed"}') => { for (const s of st.rt.sockets) s.write(frame(1, text)); };

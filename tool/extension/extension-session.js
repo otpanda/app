@@ -65,7 +65,7 @@
       // ticket (never the bearer). Any failure backs off 5s to 5min with jitter. A closed socket never clears the
       // record: 4401 forces one signed renew through the worker, and only a definitive renew 401 signs out.
       realtimeSubscribe: listener => {
-        let stopped = false, ws, timer, attempt = 0, lost = false;
+        let stopped = false, ws, timer, attempt = 0, lost = false, stable, resetAttempt;
         const tell = r => { try { listener(r); } catch { /* listener errors never stop the socket */ } };
         const down = () => { if (!lost) { lost = true; tell('connection-lost'); } };
         const later = ms => { if (!stopped) timer = setTimeout(connect, ms); };
@@ -80,10 +80,16 @@
           let w;
           try { w = new WebSocket(r.url, ['otpanda.v1', r.ticket]); } catch { return backoff(); }
           ws = w;
-          w.onopen = () => { attempt = 0; lost = false; tell('connection-restored'); tell('connect'); };
+          // R1: an open socket proves nothing until it has stayed up. The refetch waits for the SAME connection to be stable
+          // for 2s, and the backoff only resets after 30s, so accept-then-close cannot loop at the minimum delay.
+          w.onopen = () => {
+            stable = setTimeout(() => { if (ws === w && !stopped) { lost = false; tell('connection-restored'); tell('connect'); } }, 2000);
+            resetAttempt = setTimeout(() => { if (ws === w) attempt = 0; }, 30000);
+          };
           w.onmessage = e => { if (e.data === '{"v":1,"t":"changed"}') tell('changed'); else w.close(4002); };
           w.onerror = () => {};
           w.onclose = async e => {
+            clearTimeout(stable); clearTimeout(resetAttempt);
             if (ws === w) ws = undefined;
             if (stopped) return;
             down();
@@ -91,11 +97,12 @@
               try { const m = await send({ type: 'maintain', force: true }); if (m && m.signedOut === true) { status = 'idle'; return; } } catch { /* unavailable */ }
               if (e.code === 4408) return later(1000 + Math.random() * 1000);
             }
+            if (e.code === 4429) { attempt = Math.max(attempt, 4); down(); return later(60000 + Math.random() * 60000); }
             backoff();
           };
         };
         connect();
-        return () => { stopped = true; clearTimeout(timer); const w = ws; ws = undefined; if (w) { w.onclose = null; try { w.close(); } catch { /* already closed */ } } };
+        return () => { stopped = true; clearTimeout(timer); clearTimeout(stable); clearTimeout(resetAttempt); const w = ws; ws = undefined; if (w) { w.onclose = null; try { w.close(); } catch { /* already closed */ } } };
       },
       onProfileRevoked: () => {},
       profileRevoked: () => false,

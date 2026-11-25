@@ -164,3 +164,42 @@ test('client read allowlist matches the API source (set OTPANDA_API_SRC to a che
   const dom = (await readFile(dir + '/src/entry-domains-http.js', 'utf8')).match(/PATH='([^']+)'/)[1];
   assert.deepEqual([...reads, dom].sort(), [...READ_PATHS].sort());
 });
+
+const TK = 'rt1.' + 'A'.repeat(16) + '.' + 'B'.repeat(43);
+const ticketNet = (onTicket, calls = []) => async (u, o) => {
+  calls.push(u);
+  if (u.endsWith('/exchange')) return R(200, { device_id: 'dev_t', access: 'tok1', access_expires_at: 1e12 + 300000 });
+  if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_t', nonce: 'n', expires_at: 5 });
+  if (u.endsWith('/renew')) return R(200, { access: 'tok2', access_expires_at: 1e12 + 600000 });
+  if (u.endsWith('/auth/extension/realtime/ticket')) return onTicket(o);
+  return R(404);
+};
+test('ticket: bearer-only POST with no body, returns only the one-use ticket, wss URL and a receipt-relative lifetime', async () => {
+  let seen; const calls = [];
+  const { t } = await signedIn(ticketNet(o => { seen = o; return R(200, { ticket: TK, expiresAt: 1e12 + 30000, closeAt: 1e12 + 300000, serverTime: 1e12 + 1000 }); }, calls));
+  const r = await t.auth.ticket();
+  assert.deepEqual(Object.keys(r).sort(), ['closeAfterMs', 'ticket', 'url']);
+  assert.equal(r.ticket, TK); assert.equal(r.url, 'wss://api.example/auth/extension/realtime'); assert.equal(r.closeAfterMs, 299000);
+  assert.equal(seen.method, 'POST'); assert.equal(seen.body, undefined); assert.match(seen.headers.Authorization, /^Bearer tok[12]$/); assert.equal(seen.credentials, 'omit');
+  assert.ok(!JSON.stringify(r).includes('tok'), 'the bearer never leaves the worker');
+});
+test('ticket: a 401 gets one forced signed renew then one retry; a final 401 is unavailable and keeps the record', async () => {
+  let n = 0; const calls = [];
+  const { t } = await signedIn(ticketNet(() => (n++ === 0 ? R(401) : R(200, { ticket: TK, expiresAt: 1, closeAt: 2e12, serverTime: 1e12 })), calls));
+  const r = await t.auth.ticket(); assert.equal(r.ticket, TK); assert.ok(calls.filter(u => u.endsWith('/renew')).length <= 2, 'at most the initial renew plus one forced renew');
+  const y = await signedIn(ticketNet(() => R(401)));
+  const r2 = await y.t.auth.ticket(); assert.deepEqual(r2, { unavailable: true }); assert.ok(y.t.records.peek());
+});
+test('ticket: only a definitive renew 401 signs out; 5xx, 429, bad shapes and network errors keep the record', async () => {
+  const y = await signedIn(async (u, o) => (u.endsWith('/realtime/ticket') ? R(401) : u.endsWith('/renew') ? R(401, { error: 'invalid_grant' }) : ticketNet(() => R(401))(u, o)));
+  const r = await y.t.auth.ticket(); assert.deepEqual(r, { signedOut: true }); assert.equal(y.t.records.peek(), undefined);
+  for (const reply of [() => R(503), () => R(429), () => R(200, { ticket: 'x', closeAt: 2, serverTime: 1 }), () => R(200, { ticket: TK }), () => { throw Error('net'); }]) {
+    const z = await signedIn(ticketNet(reply)); assert.deepEqual(await z.t.auth.ticket(), { unavailable: true }); assert.ok(z.t.records.peek());
+  }
+});
+test('ticket: a forced renew after a transient failure shares the 10s backoff (no challenge burst)', async () => {
+  const calls = [];
+  const { t } = await signedIn(async (u, o) => { calls.push(u); return u.endsWith('/realtime/ticket') ? R(401) : u.endsWith('/challenge') ? R(503) : ticketNet(() => R(401))(u, o); });
+  await t.auth.ticket(); const n = calls.filter(u => u.endsWith('/challenge')).length; await t.auth.ticket(); await t.auth.ticket();
+  assert.equal(calls.filter(u => u.endsWith('/challenge')).length, n, 'no further challenge inside the backoff');
+});

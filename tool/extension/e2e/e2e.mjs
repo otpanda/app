@@ -161,7 +161,36 @@ try {
   const w2 = await authWindow(ctx); await w2.waitForSelector('#connect', { timeout: 20000 }); await w2.click('#connect');
   assert.equal(await again, 'ok'); assert.equal(api.exchanges, 2); ok('explicit re-sign-in after revocation works (new key, new device)');
   
-  if (process.env.E2E_REAL_BUILD) {
+  if (process.env.E2E_FLAP) {
+    await pop.close();
+    const wait = async (f, ms) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await new Promise(r => setTimeout(r, 100)); } return false; };
+    const reads = () => api.log.filter(l => l.path === '/v1/manage/active-codes' && l.method === 'GET').length;
+    const rtp = await popup(ctx, id); await rtp.setViewportSize({ width: 390, height: 600 });
+    assert.ok(await wait(() => api.rt.sockets.size === 1, 15000)); await new Promise(r => setTimeout(r, 4500));
+    // R1: accept-then-close flapping must neither refetch nor reset the backoff.
+    api.rt.flap = true; const fc0 = reads(), fm0 = api.rt.mints; api.rt.close(1011); await new Promise(r => setTimeout(r, 20000)); api.rt.flap = false;
+    const fm = api.rt.mints - fm0; assert.ok(fm >= 2 && fm <= 4, 'mints while flapping: ' + fm); assert.equal(reads(), fc0, 'no connect refetch from sockets that never stayed up 2s');
+    ok('accept-then-close flapping: no refetch, backoff keeps growing (' + fm + ' mints in 20s)');
+    assert.ok(await wait(() => api.rt.sockets.size === 1, 60000), 'recovers once the server behaves');
+    await rtp.close(); pop = await popup(ctx, id);
+  }
+  if (process.env.E2E_TRAILING) {
+    // Metadata budget (slow, run separately): a hint inside the 30s window does not refetch entries now; one trailing refetch follows.
+    await pop.close();
+    const wait = async (f, ms) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await new Promise(r => setTimeout(r, 100)); } return false; };
+    const metas = () => api.log.filter(l => l.path === '/v1/manage/entries' && l.method === 'GET').length;
+    const codes = () => api.log.filter(l => l.path === '/v1/manage/active-codes' && l.method === 'GET').length;
+    const rtp = await popup(ctx, id); await rtp.setViewportSize({ width: 390, height: 600 });
+    assert.ok(await wait(() => api.rt.sockets.size === 1, 15000)); await new Promise(r => setTimeout(r, 4000));
+    const m0 = metas(), c0 = codes(), t0 = Date.now(); api.rt.hint(); await new Promise(r => setTimeout(r, 4000));
+    assert.equal(codes() - c0, 1, 'codes refetched at once on the hint'); assert.equal(metas() - m0, 0, 'entries not refetched inside the 30s window');
+    ok('hint inside the 30s window: codes refetched immediately, entries/domains not');
+    assert.ok(await wait(() => metas() - m0 === 1, 40000), 'trailing entries refetch'); const dt = Date.now() - t0;
+    assert.ok(dt >= 20000 && dt <= 38000, 'trailing refetch after ' + dt + 'ms'); await new Promise(r => setTimeout(r, 3000)); assert.equal(metas() - m0, 1, 'exactly one trailing refetch');
+    ok('one trailing entries refetch after the 30s window (' + dt + 'ms after the hint)');
+    await rtp.close(); pop = await popup(ctx, id);
+  }
+  if (process.env.E2E_REAL_BUILD && !process.env.E2E_TRAILING && !process.env.E2E_FLAP) {
     // Popup-lifetime realtime: socket only while the popup is open; hints refetch the three reads, coalesced; no timer poll.
     await pop.close(); // one popup only: a second open popup would be a second socket and second reader
     const wait = async (f, ms = 15000) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await new Promise(r => setTimeout(r, 100)); } return false; };

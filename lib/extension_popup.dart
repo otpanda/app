@@ -34,7 +34,8 @@ class _ExtensionPopupViewState extends State<ExtensionPopupView> {
   List<ReceivedCode> codes = const [];
   Timer? ticker, spacing, metaTimer;
   bool entriesDirty = true;
-  int lastEntries = 0;
+  int lastEntries = 0, lastUnknownFetch = -100000;
+  Set<String> unresolved = {};
   int nextRead = 0;
   bool pendingRead = false, liveLost = false;
   void Function()? unsubscribe;
@@ -170,9 +171,18 @@ class _ExtensionPopupViewState extends State<ExtensionPopupView> {
       ];
       var es = entries;
       final known = es.map((x) => x.id).toSet();
-      final unknown = raw.any((x) => !known.contains(x.entryId));
+      // A code for an entry we do not know may fetch names once per 10s, and
+      // the same unresolved ids never trigger another fetch until entries
+      // change (a revoked or deleted entry must not cost 2 reads per hint).
+      final unknownIds = {
+        for (final x in raw)
+          if (!known.contains(x.entryId)) x.entryId,
+      };
+      final fresh = unknownIds.difference(unresolved).isNotEmpty;
+      final unknown = fresh && now() - lastUnknownFetch >= 10000;
       final due = entriesDirty && now() - lastEntries >= 30000;
       if (!loaded || unknown || due) {
+        if (unknown) lastUnknownFetch = now();
         final e = await bridge.read('/v1/manage/entries');
         if (e.status != 200) throw ClientFailure(e.status, e.retryAfterSeconds);
         final eb = jsonDecode(e.body);
@@ -182,6 +192,10 @@ class _ExtensionPopupViewState extends State<ExtensionPopupView> {
         ];
         lastEntries = now();
         entriesDirty = false;
+        unresolved = {
+          for (final x in raw)
+            if (!es.any((e) => e.id == x.entryId)) x.entryId,
+        };
       } else if (entriesDirty) {
         // A hint arrived inside the 30s window: one trailing refresh after it.
         metaTimer ??= Timer(
