@@ -271,21 +271,48 @@ void main() {
   });
 
   testWidgets(
-    'a camera problem is cleared when returning from manual entry so the camera retries',
+    'no camera falls back to manual entry on its own and the camera can be retried',
     (t) async {
       await open(t);
       problem(QrCameraProblem.unavailable);
       await t.pump();
-      expect(find.textContaining('camera is not available'), findsOneWidget);
-      await t.tap(find.text('Enter key manually'));
-      await t.pumpAndSettle();
+      expect(find.text('Setup key'), findsOneWidget);
+      expect(find.byKey(const Key('no-camera-note')), findsOneWidget);
+      expect(find.text('Scan QR code'), findsOneWidget);
+      expect(find.text('Next'), findsOneWidget);
       await t.tap(find.text('Scan QR code'));
       await t.pumpAndSettle();
+      expect(find.byKey(const Key('no-camera-note')), findsNothing);
       expect(find.textContaining('camera is not available'), findsNothing);
       expect(cameras, 2, reason: 'a new camera view was started');
       scan(_uri);
       await t.pumpAndSettle();
       expect(find.text('Verify and add'), findsOneWidget);
+    },
+  );
+
+  testWidgets('a second failure after the retry falls back again', (t) async {
+    await open(t);
+    problem(QrCameraProblem.unavailable);
+    await t.pump();
+    await t.tap(find.text('Scan QR code'));
+    await t.pumpAndSettle();
+    problem(QrCameraProblem.unavailable);
+    await t.pump();
+    expect(find.text('Setup key'), findsOneWidget);
+  });
+
+  testWidgets(
+    'a permission problem keeps its explanation and does not switch',
+    (t) async {
+      await open(t);
+      problem(QrCameraProblem.permissionDenied);
+      await t.pump();
+      expect(find.text('Setup key'), findsNothing);
+      expect(find.textContaining('Camera permission is off'), findsOneWidget);
+      await t.tap(find.text('Enter key manually'));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('no-camera-note')), findsNothing);
     },
   );
 
