@@ -130,7 +130,7 @@ class Fake
     if (path.endsWith('account'))
       body = {
         'email': 'alex@example.test',
-        'passkeys': 2,
+        'passkeys': Uri.base.queryParameters['nopk'] == '1' ? 0 : 2,
         'google': previewGoogle,
         'recoveryDevices': 1,
       };
