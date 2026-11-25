@@ -31,7 +31,8 @@
   let linkResult, access, expires = 0, status = 'idle', generation = 0, loginPending, entryEmail='',enrollment,googlePending,protectionPending;
   const encode = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
   const random = () => encode(crypto.getRandomValues(new Uint8Array(32)));
-  const clear = () => { assignment?.clear();generation++; renewalRetryAt=0;signingKey=undefined;renewal=undefined;renewing=undefined;restoring=undefined;access = undefined; expires = 0; loginPending=undefined;enrollment=undefined;googlePending=undefined;protectionPending=undefined; };
+  let realtime;
+  const clear = () => { realtime?.suspend();assignment?.clear();generation++; renewalRetryAt=0;signingKey=undefined;renewal=undefined;renewing=undefined;restoring=undefined;access = undefined; expires = 0; loginPending=undefined;enrollment=undefined;googlePending=undefined;protectionPending=undefined; };
   // Bound bytes as they arrive. A post-buffer string length check is too late.
   const readBounded = async (response, limit) => {
     const advertised=response.headers?.get('content-length');
@@ -177,7 +178,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const nextOffset=validateAccess(result);
       if(attempt!==generation)return;
       try{localStorage.setItem('otpanda-session-present','yes');}catch{}
-      serverOffset=nextOffset;access=result.access;expires=result.accessExpiresAt;status='restored';if(p.linkNotice)linkResult=p.linkNotice;
+      serverOffset=nextOffset;access=result.access;expires=result.accessExpiresAt;status='restored';realtime?.nudge();if(p.linkNotice)linkResult=p.linkNotice;
       if(candidateKey&&validRenewal(result.renewal,result.access)&&result.renewal.firstPartyExpiresAt!==undefined) {signingKey=candidateKey;renewal=result.renewal;}
       const grant=values.get('enrollment');if(grant&&/^otpda_[A-Za-z0-9_-]{55}$/.test(grant))enrollment=grant;
     } catch { if(attempt===generation){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='sign-in-required';} }
@@ -290,6 +291,15 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
   // only; the access token stays in this closure and is never handed to Flutter.
   const recovery=typeof globalThis.OTPandaRecoveryFactory==='function'?Object.freeze(globalThis.OTPandaRecoveryFactory({api:API,access:()=>serverNow()<expires?access:undefined,generation:()=>generation,readBounded,encode,decode:v=>Uint8Array.from(atob(v.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0)),random,fetchImpl:(...args)=>fetch(...args),credentials:{get:o=>navigator.credentials.get(o),create:o=>navigator.credentials.create(o)},storage:sessionStorage})):undefined;
   ready.then(()=>{if(typeof history.pushState==='function'&&(status==='restored'||(!pending&&status==='idle')))showRoute(route??ROUTES[Math.min(view,4)],true);},()=>{});
+  // Optional realtime change hints. Inert unless realtime-client.js was loaded first. The hint carries no data:
+  // listeners only re-read through the normal authorized reads. The ticket 401 path reuses the ordinary session read.
+  const realtimeListeners=new Set();
+  if(typeof globalThis.OTPandaRealtime?.create==='function'&&typeof globalThis.WebSocket==='function'){
+    realtime=globalThis.OTPandaRealtime.create({api:API,fetch:(...a)=>fetch(...a),WebSocket:globalThis.WebSocket,document:globalThis.document,window:globalThis,epoch:()=>generation,
+      getAccess:async()=>{if(!['restored','session-paused','restoring'].includes(status))return undefined;if(!await maintainSession(false))return undefined;return serverNow()<expires?access:undefined;},
+      onUnauthorized:async()=>{await globalThis.OTPandaSession.read('/v1/manage/session');},
+      onChanged:reason=>{for(const f of [...realtimeListeners]){try{f(reason);}catch{}}}});
+  }
   Object.defineProperty(globalThis,'OTPandaSession',{value:Object.freeze({
     ready,
     recovery,
@@ -299,6 +309,8 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     assignmentState:()=>assignment?.state??'unsupported',
     assignmentDismiss:()=>assignment?.dismiss(),
     status:()=>status,
+    realtimeState:()=>realtime?.state()??'unsupported',
+    realtimeSubscribe:listener=>{if(typeof listener!=='function')throw Error('Listener required');realtimeListeners.add(listener);if(realtime&&realtimeListeners.size===1)realtime.start();return()=>{realtimeListeners.delete(listener);if(realtime&&realtimeListeners.size===0)realtime.stop();};},
     maintain:()=>maintainSession(),
     accessExpiresAt:()=>expires-serverOffset,
     view:()=>view,
