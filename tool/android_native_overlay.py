@@ -45,3 +45,33 @@ if 'android:path="/app-return"' not in t:
 if 'android.permission.USE_BIOMETRIC' not in t:
     t = t.replace('<application', '<uses-permission android:name="android.permission.USE_BIOMETRIC"/>\n    <application', 1)
     m.write_text(t)
+# No Android auto-backup, cloud restore or device-to-device transfer of app data
+# (device id, recognition file): a restored copy must never carry them without
+# their Keystore keys. allowBackup=false alone does not stop device transfer on
+# every Android 12+ device, so explicit rules cover both modes and every domain
+# the Android Auto Backup docs list (developer.android.com/identity/data/autobackup).
+import re
+DOMAINS = ('file', 'database', 'sharedpref', 'external', 'root',
+           'device_file', 'device_database', 'device_sharedpref', 'device_root')
+excl = ''.join(f'        <exclude domain="{d}" path="."/>\n' for d in DOMAINS)
+xml = m.parent / 'res' / 'xml'
+xml.mkdir(parents=True, exist_ok=True)
+(xml / 'data_extraction_rules.xml').write_text(
+    '<?xml version="1.0" encoding="utf-8"?>\n<data-extraction-rules>\n'
+    '    <cloud-backup>\n' + excl + '    </cloud-backup>\n'
+    '    <device-transfer>\n' + excl + '    </device-transfer>\n'
+    '</data-extraction-rules>\n')
+(xml / 'backup_rules.xml').write_text(
+    '<?xml version="1.0" encoding="utf-8"?>\n<full-backup-content>\n'
+    + excl.replace('        ', '    ') + '</full-backup-content>\n')
+t = m.read_text()
+def set_attr(t, name, value):
+    tag = re.search(r'<application\b[^>]*>', t, re.S).group(0)
+    new = re.sub(r'\s' + re.escape(name) + r'="[^"]*"', '', tag)
+    new = new.replace('<application', f'<application {name}="{value}"', 1)
+    return t.replace(tag, new, 1)
+for name, value in (('android:allowBackup', 'false'),
+                    ('android:dataExtractionRules', '@xml/data_extraction_rules'),
+                    ('android:fullBackupContent', '@xml/backup_rules')):
+    t = set_attr(t, name, value)
+m.write_text(t)

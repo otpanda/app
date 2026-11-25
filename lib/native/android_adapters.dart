@@ -40,6 +40,20 @@ Future<String?> androidDeviceLabel({
   }
 }
 
+/// Recognition secret in an AndroidKeyStore AES-GCM key (see MainActivity).
+class AndroidRecognitionStore implements RecognitionStore {
+  AndroidRecognitionStore({MethodChannel channel = nativeChannel})
+    : _c = channel;
+  final MethodChannel _c;
+  @override
+  Future<String?> read() => _c.invokeMethod<String>('readRecognition');
+  @override
+  Future<void> write(String value) =>
+      _c.invokeMethod<void>('writeRecognition', {'value': value});
+  @override
+  Future<void> clear() => _c.invokeMethod<void>('clearRecognition');
+}
+
 class AndroidKeystoreAdapter implements NativeKeystore {
   AndroidKeystoreAdapter({MethodChannel channel = nativeChannel})
     : _c = channel;

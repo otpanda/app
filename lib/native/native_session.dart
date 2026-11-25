@@ -78,7 +78,7 @@ class NativeSessionController extends ChangeNotifier {
   /// Falls back to the browser when the account needs it (409).
   Future<void> signInWithGoogle({bool? remember}) => _signIn(() async {
     try {
-      return await auth.signInWithGoogle();
+      return await auth.signInWithGoogle(remember: remember);
     } on NativeAuthException catch (e) {
       if (e.kind == 'browser_required') {
         return auth.signInWithBrowser(provider: 'google', remember: remember);

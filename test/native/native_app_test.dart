@@ -59,6 +59,7 @@ class _G implements GoogleIdTokenSource {
 }
 
 void main() {
+  googleRecognitionTests();
   late _St st;
   late _Br br;
   late int renewStatus;
@@ -314,6 +315,110 @@ void main() {
       expect(c.phase, isNot(NativeSessionPhase.signedIn));
       expect(c.lastError, 'invalid_grant');
       expect(st.id, isNull);
+    });
+  });
+}
+
+class _Rec implements RecognitionStore {
+  _Rec([this.value, this.failWrite = false]);
+  String? value;
+  bool failWrite;
+  @override
+  Future<String?> read() async => value;
+  @override
+  Future<void> write(String v) async {
+    if (failWrite) throw StateError('x');
+    value = v;
+  }
+
+  @override
+  Future<void> clear() async => value = null;
+}
+
+class _GTok implements GoogleIdTokenSource {
+  @override
+  bool get available => true;
+  @override
+  Future<String?> idToken({required String nonce}) async => 'IDTOK';
+}
+
+void googleRecognitionTests() {
+  group('Google remember and recognition', () {
+    late _St st;
+    setUp(() => st = _St());
+    Future<(Map<String, dynamic>, _Rec)> run({
+      required bool? remember,
+      String? stored,
+      Map<String, dynamic> reply = const {},
+      bool failWrite = false,
+    }) async {
+      final rec = _Rec(stored, failWrite);
+      late Map<String, dynamic> sent;
+      final a = NativeAuth(
+        post: (p, b) async {
+          if (p == '/auth/native/google/begin') {
+            return (status: 200, body: {'nonce': 'N', 'expires_at': 9});
+          }
+          if (p == '/auth/native/google/complete') {
+            sent = Map<String, dynamic>.from(b);
+            return (
+              status: 200,
+              body: {
+                'device_id': 'DEV',
+                'access': 'a',
+                'access_expires_at': 9999999999999,
+                ...reply,
+              },
+            );
+          }
+          return (status: 404, body: null);
+        },
+        keystore: _Ks(),
+        browser: _Br(),
+        google: _GTok(),
+        store: st,
+        apiOrigin: 'https://api.example',
+        launchUrl: (c, s) => Uri.parse('https://x/#$c$s'),
+        recognition: rec,
+      );
+      await a.signInWithGoogle(remember: remember);
+      return (sent, rec);
+    }
+
+    test('sends remember and the stored recognition', () async {
+      final (sent, _) = await run(remember: true, stored: 'REC');
+      expect(sent['remember'], true);
+      expect(sent['recognition'], 'REC');
+      expect(sent['id_token'], 'IDTOK');
+    });
+    test('unchecked sends remember false; none stored sends no key', () async {
+      final (sent, _) = await run(remember: false);
+      expect(sent['remember'], false);
+      expect(sent.containsKey('recognition'), isFalse);
+    });
+    test(
+      'an issued recognition is stored; a storage failure keeps sign-in',
+      () async {
+        final (_, rec) = await run(
+          remember: true,
+          reply: {'recognition': 'NEW'},
+        );
+        expect(rec.value, 'NEW');
+        final (_, r2) = await run(
+          remember: true,
+          reply: {'recognition': 'NEW'},
+          failWrite: true,
+        );
+        expect(r2.value, isNull);
+        expect(st.id, 'DEV');
+      },
+    );
+    test('an over-long issued recognition is ignored', () async {
+      final (_, rec) = await run(
+        remember: true,
+        reply: {'recognition': 'x' * 201},
+      );
+      expect(rec.value, isNull);
     });
   });
 }

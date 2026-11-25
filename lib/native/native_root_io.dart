@@ -63,6 +63,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
         apiOrigin: apiOrigin,
         launchUrl: pagesNativeLaunchUrl,
         passkeys: passkeys,
+        recognition: AndroidRecognitionStore(),
       ),
     );
     _bearer = androidBearerRequest(apiOrigin);

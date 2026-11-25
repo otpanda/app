@@ -37,6 +37,9 @@ class MainActivity : FlutterActivity() {
                     "readDeviceId" -> result.success(prefs.getString("device_id", null))
                     "writeDeviceId" -> { prefs.edit().putString("device_id", call.argument<String>("id")).commit(); result.success(null) }
                     "clearDeviceId" -> { prefs.edit().remove("device_id").commit(); result.success(null) }
+                    "readRecognition" -> result.success(readRecognition())
+                    "writeRecognition" -> { writeRecognition(call.argument<String>("value")!!); result.success(null) }
+                    "clearRecognition" -> { clearRecognition(); result.success(null) }
                     "deviceLabel" -> result.success(deviceLabel())
                     "takeInitialLink" -> { val l = pendingLink; pendingLink = null; result.success(l) }
                     else -> result.notImplemented()
@@ -49,6 +52,56 @@ class MainActivity : FlutterActivity() {
         PasskeyHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
         DeviceProofHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
         captureLink(intent)
+    }
+
+    // Google recognition secret: AES-GCM under a non-exportable AndroidKeyStore
+    // key. Only ciphertext and IV reach a no-backup file. Never logged. Any
+    // failure reads as "no recognition" (the server then falls back to browser).
+    private val recognitionAlias = "otpanda_recognition"
+
+    private fun recognitionKey(): javax.crypto.SecretKey {
+        (store().getKey(recognitionAlias, null) as? javax.crypto.SecretKey)?.let { return it }
+        val gen = javax.crypto.KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        gen.init(
+            KeyGenParameterSpec.Builder(
+                recognitionAlias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            ).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256).build()
+        )
+        return gen.generateKey()
+    }
+
+    // noBackupFilesDir is excluded from auto-backup and device transfer.
+    private val recognitionFile get() = java.io.File(noBackupFilesDir, "recognition.bin")
+
+    private fun writeRecognition(value: String) {
+        require(value.isNotEmpty() && value.length <= 200)
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(javax.crypto.Cipher.ENCRYPT_MODE, recognitionKey())
+        val ct = c.doFinal(value.toByteArray(Charsets.UTF_8))
+        val tmp = java.io.File(noBackupFilesDir, "recognition.tmp")
+        tmp.writeBytes(byteArrayOf(c.iv.size.toByte()) + c.iv + ct)
+        require(tmp.renameTo(recognitionFile))
+    }
+
+    private fun readRecognition(): String? = try {
+        val f = recognitionFile
+        if (!f.exists()) null else {
+            val raw = f.readBytes()
+            val n = raw[0].toInt()
+            val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(
+                javax.crypto.Cipher.DECRYPT_MODE, recognitionKey(),
+                javax.crypto.spec.GCMParameterSpec(128, raw.copyOfRange(1, 1 + n))
+            )
+            String(c.doFinal(raw.copyOfRange(1 + n, raw.size)), Charsets.UTF_8)
+        }
+    } catch (e: Exception) { null }
+
+    private fun clearRecognition() {
+        recognitionFile.delete()
+        try { store().deleteEntry(recognitionAlias) } catch (e: Exception) {}
     }
 
     // Best-effort display label only: the user-set device name when readable,

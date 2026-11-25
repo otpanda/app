@@ -52,6 +52,14 @@ abstract class NativeSecureStore {
   Future<void> clear();
 }
 
+/// Opaque Google recognition secret (server-issued, <=200 chars). Hardware
+/// Keystore-backed on Android, never in plain prefs or logs.
+abstract class RecognitionStore {
+  Future<String?> read();
+  Future<void> write(String value);
+  Future<void> clear();
+}
+
 class NativeAuthException implements Exception {
   const NativeAuthException(this.kind);
 
@@ -95,6 +103,7 @@ class NativeAuth {
     required this.apiOrigin,
     required this.launchUrl,
     this.passkeys,
+    this.recognition,
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -107,6 +116,7 @@ class NativeAuth {
 
   /// OS passkey (Credential Manager). Null or unavailable: no OS passkey.
   final PasskeyAssertionSource? passkeys;
+  final RecognitionStore? recognition;
   final int Function() _now;
 
   /// Builds the URL the Custom Tab opens (the Pages app, which signs in and
@@ -255,20 +265,43 @@ class NativeAuth {
 
   /// Google flavor only. 409 browser_required means the account needs the
   /// browser path; callers fall back to [signInWithBrowser].
-  Future<NativeSession> signInWithGoogle() async {
+  Future<NativeSession> signInWithGoogle({bool? remember}) async {
     if (!google.available) throw const NativeAuthException('unavailable');
-    return _withNewKey((key) async {
+    String? issued;
+    final session = await _withNewKey((key) async {
       final b = await _post('/auth/native/google/begin', const {});
       if (b.status != 200 || b.body?['nonce'] is! String) {
         throw _fail(b.status, b.body);
       }
       final token = await google.idToken(nonce: b.body!['nonce'] as String);
       if (token == null) throw const NativeAuthException('cancelled');
-      return _post('/auth/native/google/complete', {
+      String? known;
+      try {
+        known = await recognition?.read();
+      } catch (_) {
+        known = null;
+      }
+      final r = await _post('/auth/native/google/complete', {
         'id_token': token,
         'renewal_key': key,
+        'remember': ?remember,
+        if (known != null && known.isNotEmpty && known.length <= 200)
+          'recognition': known,
       });
+      final n = r.body?['recognition'];
+      if (r.status == 200 && n is String && n.isNotEmpty && n.length <= 200) {
+        issued = n;
+      }
+      return r;
     });
+    // Storage failure must not undo a completed sign-in.
+    final v = issued;
+    if (v != null) {
+      try {
+        await recognition?.write(v);
+      } catch (_) {}
+    }
+    return session;
   }
 
   /// New-key sign-in: the previous valid key survives until the server
