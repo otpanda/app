@@ -32,9 +32,7 @@ void main() {
       expect(find.byType(AlertDialog), findsNothing);
     },
   );
-  testWidgets('search and navigation keep sources copy', (
-    tester,
-  ) async {
+  testWidgets('search and navigation keep sources copy', (tester) async {
     await tester.pumpWidget(const OTPandaApp());
     await tester.tap(find.text('Temporary demo'));
     await tester.pumpAndSettle();
