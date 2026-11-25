@@ -29,6 +29,16 @@ typedef BearerRequest = Future<SessionResponse> Function(
   required String bearer,
 });
 
+/// Same as [BearerRequest] plus extra request headers (only the one-time
+/// X-OTPanda-Enrollment header is ever sent through it).
+typedef HeaderRequest = Future<SessionResponse> Function(
+  String method,
+  String path, {
+  String? body,
+  required String bearer,
+  required Map<String, String> headers,
+});
+
 /// The shared account UI talks to this exactly as it talks to the web bridge.
 /// Same allow-listed paths and bodies as tool/session-bootstrap.js; the only
 /// difference is where the bearer comes from (NativeSessionController).
@@ -45,6 +55,8 @@ class NativeSessionBridge
         AssignmentBridge,
         EntryManagementBridge,
         AuthEntryBridge,
+        FirstPasskeyBridge,
+        AdditionalPasskeyBridge,
         RealtimeBridge {
   /// Set once after construction (the driver needs this bridge's transport).
   NativeAssignmentDriver? assignment;
@@ -56,6 +68,8 @@ class NativeSessionBridge
     this.passkeys,
     this.deviceLabel,
     this.googleAvailable = false,
+    this.creation,
+    this.headerRequest,
     RealtimeConnector? realtimeConnector,
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch) {
@@ -152,6 +166,10 @@ class NativeSessionBridge
 
   final NativeSessionController controller;
   final BearerRequest _request;
+  final HeaderRequest? headerRequest;
+
+  /// OS passkey creation (Credential Manager). Null: not offered.
+  final PasskeyCreationSource? creation;
   final void Function()? onLogout;
 
   static const _reads = {
@@ -279,6 +297,7 @@ class NativeSessionBridge
           : controller.signInWithBrowser();
     }
   }
+
   @override
   Future<void> passkey() async {
     throw StateError('Passkeys are managed in the browser for now.');
@@ -302,6 +321,7 @@ class NativeSessionBridge
     String path, {
     String? body,
     Map<String, String>? query,
+    Map<String, String>? headers,
   }) async {
     for (var attempt = 0; attempt < 2; attempt++) {
       final token = await controller.accessToken();
@@ -310,13 +330,24 @@ class NativeSessionBridge
             ? _paused
             : const SessionResponse(401, '{}');
       }
-      final r = await _request(
-        method,
-        path,
-        body: body,
-        query: query,
-        bearer: token,
-      );
+      final h = headers;
+      final r = h == null
+          ? await _request(
+              method,
+              path,
+              body: body,
+              query: query,
+              bearer: token,
+            )
+          : await (headerRequest ??
+                (m, p, {body, required bearer, required headers}) async =>
+                    throw StateError('Not available on this device.'))(
+              method,
+              path,
+              body: body,
+              bearer: token,
+              headers: h,
+            );
       if (r.status != 401) return r;
       await controller.forceRenew();
     }
@@ -466,6 +497,128 @@ class NativeSessionBridge
   @override
   Future<SessionResponse> totpCode(String entryId) =>
       _call('GET', '/v1/manage/totp-code', query: {'entry': entryId});
+
+  // ---- Passkey creation (same URLs and bodies as tool/session-bootstrap.js).
+  // Nothing here is a completed enrollment until the server answers 200.
+
+  bool get _canCreate => creation?.available ?? false;
+
+  /// The one-time Google enrollment grant, only while it is fresh.
+  String? get _freshGrant {
+    final s = controller.session;
+    final at = s?.grantAtMs;
+    if (s?.enrollGrant == null || at == null) return null;
+    return _now() - at < 110000 ? s!.enrollGrant : null;
+  }
+
+  @override
+  bool get firstPasskeyAvailable => _canCreate && _freshGrant != null;
+
+  Future<Map<String, dynamic>> _json(SessionResponse r) async {
+    if (r.status != 200) throw ClientFailure(r.status);
+    final b = jsonDecode(r.body);
+    if (b is! Map<String, dynamic>) throw StateError('Invalid response');
+    return b;
+  }
+
+  Future<void> _createAndFinish({
+    required Map<String, dynamic> begin,
+    required bool first,
+    required String finishPath,
+    required Map<String, String> headers,
+  }) async {
+    final source = creation!;
+    final request = passkeyCreationRequestJson(
+      begin,
+      nowMs: _now(),
+      first: first,
+    );
+    final raw = await source.create(request);
+    if (raw == null) throw StateError('Passkey setup cancelled');
+    final done = await _call(
+      'POST',
+      finishPath,
+      body: jsonEncode({
+        'token': begin['token'],
+        'response': passkeyRegistrationBody(raw),
+      }),
+      headers: headers,
+    );
+    if (done.status != 200 && done.status != 201 && done.status != 204) {
+      throw ClientFailure(done.status);
+    }
+  }
+
+  @override
+  Future<void> firstPasskey() async {
+    final grant = _freshGrant;
+    if (!_canCreate || grant == null) {
+      throw StateError('Sign in with Google again to add your first passkey.');
+    }
+    final h = {'X-OTPanda-Enrollment': grant};
+    final begin = await _json(
+      await _call(
+        'POST',
+        '/v1/manage/first-passkey/begin',
+        body: '{}',
+        headers: h,
+      ),
+    );
+    await _createAndFinish(
+      begin: begin,
+      first: true,
+      finishPath: '/v1/manage/first-passkey/finish',
+      headers: h,
+    );
+  }
+
+  @override
+  Future<void> addPasskey() async {
+    final get = passkeys;
+    if (!_canCreate || get == null || !get.available) {
+      throw StateError('Passkeys are not available on this device.');
+    }
+    final v = await _json(
+      await _call('POST', '/v1/manage/passkey/add/verify-begin', body: '{}'),
+    );
+    final request = passkeyRequestJson(v, nowMs: _now());
+    final assertion = await get.get(request);
+    if (assertion == null) throw StateError('Passkey verification cancelled');
+    final g = await _json(
+      await _call(
+        'POST',
+        '/v1/manage/passkey/add/verify-finish',
+        body: jsonEncode({
+          'token': v['token'],
+          'response': passkeyAssertionBody(assertion),
+        }),
+      ),
+    );
+    final gt = g['token'], exp = g['expiresAt'];
+    final now = _now();
+    if (gt is! String ||
+        !RegExp(r'^otpda_[A-Za-z0-9_-]{55}$').hasMatch(gt) ||
+        exp is! int ||
+        exp <= now ||
+        exp > now + 120000) {
+      throw StateError('Invalid authorization');
+    }
+    final h = {'X-OTPanda-Enrollment': gt};
+    final begin = await _json(
+      await _call(
+        'POST',
+        '/v1/manage/passkey/add/register-begin',
+        body: '{}',
+        headers: h,
+      ),
+    );
+    await _createAndFinish(
+      begin: begin,
+      first: false,
+      finishPath: '/v1/manage/passkey/add/register-finish',
+      headers: h,
+    );
+  }
 
   /// Same ceremony as the web bridge: begin (server validates the details and
   /// binds device, generation and action), a user-verified passkey assertion

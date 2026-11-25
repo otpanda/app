@@ -76,6 +76,7 @@ class NativeSession {
     this.access,
     this.accessExpiresAt, {
     this.enrollGrant,
+    this.grantAtMs,
   });
   final String deviceId;
   final String access;
@@ -85,6 +86,10 @@ class NativeSession {
   /// browser exchange and Google complete responses may carry it. Memory only:
   /// never persist or log it. Absent unless the server issued one.
   final String? enrollGrant;
+
+  /// Local time the grant arrived, to hide first-passkey set-up once it is
+  /// stale (the server enforces the real expiry).
+  final int? grantAtMs;
 }
 
 /// JSON POST transport. Must send no cookies and no Origin header.
@@ -168,7 +173,13 @@ class NativeAuth {
       }
       grant = g;
     }
-    return NativeSession(d, a, x, enrollGrant: grant);
+    return NativeSession(
+      d,
+      a,
+      x,
+      enrollGrant: grant,
+      grantAtMs: grant == null ? null : _now(),
+    );
   }
 
   Future<({int status, Map<String, dynamic>? body})> _post(

@@ -245,14 +245,41 @@ BearerRequest androidBearerRequest(
   Duration deadline = const Duration(seconds: 20),
   int maxBytes = 524288,
 }) {
+  final send = androidHeaderRequest(
+    apiOrigin,
+    client: client,
+    deadline: deadline,
+    maxBytes: maxBytes,
+  );
+  return (method, path, {body, query, required bearer}) {
+    final q = query?.isEmpty ?? true
+        ? ''
+        : '?${Uri(queryParameters: query).query}';
+    return send(
+      method,
+      '$path$q',
+      body: body,
+      bearer: bearer,
+      headers: const {},
+    );
+  };
+}
+
+/// Bearer request with extra headers. [path] may carry a query string.
+HeaderRequest androidHeaderRequest(
+  String apiOrigin, {
+  HttpClient? client,
+  Duration deadline = const Duration(seconds: 20),
+  int maxBytes = 524288,
+}) {
   final http = client ?? HttpClient();
-  return (method, path, {body, query, required bearer}) => () async {
-    final uri = Uri.parse('$apiOrigin$path')
-        .replace(queryParameters: query?.isEmpty ?? true ? null : query);
+  return (method, path, {body, required bearer, required headers}) => () async {
+    final uri = Uri.parse('$apiOrigin$path');
     final req = await http.openUrl(method, uri);
     req.followRedirects = false;
     req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $bearer');
     req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    headers.forEach(req.headers.set);
     if (body != null) {
       // Exactly application/json: the server is strict (no charset).
       req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');

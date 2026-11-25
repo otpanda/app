@@ -4,7 +4,12 @@ import android.app.Activity
 import android.os.Build
 import android.os.CancellationSignal
 import androidx.credentials.CredentialManager
+import androidx.credentials.CreateCredentialResponse
+import androidx.credentials.CreatePublicKeyCredentialRequest
+import androidx.credentials.CreatePublicKeyCredentialResponse
 import androidx.credentials.CredentialManagerCallback
+import androidx.credentials.exceptions.CreateCredentialCancellationException
+import androidx.credentials.exceptions.CreateCredentialException
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.GetPublicKeyCredentialOption
@@ -59,6 +64,30 @@ object PasskeyHost {
                             }
                             override fun onError(e: GetCredentialException) {
                                 if (e is GetCredentialCancellationException) result.success(null)
+                                else result.error("passkey", e.javaClass.simpleName, null)
+                            }
+                        })
+                }
+                "create" -> {
+                    val json = call.argument<String>("requestJson")
+                    if (json.isNullOrEmpty() || json.length > 16384) {
+                        result.error("bad_args", "requestJson required", null)
+                        return@setMethodCallHandler
+                    }
+                    if (!providerAvailable()) {
+                        result.error("unavailable", "no passkey provider", null)
+                        return@setMethodCallHandler
+                    }
+                    CredentialManager.create(activity).createCredentialAsync(
+                        activity, CreatePublicKeyCredentialRequest(json), CancellationSignal(),
+                        activity.mainExecutor,
+                        object : CredentialManagerCallback<CreateCredentialResponse, CreateCredentialException> {
+                            override fun onResult(r: CreateCredentialResponse) {
+                                if (r is CreatePublicKeyCredentialResponse) result.success(r.registrationResponseJson)
+                                else result.error("unexpected", "credential type", null)
+                            }
+                            override fun onError(e: CreateCredentialException) {
+                                if (e is CreateCredentialCancellationException) result.success(null)
                                 else result.error("passkey", e.javaClass.simpleName, null)
                             }
                         })

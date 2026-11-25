@@ -91,6 +91,8 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       onLogout: () => controller.signOut(),
       passkeys: passkeys,
       googleAvailable: widget.google.available,
+      creation: passkeys,
+      headerRequest: androidHeaderRequest(apiOrigin),
       deviceLabel: androidDeviceLabel,
       realtimeConnector: androidRealtimeConnector(apiOrigin),
     );

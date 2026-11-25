@@ -14,6 +14,15 @@ class PasskeyException implements Exception {
 
 /// Provider of a user-verified passkey assertion for a server ceremony.
 /// It is the only step-up. The Keystore renewal key is never used for it.
+/// Creates a passkey (Credential Manager createCredential).
+abstract interface class PasskeyCreationSource {
+  bool get available;
+
+  /// [requestJson] is the Credential Manager registration request. Returns the
+  /// RegistrationResponseJSON, or null when the user cancelled.
+  Future<String?> create(String requestJson);
+}
+
 abstract interface class PasskeyAssertionSource {
   bool get available;
 
@@ -24,7 +33,8 @@ abstract interface class PasskeyAssertionSource {
 
 /// Credential Manager on the google flavor. On F-Droid there is no native
 /// side, [probe] stays false and the add action stays hidden.
-class AndroidPasskeySource implements PasskeyAssertionSource {
+class AndroidPasskeySource
+    implements PasskeyAssertionSource, PasskeyCreationSource {
   AndroidPasskeySource({MethodChannel channel = passkeyChannel}) : _c = channel;
   final MethodChannel _c;
   bool _available = false;
@@ -46,6 +56,17 @@ class AndroidPasskeySource implements PasskeyAssertionSource {
   Future<String?> get(String requestJson) async {
     try {
       return await _c.invokeMethod<String>('get', {'requestJson': requestJson});
+    } on PlatformException catch (e) {
+      throw PasskeyException(e.code);
+    }
+  }
+
+  @override
+  Future<String?> create(String requestJson) async {
+    try {
+      return await _c.invokeMethod<String>('create', {
+        'requestJson': requestJson,
+      });
     } on PlatformException catch (e) {
       throw PasskeyException(e.code);
     }
@@ -158,4 +179,101 @@ String passkeyLoginRequestJson(
     'timeout': (exp - nowMs).clamp(1, 120000),
     'allowCredentials': const <Map<String, String>>[],
   });
+}
+
+final _otpToken = RegExp(r'^otpda_[A-Za-z0-9_-]{55}$');
+
+/// Validates a register-begin / first-passkey begin response exactly like
+/// tool/session-bootstrap.js (addPasskey, firstPasskey) and returns the
+/// Credential Manager create request JSON. [first] means no exclusions.
+/// Throws PasskeyException('invalid') on anything unexpected.
+String passkeyCreationRequestJson(
+  Map<String, dynamic> begin, {
+  required int nowMs,
+  required bool first,
+  String rpId = 'otpanda.github.io',
+}) {
+  final o = begin['options'];
+  final token = begin['token'];
+  final exp = begin['expiresAt'];
+  if (token is! String ||
+      !_otpToken.hasMatch(token) ||
+      o is! Map ||
+      o['rp'] is! Map ||
+      (o['rp'] as Map)['id'] != rpId ||
+      (o['rp'] as Map)['name'] != 'OTPanda' ||
+      o['challenge'] is! String ||
+      !RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(o['challenge'] as String) ||
+      exp is! int ||
+      exp <= nowMs ||
+      exp > nowMs + 120000 ||
+      o['authenticatorSelection'] is! Map ||
+      (o['authenticatorSelection'] as Map)['userVerification'] != 'required' ||
+      o['excludeCredentials'] is! List ||
+      (o['excludeCredentials'] as List).length > (first ? 0 : 10) ||
+      o['user'] is! Map) {
+    throw const PasskeyException('invalid');
+  }
+  final u = o['user'] as Map;
+  if (u['id'] is! String ||
+      !_b64url.hasMatch(u['id'] as String) ||
+      u['name'] is! String ||
+      u['displayName'] is! String) {
+    throw const PasskeyException('invalid');
+  }
+  final exclude = <Map<String, String>>[];
+  for (final v in o['excludeCredentials'] as List) {
+    final id = v is Map ? v['id'] : null;
+    if (v is! Map ||
+        v['type'] != 'public-key' ||
+        id is! String ||
+        !RegExp(r'^[A-Za-z0-9_-]{1,1400}$').hasMatch(id)) {
+      throw const PasskeyException('invalid');
+    }
+    exclude.add({'type': 'public-key', 'id': id});
+  }
+  return jsonEncode({
+    'rp': {'id': rpId, 'name': 'OTPanda'},
+    'user': {'id': u['id'], 'name': u['name'], 'displayName': u['displayName']},
+    'challenge': o['challenge'],
+    'pubKeyCredParams': const [
+      {'type': 'public-key', 'alg': -7},
+      {'type': 'public-key', 'alg': -257},
+    ],
+    'timeout': (exp - nowMs).clamp(1, 120000),
+    'attestation': 'none',
+    'authenticatorSelection': {
+      'residentKey': 'required',
+      'userVerification': 'required',
+    },
+    'excludeCredentials': exclude,
+  });
+}
+
+/// Maps the Credential Manager registration response onto the body the web
+/// bridge posts to register-finish / first-passkey finish.
+Map<String, dynamic> passkeyRegistrationBody(String responseJson) {
+  final j = jsonDecode(responseJson);
+  final r = j is Map ? j['response'] : null;
+  if (j is! Map ||
+      r is! Map ||
+      j['type'] != 'public-key' ||
+      j['id'] is! String ||
+      j['rawId'] is! String ||
+      r['clientDataJSON'] is! String ||
+      r['attestationObject'] is! String) {
+    throw const PasskeyException('invalid');
+  }
+  final t = r['transports'];
+  return {
+    'id': j['id'],
+    'rawId': j['rawId'],
+    'type': 'public-key',
+    'clientExtensionResults': const <String, dynamic>{},
+    'response': {
+      'clientDataJSON': r['clientDataJSON'],
+      'attestationObject': r['attestationObject'],
+      'transports': t is List ? t.whereType<String>().toList() : <String>[],
+    },
+  };
 }
