@@ -270,6 +270,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         applyRoute(widget.navigation, direct: true);
         if (accountOpen) workspace.suspend(preserve: true);
         await refresh();
+        if (mounted) setState(showGoogleLinkResult);
         if (view == 5 && mounted && bridge.status == 'restored') {
           await loadSecurity();
         }
@@ -322,6 +323,60 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     } finally {
       if (mounted && attempt == revision) setState(() => busy = false);
     }
+  }
+
+  /// Signed-in connect: no sign-out, no login screen. The browser goes to
+  /// Google and comes back to this page with the session restored.
+  Future<void> connectGoogle() async {
+    final b = bridge as GoogleConnectBridge;
+    final attempt = ++revision;
+    setState(() {
+      busy = true;
+      message = '';
+    });
+    var left = false;
+    try {
+      final reason = await b.connectGoogle();
+      if (!mounted || attempt != revision) return;
+      left = reason.isEmpty;
+      if (!left) {
+        setState(
+          () => message = switch (reason) {
+            'already_linked' => 'Google is already connected.',
+            'no_passkey' => 'Add a passkey first, then you can connect Google.',
+            'retry' => 'Too many tries. Wait a little and try again.',
+            'signin' => 'Browser access expired. Sign in again.',
+            _ => 'Could not start Google. Try again.',
+          },
+        );
+      }
+    } catch (_) {
+      if (mounted && attempt == revision) {
+        setState(() => message = 'Could not start Google. Try again.');
+      }
+    } finally {
+      // While the browser is leaving, keep the button busy.
+      if (mounted && attempt == revision && !left) {
+        setState(() => busy = false);
+      }
+    }
+  }
+
+  void showGoogleLinkResult() {
+    if (bridge is! GoogleConnectBridge) return;
+    final result = (bridge as GoogleConnectBridge).takeGoogleLinkResult();
+    final text = switch (result) {
+      // The account overview owns whether Google is connected. The notice
+      // only reports, so it never claims more than the overview shows.
+      'connected' =>
+        overview?['google'] == true
+            ? 'Google connected.'
+            : 'Could not confirm that Google is connected. Check below.',
+      'restart' => 'Google was not connected. Try again.',
+      'mismatch' => 'That Google account does not use this account\'s email, so it was not connected.',
+      _ => '',
+    };
+    if (text.isNotEmpty) message = text;
   }
 
   Future<void> refresh() => run(() async {
@@ -892,13 +947,25 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 )
               else
                 const SizedBox(height: 40)
-            else
+            else if (bridge is GoogleConnectBridge &&
+                (bridge as GoogleConnectBridge).googleConnectAvailable)
               OutlinedButton.icon(
-                onPressed: busy
-                    ? null
-                    : () => run(() => bridge.start('google')),
+                onPressed: busy ? null : connectGoogle,
                 icon: const Icon(Icons.link),
                 label: const Text('Connect'),
+              )
+            else
+              // A signed-in bridge without the signed-in connect never falls
+              // back to the signed-out Google sign-in, which would log out.
+              ExcludeSemantics(
+                child: Opacity(
+                  opacity: 0,
+                  child: OutlinedButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.link_off),
+                    label: const Text('Disconnect'),
+                  ),
+                ),
               ),
           ],
         ),
