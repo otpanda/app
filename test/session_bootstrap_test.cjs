@@ -136,10 +136,11 @@ test('memory-only signing renewal is singleflight, no navigation and no persiste
  assert.equal(e.stored,undefined);assert.equal(e.context.sessionStorage.getItem('otpanda.view.tab.v1'),null);
  assert.ok(!JSON.stringify(e.context).includes('privateKey'));
 });
+const refuseRenew=e=>{e.context.fetch=async(url)=>url.endsWith('/renew')?{ok:false,status:401,text:async()=>'{}'}:{status:200,text:async()=>'{}'};};
 test('unattended tab does not heartbeat; expired access uses cookie restore on user request',async()=>{
  const e=await renewingEnv();e.setClock(NOW+250000);await e.context.OTPandaSession.maintain();assert.equal(e.context.OTPandaSession.access(),e.issued[0]);assert.equal(e.context.location.assigned,undefined);
  e.setClock(NOW+300000);await e.context.OTPandaSession.maintain();assert.equal(e.context.OTPandaSession.status(),'session-paused');assert.equal(e.context.location.assigned,undefined);
- assert.equal((await e.context.OTPandaSession.read('/v1/manage/entries')).status,503);assert.ok(e.context.location.assigned.includes('/auth/restore?'));assert.equal(e.context.OTPandaSession.status(),'restoring');
+ refuseRenew(e);assert.equal((await e.context.OTPandaSession.read('/v1/manage/entries')).status,503);assert.equal(e.context.location.assigned,undefined,'refused resume renewal drops the key first');assert.equal((await e.context.OTPandaSession.read('/v1/manage/entries')).status,503);assert.ok(e.context.location.assigned.includes('/auth/restore?'));assert.equal(e.context.OTPandaSession.status(),'restoring');
 });
 test('lost renewal response keeps valid reads, never retries handle, restores only after expiry',async()=>{
  const e=await renewingEnv();e.setClock(NOW+250000);let calls=0;e.context.fetch=async(url)=>{if(url.endsWith('/renew')){calls++;throw Error('lost');}return{status:200,text:async()=>'{}'};};
@@ -160,7 +161,7 @@ test('429 renewal cools down without redirect storm or spent-handle retry',async
  const e=await renewingEnv();e.setClock(NOW+250000);let calls=0;e.context.fetch=async(url)=>{if(url.endsWith('/renew')){calls++;return{ok:false,status:429};}return{status:200,text:async()=>'{}'};};
  await e.context.OTPandaSession.read('/v1/manage/entries');await e.context.OTPandaSession.read('/v1/manage/entries');assert.equal(calls,1);assert.equal(e.context.location.assigned,undefined);
  e.setClock(NOW+300000);await e.context.OTPandaSession.read('/v1/manage/entries');assert.equal(calls,1);assert.equal(e.context.location.assigned,undefined);
- e.setClock(NOW+310001);await e.context.OTPandaSession.read('/v1/manage/entries');assert.ok(e.context.location.assigned.includes('/auth/restore?'));
+ e.setClock(NOW+310001);await e.context.OTPandaSession.read('/v1/manage/entries');assert.equal(calls,2,'resume renewal retried after cooldown');assert.equal(e.context.location.assigned,undefined,'429 never navigates');
 });
 test('missing cookie deadline cannot activate renewal or bypass first-party restore',async()=>{
  const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),response:{access:token,accessExpiresAt:NOW+300000,renewal:{lineageId:'lineage_12345',handleId:token.slice(6,18),serverTime:NOW}}});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaSession.status(),'restored');e.context.Date={now:()=>NOW+300001};await e.context.OTPandaSession.read('/v1/manage/entries');assert.ok(e.context.location.assigned.includes('/auth/restore?'));
@@ -178,7 +179,7 @@ test('blocked restoration watchdog and bfcache return release stale restore prom
  // Reload into a context with lifecycle listeners installed before bootstrap.
  const other=vm.createContext({...e.context,OTPandaSession:undefined,location:{...e.context.location,hash:''},localStorage:{getItem:()=>null,setItem(){},removeItem(){}},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}}});
  vm.runInContext(script,other);await other.OTPandaSession.ready;assert.equal(typeof listeners.pageshow,'function');listeners.pageshow({persisted:true});assert.equal(other.OTPandaSession.status(),'idle');
- e.setClock(NOW+300001);await e.context.OTPandaSession.read('/v1/manage/entries');assert.equal(e.context.OTPandaSession.status(),'restoring');assert.equal(typeof watchdog,'function');watchdog();assert.equal(e.context.OTPandaSession.status(),'session-paused');
+ e.setClock(NOW+300001);refuseRenew(e);await e.context.OTPandaSession.read('/v1/manage/entries');await e.context.OTPandaSession.read('/v1/manage/entries');assert.equal(e.context.OTPandaSession.status(),'restoring');assert.equal(typeof watchdog,'function');watchdog();assert.equal(e.context.OTPandaSession.status(),'session-paused');
 });
 test('429 preserves successful current reads during cooldown',async()=>{
  const e=await renewingEnv();e.setClock(NOW+250000);e.context.fetch=async(url)=>url.endsWith('/renew')?{ok:false,status:429}:{status:200,text:async()=>'{}'};
@@ -192,8 +193,8 @@ test('successful renewal commits new clock offset only after full validation',as
  assert.equal((await e.context.OTPandaSession.read('/v1/manage/entries')).status,200);assert.equal(e.context.OTPandaSession.accessExpiresAt(),NOW+550000);
 });
 test('watchdog releases restore for later retry without replacing PKCE during backoff',async()=>{
- const e=await renewingEnv();e.setClock(NOW+300001);let timer;e.context.setTimeout=(fn)=>timer=fn;
- await e.context.OTPandaSession.read('/v1/manage/entries');const first=e.stored;timer();await e.context.OTPandaSession.read('/v1/manage/entries');assert.equal(e.stored,first);
+ const e=await renewingEnv();e.setClock(NOW+300001);let timer;e.context.setTimeout=(fn)=>timer=fn;refuseRenew(e);
+ await e.context.OTPandaSession.read('/v1/manage/entries');await e.context.OTPandaSession.read('/v1/manage/entries');const first=e.stored;timer();await e.context.OTPandaSession.read('/v1/manage/entries');assert.equal(e.stored,first);
  e.setClock(NOW+310002);await e.context.OTPandaSession.read('/v1/manage/entries');assert.notEqual(e.stored,first);
 });
 test('pageshow persisted releases actual restoring and renewing references',async()=>{
@@ -300,3 +301,24 @@ test('TOTP enrollment requires exact passkey proof, no cookies or persisted key'
 test('TOTP logout during OS prompt cannot submit seed mutation',async()=>{const e=await addKeyEnv();let release,calls=0;e.context.navigator={credentials:{get:()=>new Promise(r=>release=r)}};e.context.fetch=async()=>{calls++;return{ok:true,text:async()=>JSON.stringify({token,expiresAt:NOW+120000,options:{rpId:'otpanda.github.io',userVerification:'required',challenge:'A'.repeat(43),allowCredentials:[]}})};};const p=e.context.OTPandaSession.addTotp('Example','','GEZDGNBVGY3TQOJQ');while(!release)await new Promise(r=>setImmediate(r));e.context.OTPandaSession.logout();release(credential());await assert.rejects(p);assert.equal(calls,1);});
 test('TOTP rejects weak assertion options and foreign RP before platform prompt',async()=>{for(const patch of [{userVerification:'preferred'},{rpId:'evil.test'}]){const e=await addKeyEnv();let prompts=0;e.context.navigator={credentials:{get:async()=>{prompts++;return credential();}}};e.context.fetch=async()=>({ok:true,text:async()=>JSON.stringify({token,expiresAt:NOW+120000,options:{rpId:'otpanda.github.io',userVerification:'required',challenge:'A'.repeat(43),allowCredentials:[],...patch}})});await assert.rejects(e.context.OTPandaSession.addTotp('Example','','GEZDGNBVGY3TQOJQ'));assert.equal(prompts,0);}});
 test('TOTP code lookup is bounded no-store GET and late logout hides response',async()=>{const e=await addKeyEnv();let release;e.context.fetch=(url,o)=>{assert.equal(url,'https://otpanda-api.abrahammurciano.workers.dev/v1/manage/totp-code?entry=new-entry');assert.equal(o.method,'GET');assert.equal(o.credentials,'omit');assert.equal(o.cache,'no-store');return new Promise(r=>release=()=>r({status:200,text:async()=>'{"code":"123456"}'}));};const p=e.context.OTPandaSession.totpCode('new-entry');while(!release)await new Promise(r=>setImmediate(r));e.context.OTPandaSession.logout();release();assert.deepEqual(JSON.parse(JSON.stringify(await p)),{status:401,body:'{}'});});
+
+// Resume after the access life: bearer-less signed request, no navigation.
+test('lapsed tab with its key sends a bearer-less signed resume (new domain, head handle id) and never navigates; cookie under 24h no longer forces a redirect',async()=>{
+ const e=await renewingEnv();e.context.document={visibilityState:'visible'};e.setClock(NOW+3600000);
+ let seen;e.context.fetch=async(url,o)=>{seen={url,o};return{ok:true,text:async()=>JSON.stringify({access:e.issued[1],accessExpiresAt:NOW+3600000+300000,renewal:{lineageId:'lineage_12345',handleId:e.issued[1].slice(6,18),serverTime:NOW+3600000,firstPartyExpiresAt:NOW+30*86400000}})};};
+ assert.equal(await e.context.OTPandaSession.maintain(),true);
+ assert.ok(seen.url.endsWith('/auth/renew'));assert.equal(seen.o.headers.Authorization,undefined);assert.equal(seen.o.credentials,'omit');
+ const b=JSON.parse(seen.o.body);assert.deepEqual(Object.keys(b).sort(),['expires_at','handle_id','lineage_id','signature']);assert.equal(b.handle_id,e.issued[0].slice(6,18));
+ assert.equal(e.context.location.assigned,undefined);assert.equal(e.context.OTPandaSession.access(),e.issued[1]);
+});
+test('hidden lapsed tab sends nothing until shown; a 429 or an offline error on resume never navigates and keeps the key',async()=>{
+ const e=await renewingEnv();e.context.document={visibilityState:'hidden'};e.setClock(NOW+3600000);let calls=0;e.context.fetch=async()=>{calls++;throw new TypeError('offline');};
+ assert.equal(await e.context.OTPandaSession.maintain(),false);assert.equal(calls,0);
+ e.context.document.visibilityState='visible';await e.context.OTPandaSession.maintain();assert.equal(calls,1);assert.equal(e.context.location.assigned,undefined);
+ e.setClock(NOW+3600000+10001);e.context.fetch=async()=>({ok:false,status:429,text:async()=>'{}'});await e.context.OTPandaSession.maintain();assert.equal(e.context.location.assigned,undefined);
+});
+test('cookie deadline already passed: lapsed tab with its key still resumes in place, never navigates solely for the cookie',async()=>{
+ const e=await renewingEnv();e.context.document={visibilityState:'visible'};const T=NOW+31*86400000;e.setClock(T);let calls=0;
+ e.context.fetch=async()=>{calls++;return{ok:true,text:async()=>JSON.stringify({access:e.issued[1],accessExpiresAt:T+300000,renewal:{lineageId:'lineage_12345',handleId:e.issued[1].slice(6,18),serverTime:T,firstPartyExpiresAt:NOW+30*86400000}})};};
+ assert.equal(await e.context.OTPandaSession.maintain(),true);assert.equal(calls,1);assert.equal(e.context.location.assigned,undefined);assert.equal(e.context.OTPandaSession.access(),e.issued[1]);
+});
