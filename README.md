@@ -1,21 +1,12 @@
 # OTPanda app
 
-One Flutter project for Android, web, Linux, Windows and macOS. Android and web
-are first; desktop platform integration/testing is still required. API, extension
-and landing page remain separate components.
+Unified Flutter client for Android, web, Linux, Windows, macOS and the browser extension popup. API and landing page are separate services, not client repositories.
 
-## Current revision
+Canonical web app: https://otpanda.github.io/app/
 
-This is a fictional-data development shell, not a cloud account or replacement
-for the existing web client. It implements search, code cards, an explicit
-owned-entry assignment dialog and navigation. Source/access previews include separate people/app permissions and confirmation-based revocation. Login,
-secure storage, SMS collection and live management are not connected yet.
-No Google SDK or production credential is bundled. Existing preview remains at
-https://otpanda.github.io/web/ until replacement parity is verified.
+The web app supports real account sign-in, codes and entry management. Native Android qualification is in progress. Do not treat build success as provider sign-in, App Link or native feature-parity proof. The extension packaging and browser integration are under tool/extension; autofill integration is not yet enabled.
 
-Tested locally with Flutter 3.50.1: clean analyzer, 21 model/widget/contract tests and
-web release build. Inspected rendered 320/390/1280 layouts. This is not evidence
-of native Google login, Android runtime behavior or desktop readiness.
+Legacy web and extension repository histories and issue records are preserved under archive/legacy-clients. They are historical inputs, not alternate clients to develop or deploy.
 
 ## Build
 
