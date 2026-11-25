@@ -1,7 +1,7 @@
 import 'auth_entry.dart';
 import 'product_shell.dart';
 import 'read_workspace_controller.dart';
-import 'main.dart' show ClientHome, ink, line, muted;
+import 'main.dart' show ClientHome, ink, muted;
 
 import 'dart:async';
 import 'dart:convert';
@@ -20,6 +20,7 @@ import 'google_link.dart';
 import 'lost_access_page.dart';
 import 'recovery_contract.dart';
 import 'recovery_panel.dart';
+import 'profile_cache.dart';
 import 'session_contract.dart';
 import 'settings_hub.dart';
 
@@ -167,6 +168,15 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   int revision = 0;
   int? accountExpiresAt;
   Map<String, dynamic>? overview, securityInfo;
+
+  /// Static identity from this sign-in's cache (see ProfileCacheBridge). It only
+  /// feeds the header; passkeys, Google status and the rest always come from the
+  /// live overview.
+  CachedProfile? cachedProfile;
+  String? sessionOwner, sessionKey;
+  bool overviewLoading = false, overviewAttempted = false;
+  int overviewInFlightRevision = -1;
+  int accountPagesShown = 0;
   String? settingChange;
   bool securityOpen = false;
   final organization = OrganizationStore();
@@ -218,6 +228,24 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     store = CodeStore(_ReadTransport(bridge));
     workspace = ReadWorkspaceController(bridge: bridge, clock: now);
     workspace.addListener(workspaceChanged);
+    final Object cacheBridge = bridge;
+    if (cacheBridge is ProfileCacheBridge) {
+      cacheBridge.onProfileRevoked(() {
+        if (!mounted) return;
+        // Another tab ended this sign-in: show the skeleton, and make any
+        // overview request already in flight land nowhere.
+        revision++;
+        setState(() {
+          resetIdentity();
+          securityInfo = null;
+          busy = false;
+          message = '';
+        });
+        // Converge on the truth: still signed in reloads the account, ended
+        // goes to sign-in through the usual paths.
+        if (status == 'restored') unawaited(refresh());
+      });
+    }
     expiryTick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && status == 'authenticating' && bridge.status != status) {
         setState(() => status = bridge.status);
@@ -269,6 +297,17 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         accountOpen = view >= 4;
         applyRoute(widget.navigation, direct: true);
         if (accountOpen) workspace.suspend(preserve: true);
+        // A Google connect that just returned may have changed the picture
+        // while the sign-in stayed the same. Read the notice first, drop the
+        // static copy, and make the live overview load before judging it.
+        if (bridge is GoogleConnectBridge) {
+          pendingLinkResult = (bridge as GoogleConnectBridge)
+              .takeGoogleLinkResult();
+          if (pendingLinkResult.isNotEmpty) {
+            forceOverview = true;
+            dropStaticProfile();
+          }
+        }
         await refresh();
         if (mounted) setState(showGoogleLinkResult);
         if (view == 5 && mounted && bridge.status == 'restored') {
@@ -363,14 +402,15 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   }
 
   void showGoogleLinkResult() {
-    if (bridge is! GoogleConnectBridge) return;
-    final result = (bridge as GoogleConnectBridge).takeGoogleLinkResult();
+    final result = pendingLinkResult;
+    pendingLinkResult = '';
     final text = switch (result) {
       // The account overview owns whether Google is connected. The notice
       // only reports, so it never claims more than the overview shows.
       'connected' =>
         overview?['google'] == true
-            ? 'Google connected.'
+            // The Passkeys screen has nothing to do with Google.
+            ? (passkeysOpen ? '' : 'Google connected.')
             : 'Could not confirm that Google is connected. Check below.',
       'restart' => 'Google was not connected. Try again.',
       'mismatch' => 'That Google account does not use this account\'s email, so it was not connected.',
@@ -382,6 +422,62 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   Future<void> refresh() => run(() async {
     await loadAccount(revision);
   }, loadAfter: false);
+  Future<void> fetchOverview(int attempt) async {
+    if (overviewInFlightRevision == attempt) return;
+    overviewInFlightRevision = attempt;
+    overviewAttempted = true;
+    final SessionResponse info;
+    try {
+      info = await bridge.read('/v1/manage/account');
+    } finally {
+      if (overviewInFlightRevision == attempt) overviewInFlightRevision = -1;
+    }
+    if (!mounted || attempt != revision || status != 'restored') return;
+    if (info.status != 200) return;
+    final v = jsonDecode(info.body);
+    if (v is Map<String, dynamic> &&
+        v['email'] is String &&
+        v['passkeys'] is int &&
+        v['google'] is bool &&
+        v['recoveryDevices'] is int) {
+      overview = v;
+      final owner = sessionOwner, key = sessionKey;
+      if (bridge is ProfileCacheBridge &&
+          owner != null &&
+          key != null &&
+          bridge.status == 'restored') {
+        (bridge as ProfileCacheBridge).profileWrite(
+          owner,
+          key,
+          v['email'] as String,
+          v['picture'] is String ? v['picture'] as String : null,
+        );
+      }
+    }
+  }
+
+  /// The account page just appeared without an overview (its header came from
+  /// the cache): fetch it once.
+  Future<void> ensureOverview() async {
+    if (overview != null ||
+        overviewLoading ||
+        overviewInFlightRevision == revision ||
+        overviewAttempted ||
+        !mounted ||
+        status != 'restored' ||
+        sessionOwner == null) {
+      return;
+    }
+    final attempt = revision;
+    setState(() => overviewLoading = true);
+    try {
+      await fetchOverview(attempt);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => overviewLoading = false);
+    }
+  }
+
   Future<void> loadAccount(int attempt) async {
     if (!widget.accountOnly) {
       await store.load(now, includePrivateInbox: true);
@@ -415,18 +511,54 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       throw const FormatException('Invalid session metadata');
     }
     accountExpiresAt = value['expiresAt'] as int;
-    final info = await bridge.read('/v1/manage/account');
-    if (!mounted || attempt != revision || status != 'restored') return;
-    if (info.status == 200) {
-      final v = jsonDecode(info.body);
-      if (v is Map<String, dynamic> &&
-          v['email'] is String &&
-          v['passkeys'] is int &&
-          v['google'] is bool &&
-          v['recoveryDevices'] is int) {
-        overview = v;
+    final cache = bridge is ProfileCacheBridge
+        ? bridge as ProfileCacheBridge
+        : null;
+    final owner = value['ownerId'] as String;
+    // The opt-in identity view. Any failure (old API, 400, bad shape, another
+    // owner) means no cache; the account page works without it.
+    String? sid;
+    if (cache != null) {
+      try {
+        final r = await bridge.read('/v1/manage/session?view=cache-v1');
+        if (!mounted || attempt != revision || status != 'restored') return;
+        final v = r.status == 200 ? jsonDecode(r.body) : null;
+        if (v is Map<String, dynamic> &&
+            v.keys.length == 3 &&
+            v['ownerId'] == owner &&
+            v['expiresAt'] is int &&
+            v['sessionId'] is String &&
+            sessionIdPattern.hasMatch(v['sessionId'] as String)) {
+          sid = v['sessionId'] as String;
+        }
+      } catch (_) {}
+    }
+    if (sessionOwner != owner || sessionKey != sid) {
+      // Another account or another sign-in: nothing from before may show.
+      cachedProfile = null;
+      overview = null;
+      overviewAttempted = false;
+    }
+    sessionOwner = owner;
+    sessionKey = sid;
+    if (cache != null && sessionKey != null && cachedProfile == null) {
+      cachedProfile = cache.profileRevoked
+          ? null
+          : parseCachedProfile(cache.profileRead(owner, sessionKey!));
+      if (mounted && attempt == revision && cachedProfile != null) {
+        setState(() {});
       }
     }
+    // The overview is only needed where the account page shows, or to refresh
+    // a copy older than a day. A fresh cached header needs no request.
+    final skip =
+        !forceOverview &&
+        overview == null &&
+        accountPagesShown == 0 &&
+        cachedProfile?.isFresh(DateTime.now().millisecondsSinceEpoch) == true;
+    if (!skip) await fetchOverview(attempt);
+    forceOverview = false;
+    if (!mounted || attempt != revision || status != 'restored') return;
     if (widget.navigation != null && accountOpen) {
       await store.load(now, includePrivateInbox: true);
       if (mounted && attempt == revision && bridge.status == 'restored') {
@@ -525,9 +657,31 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     });
   }
 
+  /// Forgets everything identity-related held in this tab.
+  /// Throws away the static identity (memory and stored copy) and the overview,
+  /// so nothing stale shows while a Google change is checked against the server.
+  void dropStaticProfile() {
+    cachedProfile = null;
+    overview = null;
+    overviewAttempted = false;
+    final Object b = bridge;
+    if (b is ProfileCacheBridge) b.profileClear();
+  }
+
+  String pendingLinkResult = '';
+  bool forceOverview = false;
+
+  void resetIdentity() {
+    cachedProfile = null;
+    overview = null;
+    sessionOwner = null;
+    sessionKey = null;
+    overviewAttempted = false;
+  }
+
   void clearOrganization() {
     accountExpiresAt = null;
-    overview = null;
+    resetIdentity();
     securityInfo = null;
     securityRequested = false;
     settingChange = null;
@@ -859,6 +1013,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       result = 'We could not confirm that. Google may have been disconnected. Check below before trying again.';
     }
     if (!mounted) return;
+    // The picture may be gone: forget the static copy before the fresh read.
+    setState(dropStaticProfile);
     await refresh();
     if (!mounted) return;
     if (refused) {
@@ -891,7 +1047,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
             : Text('$passkeys registered'),
         trailing: const Icon(Icons.chevron_right),
         onTap: () {
-          setState(() => passkeysOpen = true);
+          setState(() {
+            passkeysOpen = true;
+            message = '';
+          });
           navigated(settingsPasskeysRoute);
         },
       ),
@@ -1181,70 +1340,34 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
           );
   }
 
-  /// Fills the screen: the device list scrolls inside its card and the
-  /// browser's own Sign out stays pinned below it.
+  /// The signed-in devices as a plain list that fills the screen and
+  /// scrolls. Sign out lives at the bottom of the main settings list.
   Widget devicesPage() {
     final r = _recovery;
-    final canSignOut = status != 'unsupported' && widget.loginEnabled;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: r == null
-              ? const SizedBox.shrink()
-              : RecoveryPanel(
-                  bridge: r,
-                  sections: const {RecoverySection.devices},
-                  sectionCard: (title, children) => Expanded(
-                    child: Card(
-                      margin: EdgeInsets.zero,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: ink,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            const Divider(height: 1, color: line),
-                            Expanded(
-                              child: ListView(
-                                key: const Key('devices-list'),
-                                padding: const EdgeInsets.only(top: 8),
-                                children: children,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+    if (r == null) return const SizedBox.shrink();
+    return RecoveryPanel(
+      bridge: r,
+      sections: const {RecoverySection.devices},
+      sectionCard: (title, children) => Expanded(
+        child: ListView(
+          key: const Key('devices-list'),
+          padding: EdgeInsets.zero,
+          children: children,
         ),
-        if (canSignOut) ...[
-          const SizedBox(height: 12),
-          Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 320),
-              child: SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  key: const Key('browser-sign-out'),
-                  onPressed: busy ? null : signOutBrowser,
-                  icon: const Icon(Icons.logout),
-                  label: const Text('Sign out'),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ],
+      ),
+    );
+  }
+
+  Widget? settingsFooter() {
+    if (status == 'unsupported' || !widget.loginEnabled) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: OutlinedButton.icon(
+        key: const Key('browser-sign-out'),
+        onPressed: busy ? null : signOutBrowser,
+        icon: const Icon(Icons.logout),
+        label: const Text('Sign out'),
+      ),
     );
   }
 
@@ -1325,11 +1448,17 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
               Expanded(
                 child: SettingsHub(
                   fillPages: const {SettingsCategory.devices},
-                  email: overview?['email'] as String?,
-                  emailLoading: overview == null && busy,
-                  googlePicture: overview?['picture'] is String
-                      ? overview!['picture'] as String
-                      : null,
+                  footer: settingsFooter(),
+                  email: overview?['email'] as String? ?? cachedProfile?.email,
+                  emailLoading:
+                      overview == null &&
+                      cachedProfile == null &&
+                      (busy || overviewLoading),
+                  googlePicture: overview != null
+                      ? (overview!['picture'] is String
+                            ? overview!['picture'] as String
+                            : null)
+                      : cachedProfile?.picture,
                   selected: settingsCategory,
                   onSelect: (c) {
                     setState(() {
@@ -1339,9 +1468,16 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     navigated(c.route);
                   },
                   pages: {
-                    SettingsCategory.account: passkeysOpen
-                        ? passkeysPage()
-                        : accountSecurityPage(),
+                    SettingsCategory.account: _WhenShown(
+                      onShown: () {
+                        accountPagesShown++;
+                        ensureOverview();
+                      },
+                      onHidden: () => accountPagesShown--,
+                      child: passkeysOpen
+                          ? passkeysPage()
+                          : accountSecurityPage(),
+                    ),
                     SettingsCategory.devices: devicesPage(),
                     SettingsCategory.organization: organizationReady
                         ? organizationPage()
@@ -1666,4 +1802,40 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       ),
     );
   }
+}
+
+/// Calls [onShown] once when it enters the tree and [onHidden] when it leaves.
+class _WhenShown extends StatefulWidget {
+  final VoidCallback onShown, onHidden;
+  final Widget child;
+  const _WhenShown({
+    required this.onShown,
+    required this.onHidden,
+    required this.child,
+  });
+  @override
+  State<_WhenShown> createState() => _WhenShownState();
+}
+
+class _WhenShownState extends State<_WhenShown> {
+  late final VoidCallback hidden = widget.onHidden;
+  bool shown = false;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      shown = true;
+      widget.onShown();
+    });
+  }
+
+  @override
+  void dispose() {
+    if (shown) hidden();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
