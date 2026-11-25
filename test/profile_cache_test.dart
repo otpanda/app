@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/browser_account_page.dart';
 import 'package:otpanda_client/google_link.dart';
 import 'package:otpanda_client/profile_cache.dart';
+import 'package:otpanda_client/profile_header.dart';
 import 'package:otpanda_client/session_contract.dart';
 
 import 'browser_account_test.dart' show Bridge;
@@ -118,6 +119,37 @@ String cacheWith(String? picture) => jsonEncode({
 });
 
 void main() {
+  testWidgets('home loads the signed-in avatar without opening settings', (
+    t,
+  ) async {
+    final b = CacheBridge()
+      ..status = 'restored'
+      ..email = 'alex.murray@example.test';
+    await t.pumpWidget(
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          workspaceEnabled: true,
+          loginEnabled: true,
+          navigation: 'codes',
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(find.byType(ProfileAvatar), findsOneWidget);
+    expect(find.text('AM'), findsOneWidget);
+    expect(t.getSize(find.byType(ProfileAvatar)), const Size(32, 32));
+    expect(find.byTooltip('Account & security'), findsOneWidget);
+    expect(find.byIcon(Icons.account_circle_outlined), findsNothing);
+    expect(b.overviews, 1);
+    await t.pump(const Duration(seconds: 35));
+    await t.pumpAndSettle();
+    expect(b.overviews, 1);
+    await t.pumpWidget(const SizedBox());
+    expect(t.takeException(), isNull);
+  });
+
   test('parseCachedProfile accepts only the exact static shape', () {
     expect(parseCachedProfile(''), isNull);
     expect(parseCachedProfile('{"email":"a@b.test","savedAt":1}'), isNotNull);

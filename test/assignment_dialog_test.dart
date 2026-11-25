@@ -6,6 +6,8 @@ import 'package:otpanda_client/assignment_dialog.dart';
 import 'package:otpanda_client/browser_session_contract.dart';
 
 class Bridge implements AssignmentBridge {
+  int pendingFor = 0;
+  bool private = false;
   int prompts = 0, checks = 0, prepares = 0;
   String outcome = 'assigned';
   @override
@@ -17,8 +19,9 @@ class Bridge implements AssignmentBridge {
       'entryId': 'entry',
       'label': 'Northstar work',
       'accountName': 'work@example.test',
-      'activeRecipients': 2,
-      'automationRecipients': 1,
+      'activeRecipients': private ? 0 : 2,
+      'automationRecipients': private ? 0 : 1,
+      'proofRequired': !private,
       'irreversible': true,
     });
   }
@@ -32,6 +35,10 @@ class Bridge implements AssignmentBridge {
   @override
   Future<String> assignmentReconcile() async {
     checks++;
+    if (pendingFor > 0) {
+      pendingFor--;
+      return 'pending';
+    }
     return 'assigned';
   }
 
@@ -117,7 +124,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Northstar work'), findsOneWidget);
       expect(find.text('Active recipients: 2'), findsOneWidget);
-      expect(find.text('Recipients with automation access: 1'), findsOneWidget);
+      expect(find.text('Automation access grants: 1'), findsOneWidget);
       expect(find.textContaining('cannot undo'), findsOneWidget);
       expect(b.prompts, 0);
       await tester.tap(find.text('Confirm with passkey'));
@@ -150,6 +157,70 @@ void main() {
     await tester.tap(find.text('Check status'));
     await tester.pumpAndSettle();
     expect(b.checks, 1);
+    expect(b.prompts, 1);
+    expect(find.text('Assignment confirmed.'), findsOneWidget);
+  });
+
+  testWidgets('pending is rechecked by status with backoff, never re-begun', (
+    tester,
+  ) async {
+    final b = Bridge()
+      ..outcome = 'unknown'
+      ..pendingFor = 2;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AssignmentDialog(
+            bridge: b,
+            sourceId: 'source',
+            eventId: 'event',
+            entryId: 'entry',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm with passkey'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Check status'));
+    await tester.pump();
+    await tester.pump();
+    expect(b.checks, 1);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(b.checks, 2);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    expect(b.checks, 3);
+    expect(find.text('Assignment confirmed.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 30));
+    expect(b.checks, 3);
+    expect(b.prepares, 1);
+    expect(b.prompts, 1);
+  });
+
+  testWidgets('private entry: plain Confirm, no passkey wording', (
+    tester,
+  ) async {
+    final b = Bridge()..private = true;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AssignmentDialog(
+            bridge: b,
+            sourceId: 'source',
+            eventId: 'event',
+            entryId: 'entry',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Confirm with passkey'), findsNothing);
+    expect(find.textContaining('passkey'), findsNothing);
+    expect(find.textContaining('Active recipients'), findsNothing);
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
     expect(b.prompts, 1);
     expect(find.text('Assignment confirmed.'), findsOneWidget);
   });

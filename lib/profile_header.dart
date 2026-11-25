@@ -170,7 +170,15 @@ const profileAvatarSize = 80.0;
 class ProfileAvatar extends StatefulWidget {
   final String email;
   final String? googlePicture;
-  const ProfileAvatar({super.key, required this.email, this.googlePicture});
+  final double size;
+  final bool allowGravatar;
+  const ProfileAvatar({
+    super.key,
+    required this.email,
+    this.googlePicture,
+    this.size = profileAvatarSize,
+    this.allowGravatar = true,
+  });
   @override
   State<ProfileAvatar> createState() => _ProfileAvatarState();
 }
@@ -180,14 +188,15 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
 
   List<String> get sources => [
     if (isGooglePicture(widget.googlePicture)) widget.googlePicture!,
-    gravatarUrl(widget.email),
+    if (widget.allowGravatar) gravatarUrl(widget.email),
   ];
 
   @override
   void didUpdateWidget(ProfileAvatar old) {
     super.didUpdateWidget(old);
     if (old.email != widget.email ||
-        old.googlePicture != widget.googlePicture) {
+        old.googlePicture != widget.googlePicture ||
+        old.allowGravatar != widget.allowGravatar) {
       failed = 0;
     }
   }
@@ -197,8 +206,8 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
     final list = sources;
     return ExcludeSemantics(
       child: SizedBox(
-        width: profileAvatarSize,
-        height: profileAvatarSize,
+        width: widget.size,
+        height: widget.size,
         child: ClipOval(
           child: Stack(
             fit: StackFit.expand,
@@ -208,9 +217,9 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
                 child: Center(
                   child: Text(
                     initialsFor(widget.email),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'BricolageGrotesque',
-                      fontSize: 30,
+                      fontSize: widget.size * .375,
                       fontWeight: FontWeight.w800,
                       color: ink,
                     ),

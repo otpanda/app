@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'browser_session_contract.dart';
+import 'assignment_dialog.dart';
+import 'entry_manage_dialog.dart';
 import 'totp_enrollment.dart';
 import 'gmail_source.dart';
 import 'read_workspace_controller.dart';
@@ -6,6 +10,7 @@ import 'read_workspace_controller.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'branding.dart';
+import 'profile_header.dart';
 import 'page_reload_stub.dart'
     if (dart.library.js_interop) 'page_reload_web.dart'
     as platform;
@@ -24,6 +29,15 @@ class ProductShell extends StatefulWidget {
   final int Function() clock;
   final VoidCallback onSignedOut;
   final VoidCallback? onOpenAccount;
+  final String? profileEmail, profilePicture;
+
+  /// Offer "Assign" on private codes. Off unless the surface is a real
+  /// account with the assignment ceremony mounted.
+  final bool assignmentEnabled;
+
+  /// Offer "Edit" on owned entries. Off until the rename/account routes are
+  /// mounted and verified for the real account.
+  final bool entryEditEnabled;
   final int initialTab;
   final ValueChanged<int>? onTabChanged;
 
@@ -38,6 +52,10 @@ class ProductShell extends StatefulWidget {
     required this.clock,
     required this.onSignedOut,
     this.onOpenAccount,
+    this.profileEmail,
+    this.profilePicture,
+    this.assignmentEnabled = false,
+    this.entryEditEnabled = false,
     this.initialTab = 0,
     this.onTabChanged,
     this.pageReload = platform.pageReload,
@@ -69,10 +87,19 @@ class _ProductShellState extends State<ProductShell> {
       : _Phase.cleared;
   late int tab = widget.initialTab.clamp(0, 3);
   String query = '';
+
+  /// Codes that arrived this recently sit on top, highlighted.
+  static const freshForMs = 120000;
+  Timer? freshTimer;
+  bool hadFresh = false;
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(changed);
+    // Lets the highlight fade on its own without any refresh.
+    freshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted && hadFresh) setState(() {});
+    });
   }
 
   @override
@@ -90,6 +117,7 @@ class _ProductShellState extends State<ProductShell> {
 
   @override
   void dispose() {
+    freshTimer?.cancel();
     widget.controller.removeListener(changed);
     super.dispose();
   }
@@ -125,7 +153,17 @@ class _ProductShellState extends State<ProductShell> {
     String? code, [
     VoidCallback? onCopy,
     bool showCodeStatus = true,
+    bool fresh = false,
+    Widget? trailing,
   ]) => Card(
+    key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
+    color: fresh ? const Color(0xffe6f5ec) : null,
+    shape: fresh
+        ? RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: green, width: 1.2),
+          )
+        : null,
     child: Padding(
       padding: const EdgeInsets.all(12),
       child: Row(
@@ -170,11 +208,14 @@ class _ProductShellState extends State<ProductShell> {
               onPressed: onCopy,
               icon: const Icon(Icons.copy_outlined, size: 18),
             ),
-          ] else if (showCodeStatus)
+          ] else if (showCodeStatus) ...[
+            const SizedBox(width: 12),
             const Text(
               'No active code',
               style: TextStyle(fontSize: 12, color: muted),
             ),
+          ],
+          if (trailing != null) ...[const SizedBox(width: 4), trailing],
         ],
       ),
     ),
@@ -264,17 +305,72 @@ class _ProductShellState extends State<ProductShell> {
     final codes = {for (final c in store.visibleCodes(now)) c.entryId: c};
     switch (tab) {
       case 0:
-        if (store.entries.isEmpty && store.visibleUnassigned(now).isEmpty) {
+        final unassigned = store.visibleUnassigned(now);
+        if (store.entries.isEmpty && unassigned.isEmpty) {
           return empty(
             'No codes yet',
             'Add an authenticator to generate codes, or connect a source.',
           );
         }
-        final withCode = entries.where((e) => codes.containsKey(e.id));
+        bool isFresh(int receivedAt) => now - receivedAt < freshForMs;
+        // Received codes (SMS, email), not generated TOTP codes.
+        final freshEntries = [
+          for (final e in entries)
+            if (!e.totp &&
+                codes[e.id] != null &&
+                isFresh(codes[e.id]!.receivedAt))
+              e,
+        ];
+        final freshPrivate = [
+          for (final c in unassigned)
+            if (isFresh(c.receivedAt) && q.isEmpty) c,
+        ];
+        hadFresh = freshEntries.isNotEmpty || freshPrivate.isNotEmpty;
+        final freshIds = {for (final e in freshEntries) e.id};
+        final withCode = entries.where(
+          (e) => codes.containsKey(e.id) && !freshIds.contains(e.id),
+        );
         final rest = entries.where((e) => !codes.containsKey(e.id));
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (hadFresh)
+              const Padding(
+                key: Key('fresh-heading'),
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Just arrived',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: green,
+                  ),
+                ),
+              ),
+            for (final c in freshPrivate)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: codeTile(
+                  'Unassigned code',
+                  'Only you',
+                  c.value,
+                  () => widget.onCopyPrivate(c),
+                  true,
+                  true,
+                ),
+              ),
+            for (final e in freshEntries)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: codeTile(
+                  e.service,
+                  e.account,
+                  codes[e.id]!.value,
+                  () => widget.onCopyAssigned(codes[e.id]!),
+                  true,
+                  true,
+                ),
+              ),
             for (final e in withCode)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
@@ -302,7 +398,8 @@ class _ProductShellState extends State<ProductShell> {
                   child: codeTile(e.service, e.account, null),
                 ),
               ),
-            if (entries.isEmpty) const Text('Nothing matches your search.'),
+            if (entries.isEmpty && freshPrivate.isEmpty)
+              const Text('Nothing matches your search.'),
           ],
         );
       case 1:
@@ -341,6 +438,10 @@ class _ProductShellState extends State<ProductShell> {
         );
       case 2:
         final list = store.visibleUnassigned(now);
+        final canAssign =
+            widget.assignmentEnabled &&
+            widget.controller.bridge is AssignmentBridge &&
+            store.entries.any((e) => e.manage);
         if (list.isEmpty) {
           return empty(
             'Nothing waiting',
@@ -357,6 +458,17 @@ class _ProductShellState extends State<ProductShell> {
                   'Only you',
                   c.value,
                   () => widget.onCopyPrivate(c),
+                  true,
+                  false,
+                  canAssign
+                      ? IconButton(
+                          key: Key('assign-${c.eventId}'),
+                          tooltip: 'Assign to an entry',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => assign(c),
+                          icon: const Icon(Icons.drive_file_move_outline),
+                        )
+                      : null,
                 ),
               ),
           ],
@@ -373,10 +485,120 @@ class _ProductShellState extends State<ProductShell> {
             for (final e in entries)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: codeTile(e.service, e.account, null, null, false),
+                child: codeTile(
+                  e.service,
+                  e.account,
+                  null,
+                  null,
+                  false,
+                  false,
+                  editable(e)
+                      ? IconButton(
+                          key: Key('edit-${e.id}'),
+                          tooltip: 'Edit entry',
+                          onPressed: () => editEntry(e),
+                          icon: const Icon(Icons.edit_outlined, size: 20),
+                        )
+                      : null,
+                ),
               ),
           ],
         );
+    }
+  }
+
+  /// Pick one owned entry, then hand the irreversible confirmation (with its
+  /// passkey step) to [AssignmentDialog]. Nothing is assigned before that.
+  Future<void> assign(UnassignedCode code) async {
+    final raw = widget.controller.bridge;
+    if (!widget.assignmentEnabled || raw is! AssignmentBridge) return;
+    final AssignmentBridge bridge = raw as AssignmentBridge;
+    final store = widget.controller.store;
+    if (!code.active(widget.clock())) return;
+    if (['unknown', 'pending', 'submitting'].contains(bridge.assignmentState)) {
+      // A previous attempt is unresolved: reconcile it, send nothing new.
+      final done = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AssignmentDialog(
+          bridge: bridge,
+          sourceId: '',
+          eventId: '',
+          entryId: '',
+        ),
+      );
+      if (done == true && mounted) {
+        widget.controller.refreshAfterMutation();
+      }
+      return;
+    }
+    final owned = store.entries.where((e) => e.manage).toList();
+    final target = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        key: const Key('assign-picker'),
+        title: const Text('Choose an entry'),
+        children: [
+          for (final e in owned)
+            SimpleDialogOption(
+              key: Key('assign-to-${e.id}'),
+              onPressed: () => Navigator.pop(context, e.id),
+              child: Text(
+                e.account.isEmpty ? e.service : '${e.service} · ${e.account}',
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                key: const Key('assign-picker-cancel'),
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (!mounted ||
+        target == null ||
+        !code.active(widget.clock()) ||
+        !store.visibleUnassigned(widget.clock()).contains(code) ||
+        !store.entries.any((e) => e.id == target && e.manage)) {
+      return;
+    }
+    final done = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AssignmentDialog(
+        bridge: bridge,
+        sourceId: code.sourceId,
+        eventId: code.eventId,
+        entryId: target,
+      ),
+    );
+    if (done == true && mounted) {
+      widget.controller.refreshAfterMutation();
+    }
+  }
+
+  bool editable(ManagedEntry e) =>
+      widget.entryEditEnabled &&
+      e.manage &&
+      widget.controller.bridge is EntryManagementBridge;
+
+  Future<void> editEntry(ManagedEntry e) async {
+    if (!editable(e)) return;
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => EntryManageDialog(
+        bridge: widget.controller.bridge as EntryManagementBridge,
+        entry: e,
+      ),
+    );
+    if (changed == true && mounted) {
+      widget.controller.refreshAfterMutation();
     }
   }
 
@@ -510,7 +732,25 @@ class _ProductShellState extends State<ProductShell> {
                     IconButton(
                       tooltip: 'Account & security',
                       onPressed: widget.onOpenAccount,
-                      icon: const Icon(Icons.account_circle_outlined, size: 26),
+                      icon: widget.profileEmail == null
+                          ? const SizedBox(
+                              key: ValueKey('home-profile-loading'),
+                              width: 32,
+                              height: 32,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: line,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            )
+                          : ProfileAvatar(
+                              key: ValueKey(widget.profileEmail),
+                              email: widget.profileEmail!,
+                              googlePicture: widget.profilePicture,
+                              size: 32,
+                              allowGravatar: false,
+                            ),
                     ),
                   ],
                 ),

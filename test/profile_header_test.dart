@@ -15,6 +15,41 @@ Widget host(Widget child, {double width = 390}) => MaterialApp(
 );
 
 void main() {
+  testWidgets(
+    'home avatar uses no third-party lookup and keeps initials on failure',
+    (t) async {
+      await t.pumpWidget(
+        host(
+          const ProfileAvatar(
+            email: 'alex.murray@example.test',
+            size: 32,
+            allowGravatar: false,
+          ),
+        ),
+      );
+      expect(find.byType(Image), findsNothing);
+      expect(find.text('AM'), findsOneWidget);
+      await t.pumpWidget(
+        host(
+          const ProfileAvatar(
+            email: 'alex.murray@example.test',
+            size: 32,
+            allowGravatar: false,
+            googlePicture: 'https://lh3.googleusercontent.com/a/fail',
+          ),
+        ),
+      );
+      expect(
+        (t.widget<Image>(find.byType(Image)).image as NetworkImage).url,
+        contains('googleusercontent.com'),
+      );
+      await t.pumpAndSettle();
+      expect(find.byType(Image), findsNothing);
+      expect(find.text('AM'), findsOneWidget);
+      expect(t.takeException(), isNull);
+    },
+  );
+
   test('sha256 matches the standard vectors', () {
     expect(
       sha256Hex(''),

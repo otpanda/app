@@ -431,7 +431,7 @@ Path('web/index.html').write_text(f'''<!DOCTYPE html>
 <meta name="twitter:description" content="{description}">
 <meta name="twitter:image" content="https://otpanda.github.io/app/social-preview.png">
 <meta name="twitter:image:alt" content="Otty the panda beside OTPanda. Development preview.">
-</head><body><script src="recovery-bridge.js"></script><script src="realtime-client.js"></script><script src="session-bootstrap.js"></script><script src="flutter_bootstrap.js" async></script></body></html>
+</head><body><script src="recovery-bridge.js"></script><script src="realtime-client.js"></script><script src="assignment-host.js"></script><script src="session-bootstrap.js"></script><script src="flutter_bootstrap.js" async></script></body></html>
 ''')
 p=Path('android/app/src/main/AndroidManifest.xml');s=p.read_text().replace('android:label="otpanda_client"','android:label="OTPanda" android:description="@string/app_description"');p.write_text(s)
 write('android/app/src/main/res/values/otpanda.xml',b'<resources><string name="app_description">OTPanda development preview. Real sign-in and sources are not connected yet.</string><color name="launcher_background">#10B981</color></resources>')

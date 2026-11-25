@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
@@ -22,7 +23,28 @@ class AssignmentDialog extends StatefulWidget {
 class _AssignmentDialogState extends State<AssignmentDialog> {
   String state = 'loading';
   Map<String, dynamic>? summary;
+  bool proof = true;
   bool busy = true;
+  int checks = 0;
+  Timer? timer;
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  /// Status only, never a new begin. Bounded: 2s, 4s, 8s, 16s, then the user
+  /// decides.
+  void backoff() {
+    if (state != 'pending' || checks >= 4 || !mounted) return;
+    timer?.cancel();
+    timer = Timer(Duration(seconds: 2 << checks), () {
+      checks++;
+      if (mounted && !busy && state == 'pending') check(auto: true);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -57,6 +79,7 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
       if (!mounted) return;
       setState(() {
         summary = value;
+        proof = value['proofRequired'] != false;
         state = 'confirm';
         busy = false;
       });
@@ -86,10 +109,12 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
         state = result;
         busy = false;
       });
+      backoff();
     }
   }
 
-  Future<void> check() async {
+  Future<void> check({bool auto = false}) async {
+    if (!auto) checks = 0;
     setState(() => busy = true);
     String result;
     try {
@@ -102,6 +127,7 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
         state = result;
         busy = false;
       });
+      backoff();
     }
   }
 
@@ -126,22 +152,31 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
                 if (s['accountName'] is String &&
                     (s['accountName'] as String).isNotEmpty)
                   Text(s['accountName'] as String),
-                Text('Active recipients: ${s['activeRecipients']}'),
-                Text(
-                  'Recipients with automation access: ${s['automationRecipients']}',
-                ),
+                if (proof) ...[
+                  Text('Active recipients: ${s['activeRecipients']}'),
+                  Text(
+                    'Automation access grants: ${s['automationRecipients']}',
+                  ),
+                ],
                 const SizedBox(height: 12),
-                const Text(
-                  'This releases this code to the selected entry. Recipients may read or save it immediately. Revoking access later cannot undo that. This does not assign future messages.',
+                Text(
+                  proof
+                      ? 'This releases this code to the selected entry. Recipients may read or save it immediately. Revoking access later cannot undo that. This does not assign future messages.'
+                      : 'This moves this code into the selected entry. It cannot be undone. This does not assign future messages.',
                 ),
               ],
               const SizedBox(height: 12),
               if (busy) const CircularProgressIndicator(),
               Text(switch (state) {
                 'loading' => 'Checking the selected entry…',
-                'confirm' => 'Check the account and recipients before confirming with your passkey.',
+                'confirm' =>
+                  proof
+                      ? 'Check the account and recipients before confirming with your passkey.'
+                      : 'This entry is not shared with anyone. Check it before confirming.',
                 'authenticating' =>
-                  'Complete the passkey prompt. Do not submit again.',
+                  proof
+                      ? 'Complete the passkey prompt. Do not submit again.'
+                      : 'Assigning. Do not submit again.',
                 'assigned' => 'Assignment confirmed.',
                 'not-assigned' => 'Server confirmed this assignment did not happen. Close to choose an entry and start a new confirmation.',
                 'pending' => 'Assignment is still pending. No new assignment has been sent.',
@@ -149,8 +184,7 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
                 'cancelled' => 'Passkey cancelled. No assignment was sent.',
                 'expired' => 'Confirmation expired. Close and start again.',
                 'idle' => 'Session changed. Sign in and review the entry. A request already sent may still have completed.',
-                _ =>
-                  'Assignment is unavailable. No confirmation was requested.',
+                _ => 'This action can\'t be completed here right now. No confirmation was requested. Check your connection and try again.',
               }),
             ],
           ),
@@ -159,7 +193,7 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
           if (state == 'confirm')
             FilledButton(
               onPressed: busy ? null : confirm,
-              child: const Text('Confirm with passkey'),
+              child: Text(proof ? 'Confirm with passkey' : 'Confirm'),
             ),
           if (uncertain)
             OutlinedButton(

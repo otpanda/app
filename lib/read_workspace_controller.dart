@@ -142,6 +142,13 @@ class ReadWorkspaceController extends ChangeNotifier {
     );
   }
 
+  /// Explicit local mutation invalidation, coalesced behind the existing gate.
+  void refreshAfterMutation() {
+    if (_disposed || suspended || !signedIn) return;
+    _hintPending = true;
+    _drainHint();
+  }
+
   void _notify() {
     if (!_disposed) notifyListeners();
   }

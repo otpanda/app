@@ -69,3 +69,17 @@ abstract interface class TotpManagementBridge {
   Future<String> addTotp(String label, String account, String secret);
   Future<SessionResponse> totpCode(String entryId);
 }
+
+/// Owned-entry edits. A separate capability: a bridge without it shows no edit
+/// controls. Implementations throw when the change is not confirmed. They
+/// never retry on their own, because the server may have already committed it.
+abstract interface class EntryManagementBridge {
+  Future<void> renameEntry(String entryId, String label);
+  Future<void> updateAccount(String entryId, String? account);
+}
+
+/// Separate on purpose: delete has its own adapter and is offered only when
+/// the bridge implements it.
+abstract interface class EntryDeleteBridge {
+  Future<void> deleteEntry(String entryId);
+}

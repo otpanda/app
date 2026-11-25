@@ -37,6 +37,7 @@ if add:
 p.write_text(s)
 PY
 node --test test/session_bootstrap_test.cjs
+node tool/build-assignment-host.mjs web/assignment-host.js
 python3 tool/brand_hosts.py
 python3 tool/test_branding.py/test_branding.py
 python3 tool/decode_fonts.py
