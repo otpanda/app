@@ -1,0 +1,1 @@
+enum QrCameraProblem { permissionDenied, unavailable }

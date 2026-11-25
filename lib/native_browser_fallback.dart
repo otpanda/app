@@ -80,6 +80,7 @@ class _FallbackState extends State<NativeBrowserFallbackPage> {
                   'Sign-in on this device is not ready yet',
                   style: TextStyle(
                     color: ink,
+                    fontFamily: 'BricolageGrotesque',
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
                   ),

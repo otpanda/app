@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate disposable pinned-SDK desktop hosts without mobile toolchain setup."""
-import pathlib, shutil, subprocess, tempfile
+import pathlib, shutil, subprocess, tempfile, sys
 flutter = shutil.which('flutter')
 if flutter is None:
     raise SystemExit('Flutter executable is not on PATH')
@@ -16,4 +16,6 @@ with tempfile.TemporaryDirectory() as temp:
     for platform in platforms:
         destination = root / platform
         shutil.copytree(host / platform, destination)
+for decoder in ('decode_fonts.py', 'decode_zxing.py'):
+    subprocess.run([sys.executable, str(root / 'tool' / decoder)], cwd=root, check=True)
 subprocess.run([flutter, 'pub', 'get', '--enforce-lockfile'], cwd=root, check=True)

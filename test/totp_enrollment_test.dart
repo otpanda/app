@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/browser_session_contract.dart';
 import 'package:otpanda_client/session_contract.dart';
+import 'package:otpanda_client/otpauth.dart';
 import 'package:otpanda_client/totp_enrollment.dart';
 
 class Bridge implements BrowserSessionBridge, TotpManagementBridge {
@@ -46,6 +47,7 @@ class Bridge implements BrowserSessionBridge, TotpManagementBridge {
 }
 
 void main() {
+  qrTests();
   testWidgets(
     'missing passkey routes to account settings before secret entry',
     (t) async {
@@ -136,4 +138,38 @@ class MissingPasskeyBridge extends Bridge {
   @override
   Future<SessionResponse> read(String path) async =>
       const SessionResponse(200, '{"passkeys":0}');
+}
+
+void qrTests() {
+  testWidgets('QR scan prefills form, user still confirms', (t) async {
+    final bridge = Bridge();
+    await t.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (c) => TextButton(
+            onPressed: () => addTotpDialog(
+              c,
+              bridge,
+              scan: (_) async => const OtpauthImport(
+                'GitHub',
+                'bob',
+                'otpauth://totp/GitHub:bob?secret=JBSWY3DPEHPK3PXP',
+              ),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await t.tap(find.text('open'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Scan QR code'));
+    await t.pumpAndSettle();
+    expect(find.text('GitHub'), findsOneWidget);
+    expect(find.text('bob'), findsOneWidget);
+    expect(bridge.adds, 0);
+    await t.tap(find.text('Verify and add'));
+    await t.pumpAndSettle();
+    expect(bridge.adds, 1);
+  });
 }

@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'browser_session_contract.dart';
+import 'otpauth.dart';
+import 'qr_scanner.dart';
 import 'session_contract.dart';
 import 'totp_read_contract.dart';
 
@@ -111,7 +113,12 @@ class _TotpEntryDialogState extends State<TotpEntryDialog>
           children: [
             Text(
               code?.value ?? '------',
-              style: const TextStyle(fontSize: 36, fontFamily: 'monospace'),
+              style: const TextStyle(
+                fontSize: 36,
+                fontFamily: 'Figtree',
+                fontWeight: FontWeight.w700,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
             Text(
               code == null
@@ -203,15 +210,17 @@ Future<bool> totpPrerequisite(
 
 Future<String?> addTotpDialog(
   BuildContext context,
-  TotpManagementBridge bridge,
-) async => showDialog<String>(
+  TotpManagementBridge bridge, {
+  OtpauthScan scan = scanOtpauth,
+}) async => showDialog<String>(
   context: context,
-  builder: (_) => _AddTotp(bridge: bridge),
+  builder: (_) => _AddTotp(bridge: bridge, scan: scan),
 );
 
 class _AddTotp extends StatefulWidget {
   final TotpManagementBridge bridge;
-  const _AddTotp({required this.bridge});
+  final OtpauthScan scan;
+  const _AddTotp({required this.bridge, required this.scan});
   @override
   State<_AddTotp> createState() => _AddTotpState();
 }
@@ -229,6 +238,29 @@ class _AddTotpState extends State<_AddTotp> {
     account.dispose();
     secret.dispose();
     super.dispose();
+  }
+
+  Future<void> scanQr() async {
+    if (busy) return;
+    OtpauthImport? found;
+    try {
+      found = await widget.scan(context);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () =>
+              error = 'Could not open the camera. Enter the setup key by hand.',
+        );
+      }
+      return;
+    }
+    if (found == null || !mounted) return;
+    setState(() {
+      label.text = found!.name;
+      account.text = found.account;
+      secret.text = found.uri;
+      error = '';
+    });
   }
 
   Future<void> save() async {
@@ -271,7 +303,13 @@ class _AddTotpState extends State<_AddTotp> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Enter a setup key or otpauth URI. The key is encrypted in your cloud account so OTPanda can generate codes. Verify with a passkey to save.',
+              'Scan the QR code, or enter a setup key or otpauth URI. The key is encrypted in your cloud account so OTPanda can generate codes. Verify with a passkey to save.',
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: busy ? null : scanQr,
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('Scan QR code'),
             ),
             TextField(
               controller: label,
@@ -295,7 +333,7 @@ class _AddTotpState extends State<_AddTotp> {
               enableSuggestions: false,
               autocorrect: false,
               decoration: const InputDecoration(
-                labelText: 'Setup key or otpauth URI',
+                labelText: 'Setup key or URI',
               ),
             ),
             if (error.isNotEmpty) Text(error),

@@ -251,7 +251,11 @@ class _OrganizationPanelState extends State<OrganizationPanel> {
       children: [
         const Text(
           'Organize your entries',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+          style: TextStyle(
+            fontFamily: 'BricolageGrotesque',
+            fontSize: 24,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         const SizedBox(height: 8),
         const Text(
