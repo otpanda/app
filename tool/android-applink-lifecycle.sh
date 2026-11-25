@@ -32,8 +32,25 @@ else
 fi
 adb shell pm get-app-links "$PKG" > "$OUT/get-app-links-initial.txt" 2>&1
 # Resolver must be tested BEFORE any forced user selection.
-adb shell cmd package resolve-activity --brief -a android.intent.action.VIEW -c android.intent.category.BROWSABLE -d "https://$HOST/app-return" > "$OUT/verified-resolver.txt" 2>&1
+adb shell cmd package resolve-activity --brief --query-flags 65536 -a android.intent.action.VIEW -c android.intent.category.BROWSABLE -d "https://$HOST/app-return" > "$OUT/verified-resolver.txt" 2>&1
 if grep -q "$PKG" "$OUT/verified-resolver.txt"; then say V2_UNFORCED_RESOLVER PASS "Android resolver chooses installed app"; else say V2_UNFORCED_RESOLVER FAIL "see verified-resolver.txt"; fi
+# Complete only Chrome's account-free first-run UI before exercising app flow.
+adb shell am start -a android.intent.action.VIEW -d https://example.com >/dev/null 2>&1
+for setup_try in $(seq 1 8); do
+ sleep 2
+ adb shell uiautomator dump /sdcard/chrome-setup.xml >/dev/null 2>&1 || true
+ adb pull /sdcard/chrome-setup.xml "$OUT/chrome-setup.xml" >/dev/null 2>&1 || true
+ python3 - "$OUT/chrome-setup.xml" <<'PYSETUP'
+import sys,re,subprocess,xml.etree.ElementTree as ET
+try: nodes=ET.parse(sys.argv[1]).iter('node')
+except Exception: sys.exit(0)
+for n in nodes:
+ if n.get('text','') in ['Use without an account','No thanks','Got it']:
+  b=list(map(int,re.findall(r'\d+',n.get('bounds',''))))
+  if len(b)==4: subprocess.run(['adb','shell','input','tap',str((b[0]+b[2])//2),str((b[1]+b[3])//2)])
+PYSETUP
+done
+adb shell input keyevent KEYCODE_BACK
 # Drive the actual shared signed-out Google button. FDroid must open its
 # automatic browser fallback without any separate browser-choice button.
 adb shell am force-stop com.google.android.apps.nexuslauncher || true
