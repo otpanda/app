@@ -94,17 +94,21 @@ class _ProductShellState extends State<ProductShell> {
 
   Future<void> refresh() => widget.controller.refresh();
 
-  /// Pull-down gesture. Honors the same gate as automatic updates
-  /// (signed in, not loading, 15s gap, 429 cooldown), so it can never add
-  /// requests or reloads beyond what the button allows.
+  /// Pull-down gesture (touch platforms only). Web: reload the page. Native:
+  /// refetch, under the same gate as automatic updates (signed in, not
+  /// loading, 15s gap, 429 cooldown).
   Future<void> pull() async {
-    if (!widget.controller.canRefresh) return;
+    // On the web a pull reloads the whole page. It is the person's own
+    // gesture and adds no data requests of its own, so the refetch cooldown
+    // and loading gate do not apply: gating it made the indicator show and
+    // then do nothing.
     final reload = widget.pageReload;
     if (reload != null) {
       await reload();
-    } else {
-      await widget.controller.refresh();
+      return;
     }
+    if (!widget.controller.canRefresh) return;
+    await widget.controller.refresh();
   }
 
   String spaced(String c) =>

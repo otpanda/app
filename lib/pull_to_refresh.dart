@@ -19,11 +19,23 @@ class PullToRefresh extends StatelessWidget {
   final Widget child;
   final bool enabled;
 
+  /// Touch platforms only. On desktop browsers there is no pull gesture, so
+  /// the child is shown as it is and no indicator can appear.
+  static bool isMobile(BuildContext context) =>
+      switch (Theme.of(context).platform) {
+        TargetPlatform.android ||
+        TargetPlatform.iOS ||
+        TargetPlatform.fuchsia => true,
+        _ => false,
+      };
+
   @override
-  Widget build(BuildContext context) => RefreshIndicator(
-    onRefresh: () async {
-      if (enabled) await onRefresh();
-    },
-    child: child,
-  );
+  Widget build(BuildContext context) => !isMobile(context)
+      ? child
+      : RefreshIndicator(
+          onRefresh: () async {
+            if (enabled) await onRefresh();
+          },
+          child: child,
+        );
 }
