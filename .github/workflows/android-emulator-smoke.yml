@@ -50,6 +50,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
+            bash tool/android-directory-cache.sh directory-cache-out
             bash tool/android-emulator-smoke.sh build/app/outputs/flutter-apk/app-google-debug.apk smoke-out
             bash tool/android-os-qualify.sh os-qualify-out
             API_DIR="$PWD/api-qualification" bash tool/android-roundtrip.sh roundtrip-out
@@ -63,4 +64,5 @@ jobs:
             os-qualify-out
             roundtrip-out
             signed-in-ui-out
+            directory-cache-out
           retention-days: 7
