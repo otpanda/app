@@ -1,9 +1,24 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:otpanda_client/service_directory.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:otpanda_client/main.dart';
 import 'package:otpanda_client/public_service_catalog.dart';
+
+/// The picker reads the runtime directory. Tests run it offline with no
+/// platform store, so it falls back to the bundled snapshot.
+Future<void> prime(WidgetTester t) async {
+  await t.runAsync(() => PublicServiceCatalog.bundled());
+  ServiceDirectory.instance = ServiceDirectory(
+    useDefaultStore: false,
+    client: () =>
+        MockClient((_) async => throw http.ClientException('offline')),
+  );
+  await t.runAsync(ServiceDirectory.instance.ensureLoaded);
+}
 
 void main() {
   testWidgets('bundled metadata has provenance and bounded literal search', (
@@ -78,7 +93,7 @@ void main() {
   testWidgets(
     'explicit selection fills label before local fictional creation',
     (t) async {
-      await t.runAsync(() => PublicServiceCatalog.bundled());
+      await prime(t);
       await t.pumpWidget(const OTPandaApp());
       await t.tap(find.text('Temporary demo'));
       await t.pumpAndSettle();
@@ -107,7 +122,7 @@ void main() {
   testWidgets(
     'closing picker preserves custom entry and cancel creates nothing',
     (t) async {
-      await t.runAsync(() => PublicServiceCatalog.bundled());
+      await prime(t);
       await t.pumpWidget(const OTPandaApp());
       await t.tap(find.text('Temporary demo'));
       await t.pumpAndSettle();
@@ -138,7 +153,7 @@ void main() {
   testWidgets(
     'label edits clear public identity on creation and existing entry',
     (t) async {
-      await t.runAsync(() => PublicServiceCatalog.bundled());
+      await prime(t);
       await t.pumpWidget(const OTPandaApp());
       await t.tap(find.text('Temporary demo'));
       await t.pumpAndSettle();
@@ -226,7 +241,7 @@ void main() {
     addTearDown(t.view.resetDevicePixelRatio);
     t.view.physicalSize = const Size(390, 600);
     t.view.devicePixelRatio = 1;
-    await t.runAsync(() => PublicServiceCatalog.bundled());
+    await prime(t);
     await t.pumpWidget(
       const MaterialApp(home: Scaffold(body: PublicServicePicker())),
     );

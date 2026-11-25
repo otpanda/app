@@ -160,8 +160,12 @@ class _ProductShellState extends State<ProductShell> {
   String spaced(String c) =>
       c.length == 6 ? '${c.substring(0, 3)} ${c.substring(3)}' : c;
 
-  Widget avatar(String name) =>
-      ServiceAvatar(service: name, color: const Color(0xffdff3e8), ink: ink);
+  Widget avatar(String name, [String? serviceId]) => ServiceAvatar(
+    service: name,
+    serviceId: serviceId,
+    color: const Color(0xffdff3e8),
+    ink: ink,
+  );
 
   Widget codeTile(
     String title,
@@ -171,6 +175,7 @@ class _ProductShellState extends State<ProductShell> {
     bool showCodeStatus = true,
     bool fresh = false,
     Widget? trailing,
+    String? serviceId,
   ]) => Card(
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
     color: fresh ? const Color(0xffe6f5ec) : null,
@@ -184,7 +189,7 @@ class _ProductShellState extends State<ProductShell> {
       padding: const EdgeInsets.all(12),
       child: Row(
         children: [
-          avatar(title),
+          avatar(title, serviceId),
           const SizedBox(width: 11),
           Expanded(
             child: Column(
@@ -385,6 +390,8 @@ class _ProductShellState extends State<ProductShell> {
                   () => widget.onCopyAssigned(codes[e.id]!),
                   true,
                   true,
+                  null,
+                  e.serviceId,
                 ),
               ),
             for (final e in withCode)
@@ -395,6 +402,10 @@ class _ProductShellState extends State<ProductShell> {
                   e.account,
                   codes[e.id]?.value,
                   () => widget.onCopyAssigned(codes[e.id]!),
+                  true,
+                  false,
+                  null,
+                  e.serviceId,
                 ),
               ),
             for (final e in rest)
@@ -411,7 +422,16 @@ class _ProductShellState extends State<ProductShell> {
                           ),
                         )
                       : null,
-                  child: codeTile(e.service, e.account, null),
+                  child: codeTile(
+                    e.service,
+                    e.account,
+                    null,
+                    null,
+                    true,
+                    false,
+                    null,
+                    e.serviceId,
+                  ),
                 ),
               ),
             if (entries.isEmpty && freshPrivate.isEmpty)
@@ -529,6 +549,7 @@ class _ProductShellState extends State<ProductShell> {
                           ],
                         )
                       : null,
+                  e.serviceId,
                 ),
               ),
           ],
