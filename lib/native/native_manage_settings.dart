@@ -1,6 +1,18 @@
 import '../recovery_contract.dart';
 import 'native_passkey.dart';
 
+/// A non-200 answer from a read, with the server's error code when readable.
+class ManageFailure implements Exception {
+  const ManageFailure(this.status, [this.error]);
+  final int status;
+  final String? error;
+}
+
+/// The person dismissed the OS passkey prompt. Nothing was sent to finish.
+class ManageDismissed implements Exception {
+  const ManageDismissed();
+}
+
 /// Bearer request to the API. [body] null means no body (GET).
 typedef ManageRequest =
     Future<({int status, Map<String, dynamic>? body})> Function(
@@ -198,20 +210,26 @@ class NativeManageSettings {
   }
 
   /// Google link ticket for the browser leg. [state] is 43 opaque chars.
-  Future<({String ticket, int expiresAt})> googleLinkTicket(
-    String state,
-  ) async {
+  /// Throws [ManageFailure] with the status and error code on refusal.
+  Future<String> googleLinkTicket(String state) async {
     if (!RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(state)) {
       throw StateError('Invalid state');
     }
-    final b = await _read('POST', '/v1/manage/google/link/ticket', {
-      'state': state,
-    });
-    final t = b['ticket'], x = b['expiresAt'];
-    if (t is! String || t.isEmpty || t.length > 512 || x is! int) {
-      throw StateError('Unexpected response');
+    final ({int status, Map<String, dynamic>? body}) r;
+    try {
+      r = await request('POST', '/v1/manage/google/link/ticket', {
+        'state': state,
+      });
+    } catch (_) {
+      throw const ManageFailure(0);
     }
-    return (ticket: t, expiresAt: x);
+    final e = r.body?['error'];
+    if (r.status != 200) throw ManageFailure(r.status, e is String ? e : null);
+    final t = r.body?['ticket'];
+    if (t is! String || !RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(t)) {
+      throw const ManageFailure(200);
+    }
+    return t;
   }
 
   /// After the browser leg returns the link-only continuation: passkey
@@ -229,7 +247,7 @@ class NativeManageSettings {
       maxAllow: 20,
       maxWindowMs: 300000,
     );
-    if (response == null) throw const RecoveryRefused();
+    if (response == null) throw const ManageDismissed();
     final done = await _commit('/v1/manage/google/link/finish', {
       'continuation': continuation,
       'token': begin['token'],

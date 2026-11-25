@@ -188,11 +188,11 @@ void main() {
     () async {
       replies['/v1/manage/google/link/ticket'] = (
         status: 200,
-        body: {'ticket': 'tk', 'expiresAt': now + 1000},
+        body: {'ticket': 'T' * 43, 'expiresAt': now + 1000},
       );
       final m = make();
       final t = await m.googleLinkTicket('A' * 43);
-      expect(t.ticket, 'tk');
+      expect(t, 'T' * 43);
       await expectLater(m.googleLinkTicket('short'), throwsStateError);
       replies['/v1/manage/google/link/begin'] = (
         status: 200,
