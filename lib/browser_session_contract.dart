@@ -66,7 +66,14 @@ abstract interface class RealtimeBridge {
 
 /// New TOTP creation never exposes stored seed material.
 abstract interface class TotpManagementBridge {
-  Future<String> addTotp(String label, String account, String secret);
+  /// [catalogId] is the optional catalogue association chosen in the picker.
+  /// It is left out of the request entirely when null (a custom entry).
+  Future<String> addTotp(
+    String label,
+    String account,
+    String secret, {
+    String? catalogId,
+  });
   Future<SessionResponse> totpCode(String entryId);
 }
 

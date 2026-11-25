@@ -475,12 +475,13 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       if(r.disconnected!==true&&!(r.disconnected===false&&r.lifecycleBlocked===true))throw Error('Gmail was not disconnected');
       return JSON.stringify({disconnected:r.disconnected===true,googlePermissionRemains:r.googlePermissionRemains!==false,lifecycleBlocked:r.lifecycleBlocked===true,...(typeof r.artifactsRemoved==='boolean'?{artifactsRemoved:r.artifactsRemoved}:{})});
     },
-    addTotp:async(label,account,secret)=>{
+    addTotp:async(label,account,secret,catalogId)=>{
+      if(catalogId!==undefined&&(typeof catalogId!=='string'||!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(catalogId)))throw Error('Invalid authenticator details');
       if(typeof label!=='string'||!label.trim()||label.length>120||typeof account!=='string'||account.length>120||typeof secret!=='string'||secret.length>2048)throw Error('Invalid authenticator details');
       if(!await maintainSession(true))throw Error('Sign in again');
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)throw Error('Sign in again');
       const post=async(suffix,value)=>{const r=await fetch(API+'/v1/manage/totp'+suffix,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,24576));if(!r.ok||attempt!==generation)throw Error('Authenticator setup did not finish. Check details and verify with a passkey.');return v;};
-      const value={label,account,secret};try{const c=await post('/begin',value),response=await assertion(c);if(attempt!==generation)throw Error('Cancelled');const result=await post('',{...value,token:c.token,response});if(typeof result.entryId!=='string'||result.entryId.length>256)throw Error('Invalid result');return result.entryId;}finally{value.secret='';secret='';}
+      const value={label,account,secret,...(catalogId===undefined?{}:{catalogId})};try{const c=await post('/begin',value),response=await assertion(c);if(attempt!==generation)throw Error('Cancelled');const result=await post('',{...value,token:c.token,response});if(typeof result.entryId!=='string'||result.entryId.length>256)throw Error('Invalid result');return result.entryId;}finally{value.secret='';secret='';}
     },
     totpCode:async entryId=>{
       if(typeof entryId!=='string'||!entryId||entryId.length>256)throw Error('Entry required');

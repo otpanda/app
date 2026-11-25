@@ -59,9 +59,15 @@ class ManagedEntry {
           : _text(json, 'account_name'),
       capabilities['manage'] == true,
       json['service_id'] == 'custom-totp',
-      json['service_id'] is String &&
-              RegExp(r'^[a-z0-9-]+(?:\.[a-z0-9-]+)+$')
-                  .hasMatch(json['service_id'])
+      // The owner-chosen, untrusted catalogue id wins. Entries created before
+      // it existed fall back to the legacy service id, when it is a plain host.
+      json['catalogId'] is String &&
+              RegExp(r'^[a-z0-9][a-z0-9._-]{0,127}$')
+                  .hasMatch(json['catalogId'])
+          ? json['catalogId'] as String
+          : json['service_id'] is String &&
+                RegExp(r'^[a-z0-9-]+(?:\.[a-z0-9-]+)+$')
+                    .hasMatch(json['service_id'])
           ? json['service_id'] as String
           : null,
     );

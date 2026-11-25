@@ -12,11 +12,18 @@ import 'package:otpanda_client/totp_enrollment.dart';
 
 class _Bridge implements TotpManagementBridge {
   final adds = <List<String>>[];
+  final catalogIds = <String?>[];
   Completer<void>? gate;
   bool failNext = false;
   @override
-  Future<String> addTotp(String label, String account, String secret) async {
+  Future<String> addTotp(
+    String label,
+    String account,
+    String secret, {
+    String? catalogId,
+  }) async {
     adds.add([label, account, secret]);
+    catalogIds.add(catalogId);
     await gate?.future;
     if (failNext) {
       failNext = false;
