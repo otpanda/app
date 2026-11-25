@@ -163,3 +163,27 @@ OtpauthImport parseOtpauth(String input) {
   if (account == name) account = '';
   return OtpauthImport(name, account, input);
 }
+
+/// Manual entry: an otpauth URI, or a bare Base32 setup key as services show
+/// it (spaces or hyphens between groups, any case, optional '=' padding).
+/// A bare key carries no name, so the returned name and account are empty.
+/// Returns null when [input] is not a valid key. Never reports content.
+OtpauthImport? parseSetupKey(String input) {
+  final t = input.trim();
+  if (t.isEmpty) return null;
+  if (t.toLowerCase().startsWith('otpauth://')) {
+    try {
+      return parseOtpauth(t);
+    } on OtpauthException {
+      return null;
+    }
+  }
+  final key = t
+      .replaceAll(RegExp(r'[ -]'), '')
+      .replaceFirst(RegExp(r'=+$'), '')
+      .toUpperCase();
+  if (key.length > 208 || !_b32.hasMatch(key) || !_canonicalSecretBytes(key)) {
+    return null;
+  }
+  return OtpauthImport('', '', key);
+}
