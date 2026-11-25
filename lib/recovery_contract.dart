@@ -45,7 +45,8 @@ enum RecoveryKind {
   emailEscapeOn('email-escape-on'),
   emailEscapeOff('email-escape-off'),
   passkeyRevoke('passkey-revoke'),
-  sessionRevoke('session-revoke');
+  sessionRevoke('session-revoke'),
+  googleUnlink('google-unlink');
 
   final String wire;
   const RecoveryKind(this.wire);
