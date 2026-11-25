@@ -8,6 +8,7 @@ import 'models.dart';
 import 'app_navigation_stub.dart'
     if (dart.library.js_interop) 'app_navigation_web.dart';
 import 'branding.dart';
+import 'service_logo.dart';
 import 'source_preview.dart';
 import 'access_preview.dart';
 import 'browser_account_page.dart';
@@ -534,22 +535,11 @@ class _ClientHomeState extends State<ClientHome> {
     builder: (context, bounds) => Row(
       children: [
         if (bounds.maxWidth >= 80) ...[
-          Container(
-            width: 36,
-            height: 36,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: avatarTint(e.service),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              e.service.isEmpty ? '?' : e.service[0].toUpperCase(),
-              style: const TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 15,
-                color: ink,
-              ),
-            ),
+          ServiceAvatar(
+            service: e.service,
+            color: avatarTint(e.service),
+            ink: ink,
+            fontSize: 15,
           ),
           const SizedBox(width: 11),
         ],
