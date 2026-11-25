@@ -380,6 +380,16 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     try {
       final reason = await b.connectGoogle();
       if (!mounted || attempt != revision) return;
+      if (reason == 'completed') {
+        // The whole connect ran in this app (no page reload): read the
+        // notice and the live overview the way a returning page does.
+        pendingLinkResult = b.takeGoogleLinkResult();
+        forceOverview = true;
+        dropStaticProfile();
+        await refresh();
+        if (mounted) setState(showGoogleLinkResult);
+        return;
+      }
       left = reason.isEmpty;
       if (!left) {
         setState(
@@ -410,7 +420,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     final text = switch (result) {
       // The account overview owns whether Google is connected. The notice
       // only reports, so it never claims more than the overview shows.
-      'connected' =>
+      'connected' || 'unconfirmed' =>
         overview?['google'] == true
             // The Passkeys screen has nothing to do with Google.
             ? (passkeysOpen ? '' : 'Google connected.')

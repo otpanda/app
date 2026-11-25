@@ -15,7 +15,7 @@ class ActivityProofOperation(private val activity: Activity, private val keys: D
     private var listener: Application.ActivityLifecycleCallbacks? = null
 
     /** Call on the main thread. Lifecycle cancellation suppresses all late data. */
-    fun start(proof: DeviceProof, complete: (Result<ByteArray>) -> Unit) {
+    fun start(proof: DeviceProof, displayText: String? = null, complete: (Result<ByteArray>) -> Unit) {
         check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
         check(!activity.isFinishing && !activity.isDestroyed)
         check(active.compareAndSet(false,true))
@@ -33,7 +33,7 @@ class ActivityProofOperation(private val activity: Activity, private val keys: D
         listener = callback
         activity.application.registerActivityLifecycleCallbacks(callback)
         try {
-            val operation = keys.signWithOsVerification(activity,proof) { result ->
+            val operation = keys.signWithOsVerification(activity, proof, displayText = displayText) { result ->
                 if (attempt == generation && active.compareAndSet(true,false)) {
                     detach(); complete(result)
                 } else { result.getOrNull()?.fill(0) }
@@ -52,7 +52,7 @@ class ActivityProofOperation(private val activity: Activity, private val keys: D
         val reply = completion
         detach()
         operation?.cancel()
-        if (wasActive) reply?.invoke(Result.failure(IllegalStateException("Verification cancelled")))
+        if (wasActive) reply?.invoke(Result.failure(DeviceProofException("cancelled")))
     }
     private fun detach() {
         listener?.let { activity.application.unregisterActivityLifecycleCallbacks(it) }

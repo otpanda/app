@@ -68,6 +68,10 @@ class ProductShell extends StatefulWidget {
 enum _Phase { loading, loaded, cleared, failed, rateLimited, signedOut }
 
 class _ProductShellState extends State<ProductShell> {
+  bool get _canAddTotp =>
+      widget.controller.bridge is TotpManagementBridge &&
+      (widget.controller.bridge is! TotpCreationCapability ||
+          (widget.controller.bridge as TotpCreationCapability).canAddTotp);
   static const names = ['Codes', 'Sources', 'Unassigned', 'Entries'];
   static const icons = [
     Icons.password,
@@ -699,15 +703,14 @@ class _ProductShellState extends State<ProductShell> {
                 label: const Text('Reload'),
               ),
           ],
-          if (widget.controller.bridge is TotpManagementBridge)
-            const SizedBox(height: 80),
+          if (_canAddTotp) const SizedBox(height: 80),
         ],
       );
       final content = widget.pageReload == null
           ? list
           : PullToRefresh(onRefresh: pull, child: list);
       return Scaffold(
-        floatingActionButton: widget.controller.bridge is TotpManagementBridge
+        floatingActionButton: _canAddTotp
             ? FloatingActionButton.extended(
                 tooltip: 'Add authenticator',
                 backgroundColor: green,

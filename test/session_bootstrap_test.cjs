@@ -1,7 +1,7 @@
 function streaming(r){if(r&&typeof r.text==='function'&&!r.body){r.body={getReader(){let sent=false;return {async read(){if(sent)return {done:true};sent=true;return {done:false,value:new TextEncoder().encode(await r.text())};},async cancel(){},releaseLock(){}};}};}return r;}
 const {test}=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');const fs=require('node:fs');const script=fs.readFileSync('tool/session-bootstrap.js','utf8');
 const NOW=1800000000000,token='otpda_'+'a'.repeat(55),state='s'.repeat(43);
-function env({hash='',saved,now=NOW,response={access:token,accessExpiresAt:NOW+300000},hint,navigator,fetchImpl,sessionValues=new Map(),events}={}){let stored=saved,cleaned=false,calls=0;const location={origin:'https://otpanda.github.io',pathname:'/app/',search:'',hash,assign(url){location.assigned=url;}};const hints=new Map(hint?[['otpanda-session-present','yes']]:[]);const context={AbortController,setTimeout,clearTimeout,localStorage:{getItem:k=>hints.get(k),setItem:(k,v)=>hints.set(k,v),removeItem:k=>hints.delete(k)},location,history:{replaceState(){cleaned=true;location.hash='';}},sessionStorage:{getItem(k){return k==='otpanda.restore.tab.v1'?stored:sessionValues.get(k)??null;},removeItem(k){if(k==='otpanda.restore.tab.v1')stored=undefined;else sessionValues.delete(k);},setItem(k,v){if(k==='otpanda.restore.tab.v1')stored=v;else sessionValues.set(k,v);}},fetch:async(url,options)=>{assert.ok(cleaned);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');calls++;return {ok:true,text:async()=>JSON.stringify(response)};},URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),crypto:require('node:crypto').webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Date:class extends Date{static now(){return now;}}};if(navigator)context.navigator=navigator;if(fetchImpl)context.fetch=fetchImpl;let fetchValue=context.fetch;Object.defineProperty(context,'fetch',{get(){return async(...args)=>streaming(await fetchValue(...args));},set(v){fetchValue=v;},enumerable:true,configurable:true});if(events)context.addEventListener=(n,f)=>{events[n]=f;};vm.createContext(context);vm.runInContext(script,context);return {context,get cleaned(){return cleaned;},get stored(){return stored;},get calls(){return calls;}};}
+function env({hash='',saved,now=NOW,response={access:token,accessExpiresAt:NOW+300000},hint,navigator,fetchImpl,sessionValues=new Map(),events,lib,path='/app/',query=''}={}){let stored=saved,cleaned=false,calls=0;const location={origin:'https://otpanda.github.io',pathname:path,search:query,hash,assign(url){location.assigned=url;}};const hints=new Map(hint?[['otpanda-session-present','yes']]:[]);const context={AbortController,setTimeout,clearTimeout,localStorage:{getItem:k=>hints.get(k),setItem:(k,v)=>hints.set(k,v),removeItem:k=>hints.delete(k)},location,history:{replaceState(){cleaned=true;location.hash='';}},sessionStorage:{getItem(k){return k==='otpanda.restore.tab.v1'?stored:sessionValues.get(k)??null;},removeItem(k){if(k==='otpanda.restore.tab.v1')stored=undefined;else sessionValues.delete(k);},setItem(k,v){if(k==='otpanda.restore.tab.v1')stored=v;else sessionValues.set(k,v);}},fetch:async(url,options)=>{assert.ok(cleaned);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');calls++;return {ok:true,text:async()=>JSON.stringify(response)};},URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),crypto:require('node:crypto').webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Date:class extends Date{static now(){return now;}}};if(navigator)context.navigator=navigator;if(fetchImpl)context.fetch=fetchImpl;let fetchValue=context.fetch;Object.defineProperty(context,'fetch',{get(){return async(...args)=>streaming(await fetchValue(...args));},set(v){fetchValue=v;},enumerable:true,configurable:true});if(events)context.addEventListener=(n,f)=>{events[n]=f;};vm.createContext(context);if(lib)vm.runInContext(fs.readFileSync('tool/native-launch-intent.js','utf8'),context);vm.runInContext(script,context);return {context,get cleaned(){return cleaned;},get stored(){return stored;},get calls(){return calls;}};}
 test('callback cleans synchronously before exchange; state consumed and memory access returned',async()=>{const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(e.calls,1);assert.equal(e.stored,undefined);assert.equal(e.context.OTPandaSession.status(),'restored');assert.equal(e.context.OTPandaSession.access(),token);e.context.OTPandaSession.clear();assert.equal(e.context.OTPandaSession.access(),undefined);});
 test('wrong state duplicates missing pending and future/expired state never exchange',async()=>{for(const change of [{saved:undefined},{hash:'#code='+token+'&state=wrong'},{hash:'#code='+token+'&state='+state+'&state='+state},{now:NOW+300001},{now:NOW-1}]){const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),...change});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');}});
 test('invalid response never becomes access; secrets absent from storage',async()=>{const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),response:{access:token,refresh:'bad',accessExpiresAt:NOW+300000}});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaSession.access(),undefined);assert.equal(e.stored,undefined);});
@@ -472,3 +472,127 @@ assert.equal(calls[0].url,'https://otpanda-api.abrahammurciano.workers.dev/v1/ma
 assert.equal(calls[1].url,'https://otpanda-api.abrahammurciano.workers.dev/v1/manage/entry/account');assert.deepEqual(JSON.parse(calls[1].o.body),{entryId:'e1',accountName:'me@example.test'});assert.deepEqual(JSON.parse(calls[2].o.body),{entryId:'e1',accountName:null});
 for(const bad of [['rename','e1','   '],['rename','e1','x'.repeat(121)],['account','e1','  '],['delete','e1','x'],['rename','','x']])await assert.rejects(S.entryEdit(...bad));assert.equal(calls.length,3);
 for(const r of [{status:404,text:async()=>'{"ok":true}'},{status:200,text:async()=>'{}'},{status:500,text:async()=>'{"ok":true}'}]){reply=r;await assert.rejects(S.entryEdit('rename','e1','x',false));}assert.equal(calls.length,6);});
+
+// Native app handoff: Pages keeps the intent across sign-in, then sends only challenge and state to the API approve page.
+const NC='A'.repeat(43),NS='b-_'.padEnd(43,'c'),NKEY='otpanda.native.intent.v1',APPROVE='https://otpanda-api.abrahammurciano.workers.dev/auth/native/approve?challenge='+NC+'&state='+NS+'&redirect_uri=https%3A%2F%2Fotpanda-api.abrahammurciano.workers.dev%2Fapp-return';
+const launchHash=`#native=1&challenge=${NC}&state=${NS}`;
+test('native launch fragment is removed synchronously, kept only as tab-scoped intent, and never navigates before sign-in',async()=>{
+  const sv=new Map(),e=env({hash:launchHash,sessionValues:sv,lib:true});
+  assert.ok(e.cleaned);await e.context.OTPandaSession.ready;
+  assert.equal(e.context.location.hash,'');assert.equal(e.context.location.assigned,undefined);assert.equal(e.calls,0);
+  assert.deepEqual(JSON.parse(sv.get(NKEY)),{challenge:NC,state:NS,created:NOW});
+  assert.equal(e.context.OTPandaSession.status(),'idle');
+});
+test('native launch with a remembered session restores first, then goes to the approve page after sign-in',async()=>{
+  const sv=new Map(),e=env({hash:launchHash,sessionValues:sv,hint:true,lib:true});
+  await e.context.OTPandaSession.ready;
+  assert.ok(e.context.location.assigned.startsWith('https://otpanda-api.abrahammurciano.workers.dev/auth/restore?'));
+  assert.ok(sv.has(NKEY));
+  // The restore comes back to Pages with a normal callback; the saved intent is then used once.
+  const back=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues:sv,lib:true});
+  await back.context.OTPandaSession.ready;
+  assert.equal(back.context.OTPandaSession.status(),'restored');
+  assert.equal(back.context.location.assigned,APPROVE);
+  assert.equal(sv.has(NKEY),false);
+});
+test('a normal sign-in callback with no native intent never navigates onward',async()=>{
+  const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),lib:true});
+  await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaSession.status(),'restored');assert.equal(e.context.location.assigned,undefined);
+});
+test('native intent is single use, expires after 10 minutes, and malformed storage is ignored',async()=>{
+  const cb={hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})};
+  for(const [stored,now,go] of [
+    [{challenge:NC,state:NS,created:NOW},NOW,true],
+    [{challenge:NC,state:NS,created:NOW-600001},NOW,false],
+    [{challenge:NC,state:NS,created:NOW+1},NOW,false],
+    [{challenge:NC,state:NS,created:NOW,redirect_uri:'https://evil.example/'},NOW,false],
+    [{challenge:NC+'x',state:NS,created:NOW},NOW,false],
+  ]){
+    const sv=new Map([[NKEY,JSON.stringify(stored)]]),e=env({...cb,sessionValues:sv,now,lib:true});
+    await e.context.OTPandaSession.ready;
+    assert.equal(e.context.location.assigned,go?APPROVE:undefined,JSON.stringify(stored));
+    assert.equal(sv.has(NKEY),false);
+  }
+  const sv=new Map([[NKEY,'not json']]),e=env({...cb,sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;assert.equal(e.context.location.assigned,undefined);
+});
+test('malformed or extended native fragments are stripped and store nothing; no redirect is ever accepted',async()=>{
+  for(const h of [`#native=1&challenge=${NC}&state=${NS}&redirect_uri=https://evil.example/`,`#native=1&challenge=${NC}`,`#native=2&challenge=${NC}&state=${NS}`,`#native=1&challenge=${NC}&challenge=${NC}&state=${NS}`,`#native=1&challenge=${NC.slice(1)}&state=${NS}`]){
+    const sv=new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,created:NOW})]]),e=env({hash:h,sessionValues:sv,lib:true});
+    assert.ok(e.cleaned);await e.context.OTPandaSession.ready;
+    assert.equal(sv.has(NKEY),false,h);assert.equal(e.context.location.assigned,undefined);assert.equal(e.calls,0);
+  }
+});
+test('native fragment is stripped and ignored when the launch script is absent',async()=>{
+  const sv=new Map(),e=env({hash:launchHash,sessionValues:sv});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(sv.has(NKEY),false);assert.equal(e.calls,0);
+});
+test('native fragment on another path or with a query is stripped and ignored',async()=>{
+  for(const o of [{path:'/other/'},{query:'?x=1'}]){
+    const sv=new Map(),e=env({hash:launchHash,sessionValues:sv,lib:true,...o});assert.ok(e.cleaned);assert.equal(sv.has(NKEY),false);
+  }
+});
+
+// Native Google fallback: the app has no Google services, so Pages starts the web Google sign-in itself, once.
+const gHash=(extra='')=>`#native=1&challenge=${NC}&state=${NS}&provider=google${extra}`;
+test('provider=google with no remembered session starts the web Google sign-in once and keeps the intent',async()=>{
+  const sv=new Map(),e=env({hash:gHash(),sessionValues:sv,lib:true});
+  await e.context.OTPandaSession.ready;
+  const u=new URL(e.context.location.assigned);
+  assert.equal(u.origin+u.pathname,'https://otpanda-api.abrahammurciano.workers.dev/auth/google/start');
+  assert.equal(u.searchParams.get('remember'),'yes');assert.equal(u.searchParams.get('redirect_uri'),'https://otpanda.github.io/app/');
+  assert.deepEqual(JSON.parse(sv.get(NKEY)),{challenge:NC,state:NS,provider:'google',created:NOW,autostarted:true});
+  assert.equal(e.context.location.hash,'');
+  // A return that fails does not loop: the intent is marked, so the next load does not autostart again.
+  const again=env({hash:'',sessionValues:sv,lib:true});await again.context.OTPandaSession.ready;assert.equal(again.context.location.assigned,undefined);
+});
+test('remember=0 and remember=1 are carried to the Google start; anything else drops the intent',async()=>{
+  for(const [x,want] of [['&remember=0','no'],['&remember=1','yes']]){
+    const e=env({hash:gHash(x),lib:true});await e.context.OTPandaSession.ready;assert.equal(new URL(e.context.location.assigned).searchParams.get('remember'),want);
+  }
+  for(const h of [gHash('&remember=2'),gHash('&remember='),gHash('&remember=0&remember=0'),`#native=1&challenge=${NC}&state=${NS}&remember=1`,`#native=1&challenge=${NC}&state=${NS}&provider=apple`,`#native=1&challenge=${NC}&state=${NS}&provider=google&provider=google`]){
+    const sv=new Map(),e=env({hash:h,sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;
+    assert.equal(sv.has(NKEY),false,h);assert.equal(e.context.location.assigned,undefined,h);
+  }
+});
+test('provider=google with a remembered session uses the unchanged restore, never a fresh Google login',async()=>{
+  const e=env({hash:gHash(),hint:true,lib:true});await e.context.OTPandaSession.ready;
+  assert.ok(e.context.location.assigned.startsWith('https://otpanda-api.abrahammurciano.workers.dev/auth/restore?'));
+});
+test('Google fallback round trip ends at the approve page; provider never changes the approve parameters',async()=>{
+  const sv=new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,provider:'google',created:NOW,autostarted:true})]]);
+  const back=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues:sv,lib:true});
+  await back.context.OTPandaSession.ready;assert.equal(back.context.location.assigned,APPROVE);assert.equal(sv.has(NKEY),false);
+});
+test('stored intent with autostarted or remember but no provider is refused',async()=>{
+  for(const m of [{challenge:NC,state:NS,created:NOW,autostarted:true},{challenge:NC,state:NS,created:NOW,remember:true},{challenge:NC,state:NS,provider:'google',created:NOW,remember:'1'}]){
+    const sv=new Map([[NKEY,JSON.stringify(m)]]),e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues:sv,lib:true});
+    await e.context.OTPandaSession.ready;assert.equal(e.context.location.assigned,undefined,JSON.stringify(m));
+  }
+});
+test('a failed remembered restore starts the Google fallback once with the chosen remember value, then never again',async()=>{
+  const rec=()=>JSON.stringify({state,verifier:'v'.repeat(43),created:NOW});
+  for(const [extra,want] of [['','yes'],['&remember=0','no'],['&remember=1','yes']]){
+    for(const value of ['sign-in','restart']){
+      const sv=new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,provider:'google',...(extra?{remember:extra==='&remember=1'}:{}),created:NOW})]]);
+      const e=env({hash:`#auth=${value}&state=${state}`,saved:rec(),sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;
+      const u=new URL(e.context.location.assigned);
+      assert.equal(u.origin+u.pathname,'https://otpanda-api.abrahammurciano.workers.dev/auth/google/start',value+extra);assert.equal(u.searchParams.get('remember'),want);
+      assert.equal(JSON.parse(sv.get(NKEY)).autostarted,true);
+      // The Google attempt itself failing returns here and must not start another.
+      const again=env({hash:`#auth=${value}&state=${state}`,saved:rec(),sessionValues:sv,lib:true});await again.context.OTPandaSession.ready;
+      assert.equal(again.context.location.assigned,undefined);assert.equal(again.context.OTPandaSession.status(),value==='sign-in'?'sign-in-required':'restart');
+    }
+  }
+});
+test('a failed restore without a Google intent, or with a plain native intent, goes to the normal chooser',async()=>{
+  const rec=JSON.stringify({state,verifier:'v'.repeat(43),created:NOW});
+  for(const sv of [new Map(),new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,created:NOW})]])]){
+    const e=env({hash:`#auth=sign-in&state=${state}`,saved:rec,sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;
+    assert.equal(e.context.location.assigned,undefined);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');
+  }
+});
+test('an invalid restore callback (bad state) also falls back to Google once for a Google intent',async()=>{
+  const sv=new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,provider:'google',created:NOW})]]);
+  const e=env({hash:'#code='+token+'&state=wrong',saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;
+  assert.ok(e.context.location.assigned.startsWith('https://otpanda-api.abrahammurciano.workers.dev/auth/google/start?'));
+  assert.equal(e.calls,0);
+});

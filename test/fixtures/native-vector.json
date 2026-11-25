@@ -1,0 +1,24 @@
+{
+ "description": "Authoritative cross-language vector for otpanda-native-v1. message_utf8 is the exact string; sign its UTF-8 bytes with ECDSA P-256 SHA-256. signature_raw is r||s 64 bytes base64url (what the server takes); signature_der is the same signature as ASN.1 DER hex (what Android Keystore emits) for converter tests.",
+ "public_key": "BEjSe2RpDU7wFMHs-TVduNR89SmJPYj6MNL2W1HFIJJGBIiPUhUwt4iPln0_dpGsFJ9uyHHc_oOv3Fj1E7PsmSc",
+ "cases": {
+  "renew": {
+   "device_id": "AbCdEfGhIjKl",
+   "nonce": "otpda_NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+   "expires_at": 1800000060000,
+   "message_utf8": "otpanda-native-v1\nPOST /auth/native/renew\nAbCdEfGhIjKl\notpda_NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n1800000060000",
+   "message_hex": "6f7470616e64612d6e61746976652d76310a504f5354202f617574682f6e61746976652f72656e65770a4162436445664768496a4b6c0a6f747064615f4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e0a31383030303030303630303030",
+   "signature_raw": "w_1PK__D0NjiCqMaV-PQLSP7svxtTVBLdLBykYIOtbuuqCrKKJwg7XHYZQyT9l3q5L_LkimnudGsbz89gj6UZA",
+   "signature_der_hex": "3046022100c3fd4f2bffc3d0d8e20aa31a57e3d02d23fbb2fc6d4d504b74b07291820eb5bb022100aea82aca289c20ed71d8650c93f65deae4bfcb9229a7b9d1ac6f3f3d823e9464"
+  },
+  "logout": {
+   "device_id": "AbCdEfGhIjKl",
+   "nonce": "otpda_NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+   "expires_at": 1800000060000,
+   "message_utf8": "otpanda-native-v1\nPOST /auth/native/logout\nAbCdEfGhIjKl\notpda_NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n1800000060000",
+   "message_hex": "6f7470616e64612d6e61746976652d76310a504f5354202f617574682f6e61746976652f6c6f676f75740a4162436445664768496a4b6c0a6f747064615f4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e0a31383030303030303630303030",
+   "signature_raw": "oD08x3EXrJKjPJ39y4v1flcKW2434AlBUmmex4QZA2s155roEx34BgreD8PC7lHW_99ScR09wDU1k-Rmlnhmtw",
+   "signature_der_hex": "3045022100a03d3cc77117ac92a33c9dfdcb8bf57e570a5b6e37e0094152699ec78419036b022035e79ae8131df8060ade0fc3c2ee51d6ffdf52711d3dc0353593e466967866b7"
+  }
+ }
+}

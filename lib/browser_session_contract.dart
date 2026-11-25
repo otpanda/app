@@ -70,6 +70,13 @@ abstract interface class TotpManagementBridge {
   Future<SessionResponse> totpCode(String entryId);
 }
 
+/// Optional: a bridge whose client can only sometimes create TOTP entries
+/// (for example no passkey provider on this device). Shells hide the add
+/// action instead of showing a dead button. Absent means always available.
+abstract interface class TotpCreationCapability {
+  bool get canAddTotp;
+}
+
 /// Owned-entry edits. A separate capability: a bridge without it shows no edit
 /// controls. Implementations throw when the change is not confirmed. They
 /// never retry on their own, because the server may have already committed it.

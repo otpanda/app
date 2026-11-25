@@ -67,11 +67,17 @@ jobs:
           cache: true
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
-      - run: flutter build apk --debug --target-platform android-arm64
+      - run: flutter build apk --debug --flavor google --target-platform android-arm64 --dart-define=NATIVE_SIGNIN=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
+      - run: flutter build apk --debug --flavor fdroid --target-platform android-arm64 --dart-define=NATIVE_SIGNIN=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
+      - name: Verify merged Android backup declarations
+        run: |
+          mapfile -t manifests < <(find build/app/intermediates/merged_manifests -name AndroidManifest.xml -type f)
+          test "${#manifests[@]}" -ge 2
+          python3 tool/check-android-backup.py "${manifests[@]}" --res android/app/src/main/res
       - uses: actions/upload-artifact@v4
         with:
           name: development-only-android-arm64-debug
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: build/app/outputs/flutter-apk/app-*-debug.apk
           retention-days: 7
   android-release-signing:
     # Exercises the release signing patch with a throwaway key. No secrets are used,
@@ -104,8 +110,13 @@ jobs:
           RELEASE_STORE_FILE="$RUNNER_TEMP/throwaway.jks" RELEASE_STORE_PASSWORD=throwaway-pass \
           RELEASE_KEY_ALIAS=throwaway RELEASE_KEY_PASSWORD=throwaway-pass \
             python3 .github/scripts/android-release-signing.py
-          flutter build apk --release --target-platform android-arm64
-          bash .github/scripts/verify-apk-signature.sh build/app/outputs/flutter-apk/app-release.apk
+          for flavor in google fdroid; do
+            flutter build apk --release --flavor "$flavor" --target-platform android-arm64 --dart-define=NATIVE_SIGNIN=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
+            bash .github/scripts/verify-apk-signature.sh "build/app/outputs/flutter-apk/app-$flavor-release.apk"
+          done
+          mapfile -t manifests < <(find build/app/intermediates/merged_manifests -name AndroidManifest.xml -type f)
+          test "${#manifests[@]}" -ge 2
+          python3 tool/check-android-backup.py "${manifests[@]}" --res android/app/src/main/res
   deploy-preview:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [web, android-debug]
@@ -123,3 +134,28 @@ jobs:
       - name: Deploy fictional-data app preview
         id: deployment
         uses: actions/deploy-pages@v4
+
+  persistent-signing-certificate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/native-ready-current'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify public persistent release certificate
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          trap 'rm -f "$RUNNER_TEMP/release.jks"' EXIT
+          keytool -exportcert -keystore "$RUNNER_TEMP/release.jks" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" -file "$RUNNER_TEMP/release-cert.der"
+          openssl x509 -inform DER -in "$RUNNER_TEMP/release-cert.der" -noout -fingerprint -sha1
+          openssl x509 -inform DER -in "$RUNNER_TEMP/release-cert.der" -noout -fingerprint -sha256
+          actual=$(openssl x509 -inform DER -in "$RUNNER_TEMP/release-cert.der" -noout -fingerprint -sha256 | cut -d= -f2)
+          test "$actual" = '05:C6:2F:2D:61:FB:DC:15:0F:DD:DA:58:E7:FB:C8:36:65:0A:65:74:3A:B5:3F:13:93:AE:08:D5:5C:A8:59:99'

@@ -14,7 +14,8 @@ import 'access_preview.dart';
 import 'browser_account_page.dart';
 import 'browser_session_contract.dart';
 import 'fictional_totp_dialog.dart';
-import 'native_browser_fallback.dart';
+import 'native/native_root_stub.dart'
+    if (dart.library.io) 'native/native_root_io.dart';
 import 'public_service_catalog.dart';
 
 const ink = Color(0xff12281f), green = Color(0xff0a7955);
@@ -62,7 +63,7 @@ void _registerFontLicenses() {
 
 void main() {
   _registerFontLicenses();
-  runApp(kIsWeb ? const OTPandaApp() : const NativeBrowserFallbackApp());
+  runApp(kIsWeb ? const OTPandaApp() : buildNativeRoot());
 }
 
 ThemeData otpandaTheme() => ThemeData(

@@ -400,6 +400,7 @@ Path('web/manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 Path('web/session-bootstrap.js').write_text(Path('tool/session-bootstrap.js').read_text())
 Path('web/realtime-client.js').write_text(Path('tool/realtime-client.js').read_text())
 Path('web/recovery-bridge.js').write_text(Path('tool/recovery-bridge.js').read_text())
+Path('web/native-launch-intent.js').write_text(Path('tool/native-launch-intent.js').read_text())
 Path('web/index.html').write_text(f'''<!DOCTYPE html>
 <html lang="en"><head>
 <base href="$FLUTTER_BASE_HREF">
@@ -431,7 +432,7 @@ Path('web/index.html').write_text(f'''<!DOCTYPE html>
 <meta name="twitter:description" content="{description}">
 <meta name="twitter:image" content="https://otpanda.github.io/app/social-preview.png">
 <meta name="twitter:image:alt" content="Otty the panda beside OTPanda. Development preview.">
-</head><body><script src="recovery-bridge.js"></script><script src="realtime-client.js"></script><script src="assignment-host.js"></script><script src="session-bootstrap.js"></script><script src="flutter_bootstrap.js" async></script></body></html>
+</head><body><script src="recovery-bridge.js"></script><script src="realtime-client.js"></script><script src="native-launch-intent.js"></script><script src="assignment-host.js"></script><script src="session-bootstrap.js"></script><script src="flutter_bootstrap.js" async></script></body></html>
 ''')
 p=Path('android/app/src/main/AndroidManifest.xml');s=p.read_text().replace('android:label="otpanda_client"','android:label="OTPanda" android:description="@string/app_description"');p.write_text(s)
 write('android/app/src/main/res/values/otpanda.xml',b'<resources><string name="app_description">OTPanda development preview. Real sign-in and sources are not connected yet.</string><color name="launcher_background">#10B981</color></resources>')

@@ -181,7 +181,7 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
                 'not-assigned' => 'Server confirmed this assignment did not happen. Close to choose an entry and start a new confirmation.',
                 'pending' => 'Assignment is still pending. No new assignment has been sent.',
                 'unknown' => 'Could not confirm the outcome. It may have happened. Check status or sign in again and review the entry before trying a new assignment.',
-                'cancelled' => 'Passkey cancelled. No assignment was sent.',
+                'cancelled' => 'Authentication cancelled. No assignment was sent.',
                 'expired' => 'Confirmation expired. Close and start again.',
                 'idle' => 'Session changed. Sign in and review the entry. A request already sent may still have completed.',
                 _ => 'This action can\'t be completed here right now. No confirmation was requested. Check your connection and try again.',
