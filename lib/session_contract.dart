@@ -166,6 +166,23 @@ class CodeStore {
     _codes.where((code) => !sessionExpired(now) && code.active(now)),
   );
 
+  /// Applies a server-confirmed rename or account change to the loaded list.
+  /// Unknown ids change nothing. The next full read replaces the whole list.
+  void replaceEntry(String id, {String? service, String? account}) {
+    _entries = [
+      for (final e in _entries)
+        e.id == id
+            ? ManagedEntry(
+                e.id,
+                service ?? e.service,
+                account ?? e.account,
+                e.manage,
+                e.totp,
+              )
+            : e,
+    ];
+  }
+
   void clear() {
     _generation++;
     _sessionExpiresAt = null;

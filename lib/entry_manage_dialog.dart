@@ -8,10 +8,16 @@ import 'session_contract.dart';
 class EntryManageDialog extends StatefulWidget {
   final EntryManagementBridge bridge;
   final ManagedEntry entry;
+
+  /// Called as soon as the server confirms the new label or account name, so
+  /// the list can show it without waiting for a reload. Not called when the
+  /// outcome is unknown.
+  final void Function({String? service, String? account})? onConfirmed;
   const EntryManageDialog({
     super.key,
     required this.bridge,
     required this.entry,
+    this.onConfirmed,
   });
   @override
   State<EntryManageDialog> createState() => _EntryManageDialogState();
@@ -62,6 +68,7 @@ class _EntryManageDialogState extends State<EntryManageDialog> {
     final label = name.text.trim();
     if (label != widget.entry.service) {
       await widget.bridge.renameEntry(widget.entry.id, label);
+      widget.onConfirmed?.call(service: label);
     }
     final acc = account.text.trim();
     if (acc != widget.entry.account) {
@@ -69,6 +76,7 @@ class _EntryManageDialogState extends State<EntryManageDialog> {
         widget.entry.id,
         acc.isEmpty ? null : acc,
       );
+      widget.onConfirmed?.call(account: acc);
     }
   }, close: true);
 
