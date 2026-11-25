@@ -10,14 +10,16 @@ abstract interface class SessionTransport {
 class SessionResponse {
   final int status;
   final String body;
-  const SessionResponse(this.status, this.body);
+  final int? retryAfterSeconds;
+  const SessionResponse(this.status, this.body, {this.retryAfterSeconds});
   @override
   String toString() => 'SessionResponse($status, redacted)';
 }
 
 class ClientFailure implements Exception {
   final int? status;
-  const ClientFailure([this.status]);
+  final int? retryAfterSeconds;
+  const ClientFailure([this.status, this.retryAfterSeconds]);
   bool get signedOut => status == 401;
   @override
   String toString() => signedOut
@@ -175,7 +177,9 @@ class CodeStore {
 
   Future<Map<String, dynamic>> _get(String path) async {
     final response = await transport.getManagement(path);
-    if (response.status != 200) throw ClientFailure(response.status);
+    if (response.status != 200) {
+      throw ClientFailure(response.status, response.retryAfterSeconds);
+    }
     if (utf8.encode(response.body).length > 512 * 1024) {
       throw const FormatException('Response too large');
     }

@@ -10,7 +10,7 @@
   const DEFAULTS = Object.freeze({
     hiddenPauseMs: 60000, coalesceGapMs: 1000, backoffBaseMs: 1000, backoffMaxMs: 60000,
     stableOpenMs: 30000, replaceBackoffMs: 60000, replaceCap: 3, replaceWindowMs: 600000,
-    degradedMs: 300000, unknownFailureCap: 3, ticketTimeoutMs: 15000, retryAfterCapMs: 300000,
+    degradedMs: 60000, lostAfterMs: 120000, slowRetryMs: 120000, unknownFailureCap: 3, ticketTimeoutMs: 15000, retryAfterCapMs: 300000,
     openTimeoutMs: 15000, ticketBodyMax: 2048, waitingBaseMs: 1000, waitingMaxMs: 15000, fastReconnectMs: 1000,
   });
   function create(options) {
@@ -28,10 +28,34 @@
     // onChanged(reason) re-reads data and may return a promise. onUnauthorized() runs the normal
     // renew/restore path. epoch() changes on sign-out so late results are dropped.
     const getAccess = o.getAccess, onChanged = o.onChanged || (() => {}), onUnauthorized = o.onUnauthorized || (async () => {});
-    const epochOf = o.epoch || (() => 0), onState = o.onState || (() => {});
+    const epochOf = o.epoch || (() => 0), onState = o.onState || (() => {}), onConnection = o.onConnection || (() => {});
     let state = 'stopped', running = false, ws, myEpoch = 0, runId = 0;
     let timer, hiddenTimer, openedAt = 0, failures = 0, unknownFailures = 0, auth401 = 0, replaced = [];
     let ticketAbort, openTimer, waits = 0, refreshing = false, trailing = false, lastRefreshAt = -Infinity, gapTimer;
+    // User-facing connection summary, separate from the transport state. 'ok' shows nothing; 'lost' means recovery has failed persistently
+    // (or can never succeed on this page load); 'ended' means the session ended (ticket 401 twice) and the session flow owns it.
+    let conn = Object.freeze({ status: 'ok', reason: undefined, retrying: true, since: now() }), failSince, lostTimer, stableTimer, signedIn = false;
+    const setConn = (status, reason, retrying) => {
+      if (conn.status === status && conn.reason === reason && conn.retrying === retrying) return;
+      const changed = conn.status !== status || conn.reason !== reason;
+      conn = Object.freeze({ status, reason, retrying, since: changed ? now() : conn.since });
+      if (changed) { try { onConnection(conn); } catch {} }
+    };
+    const clearLost = () => { if (lostTimer !== undefined) { clearT(lostTimer); lostTimer = undefined; } };
+    // Stop counting failure time (hidden, offline, signed out, stopped). Does not clear an already raised 'lost'.
+    const resetClock = () => { failSince = undefined; clearLost(); if (stableTimer !== undefined) { clearT(stableTimer); stableTimer = undefined; } };
+    const raiseLost = (reason, retrying = true) => { clearLost(); if (conn.status === 'ended') return; setConn('lost', reason, retrying); };
+    // Only visible, online, signed-in failure time counts: callers reach this from real failed attempts, and pause/hidden/waiting reset the clock.
+    const markFailure = reason => {
+      // The clock only starts or advances for visible, online, signed-in failures. A late failure from an attempt that began before the tab
+      // was hidden, went offline or signed out must not count.
+      if (!running || !signedIn || !visible() || !online()) return;
+      if (stableTimer !== undefined) { clearT(stableTimer); stableTimer = undefined; }
+      if (failSince === undefined) failSince = now();
+      if (conn.status === 'lost') return;
+      if (now() - failSince >= cfg.lostAfterMs) return raiseLost(reason || 'unreachable');
+      if (lostTimer === undefined) lostTimer = setT(() => { lostTimer = undefined; if (running && failSince !== undefined && visible() && online()) raiseLost(reason || 'unreachable'); }, Math.max(0, failSince + cfg.lostAfterMs - now()));
+    };
     const set = s => { if (state !== s) { state = s; try { onState(s); } catch {} } };
     const visible = () => !doc || doc.visibilityState !== 'hidden';
     const online = () => !win || win.navigator?.onLine !== false;
@@ -64,10 +88,14 @@
       });
     };
     const degrade = () => {
-      closeSocket(); set('degraded'); unknownFailures = 0; schedule(cfg.degradedMs, 'degraded');
+      closeSocket(); set('degraded'); unknownFailures = 0; markFailure('unreachable'); schedule(cfg.degradedMs, 'degraded');
+    };
+    const slowLost = (reason, floorMs) => {
+      closeSocket(); resetClock(); failures++; set('degraded'); raiseLost(reason, true);
+      schedule(Math.min(cfg.retryAfterCapMs, Math.max(floorMs, cfg.slowRetryMs / 2 + rand() * cfg.slowRetryMs / 2)), 'slow');
     };
     const backoff = (extraMs = 0) => {
-      failures++; set('backoff');
+      failures++; set('backoff'); markFailure('unreachable');
       schedule(Math.max(extraMs ? extraMs + rand() * 1000 : 0, jitterBackoff(failures - 1)), 'backoff');
     };
     // Bound bytes as they arrive; a streamed oversize or advertised-oversize body is refused and cancelled.
@@ -93,11 +121,11 @@
       if (stale(id)) return;
       if (!token) {
         // Transient: not restored yet, or signed out with listeners kept. Local check only, no network. Retry with backoff.
-        waits++; set('waiting');
+        waits++; signedIn = false; resetClock(); if (conn.status !== 'ended') setConn('ok', undefined, true); set('waiting');
         const step = Math.min(cfg.waitingMaxMs, cfg.waitingBaseMs * 2 ** Math.min(waits - 1, 16));
         schedule(step / 2 + rand() * step / 2, 'waiting'); return;
       }
-      waits = 0;
+      waits = 0; signedIn = true;
       let res, body;
       const abort = typeof AbortController === 'function' ? new AbortController() : undefined;
       ticketAbort = abort;
@@ -116,16 +144,20 @@
         if (res.status === 401) {
           // Never retry a ticket on 401. One renew through the normal path; a second 401 ends this run.
           auth401++;
-          if (auth401 > 1) { running = false; set('stopped'); return; }
+          if (auth401 > 1) { running = false; signedIn = false; resetClock(); setConn('ended', 'auth', false); set('stopped'); return; }
           try { await onUnauthorized(); } catch {}
           if (stale(id)) return;
           return backoff();
         }
-        if (res.status === 404) { running = false; set('inactive'); return; }
+        // 404 means realtime is off server-side, 400/403/405 are client-contract errors. Neither is proven permanent for the page's life (a deploy can
+        // fix it), so: lost at once, then slow capped jittered retries. Retry-After is a floor.
+        if (res.status === 404) return slowLost('unavailable', retryAfterMs(res));
+        // Other 5xx and 408 are transient server failures: bounded backoff, never a permanent stop.
+        if (res.status >= 500 && res.status !== 503 || res.status === 408) return backoff();
         if (res.status === 429 || res.status === 503) return backoff(retryAfterMs(res) || (res.status === 429 ? 30000 : 0));
         if (res.status !== 200) {
           // 400, 403, 405 are client bugs: do not hammer.
-          running = false; set('stopped'); return;
+          return slowLost('rejected', retryAfterMs(res));
         }
         try { body = JSON.parse(await boundedText(res, cfg.ticketBodyMax, deadline)); } catch { if (stale(id)) return; return backoff(); }
       } finally { if (tt !== undefined) clearT(tt); if (ticketAbort === abort) ticketAbort = undefined; }
@@ -139,7 +171,7 @@
       sock.onopen = () => {
         if (stale(id) || ws !== sock) { try { sock.close(1000, ''); } catch {} return; }
         if (sock.protocol !== SUBPROTOCOL) { closeSocket(1008); return backoff(); }
-        opened = true; if (openTimer !== undefined) { clearT(openTimer); openTimer = undefined; } openedAt = now(); unknownFailures = 0; set('open');
+        opened = true; if (openTimer !== undefined) { clearT(openTimer); openTimer = undefined; } openedAt = now(); unknownFailures = 0; clearLost(); setConn('ok', undefined, true); if (stableTimer !== undefined) clearT(stableTimer); stableTimer = setT(() => { stableTimer = undefined; failSince = undefined; }, cfg.stableOpenMs); set('open');
         requestRefresh('connect');
       };
       sock.onmessage = ev => {
@@ -169,15 +201,15 @@
         }
         if (code === CLOSE_REPLACED) {
           const t = now(); replaced = replaced.filter(x => t - x < cfg.replaceWindowMs); replaced.push(t);
-          if (replaced.length >= cfg.replaceCap) { replaced = []; return degrade(); }
+          if (replaced.length >= cfg.replaceCap) { replaced = []; degrade(); raiseLost('replaced'); return; }
           set('backoff'); schedule(cfg.replaceBackoffMs + rand() * 1000, 'replaced'); return;
         }
-        if (code === 1008) { running = false; set('stopped'); return; }
+        if (code === 1008) return slowLost('rejected', 0);
         backoff();
       };
     }
     const pause = () => {
-      if (!running) return; clearTimer(); runId++; closeSocket(1000); set('paused');
+      if (!running) return; clearTimer(); resetClock(); runId++; closeSocket(1000); set('paused');
     };
     const resume = (reset = false) => {
       if (!running || !visible() || !online()) return;
@@ -189,6 +221,7 @@
     const onVisibility = () => {
       if (!doc) return;
       if (doc.visibilityState === 'hidden') {
+        resetClock();
         if (hiddenTimer === undefined) hiddenTimer = setT(() => { hiddenTimer = undefined; if (!visible()) pause(); }, cfg.hiddenPauseMs);
       } else {
         if (hiddenTimer !== undefined) { clearT(hiddenTimer); hiddenTimer = undefined; }
@@ -197,21 +230,22 @@
     };
     const onOffline = () => { if (running) pause(); };
     const onOnline = () => { if (state === 'paused') resume(true); else if (running && state === 'backoff') resume(true); };
-    const onPageShow = e => { if (e?.persisted && running) { runId++; clearTimer(); closeSocket(1000); set('paused'); resume(true); } };
+    const onPageShow = e => { if (e?.persisted && running) { runId++; clearTimer(); resetClock(); closeSocket(1000); set('paused'); resume(true); } };
     doc?.addEventListener?.('visibilitychange', onVisibility);
     win?.addEventListener?.('offline', onOffline);
     win?.addEventListener?.('online', onOnline);
     win?.addEventListener?.('pageshow', onPageShow);
     return Object.freeze({
-      start() { if (running) return; running = true; failures = 0; unknownFailures = 0; auth401 = 0; replaced = []; connect(); },
+      start() { if (running) return; running = true; resetClock(); setConn('ok', undefined, true); failures = 0; unknownFailures = 0; auth401 = 0; replaced = []; connect(); },
       // Sign-out, clear or disposal: close, cancel every timer, drop late results.
-      stop() { running = false; runId++; clearTimer(); if (hiddenTimer !== undefined) { clearT(hiddenTimer); hiddenTimer = undefined; } if (gapTimer !== undefined) { clearT(gapTimer); gapTimer = undefined; } trailing = false; closeSocket(1000); set('stopped'); },
+      stop() { running = false; signedIn = false; runId++; clearTimer(); resetClock(); if (conn.status !== 'ended') setConn('ok', undefined, true); if (hiddenTimer !== undefined) { clearT(hiddenTimer); hiddenTimer = undefined; } if (gapTimer !== undefined) { clearT(gapTimer); gapTimer = undefined; } trailing = false; closeSocket(1000); set('stopped'); },
       // Sign-out with listeners kept: close and drop late work, but keep the intent to run so a later restore
       // reconnects. Only a local access check runs while waiting (no network).
-      suspend() { if (!running) return; runId++; clearTimer(); if (gapTimer !== undefined) { clearT(gapTimer); gapTimer = undefined; } trailing = false; refreshing = false; closeSocket(1000); failures = 0; unknownFailures = 0; auth401 = 0; waits = 0; set('waiting'); schedule(cfg.waitingBaseMs / 2 + rand() * cfg.waitingBaseMs / 2, 'waiting'); },
+      suspend() { if (!running) return; signedIn = false; runId++; clearTimer(); resetClock(); setConn('ok', undefined, true); if (gapTimer !== undefined) { clearT(gapTimer); gapTimer = undefined; } trailing = false; refreshing = false; closeSocket(1000); failures = 0; unknownFailures = 0; auth401 = 0; waits = 0; set('waiting'); schedule(cfg.waitingBaseMs / 2 + rand() * cfg.waitingBaseMs / 2, 'waiting'); },
       // Sign-in or restore completed: leave the waiting state now instead of at the next backoff step.
       nudge() { if (running && state === 'waiting') { clearTimer(); waits = 0; connect(); } },
       state: () => state,
+      connection: () => conn,
       dispose() { this.stop(); doc?.removeEventListener?.('visibilitychange', onVisibility); win?.removeEventListener?.('offline', onOffline); win?.removeEventListener?.('online', onOnline); win?.removeEventListener?.('pageshow', onPageShow); },
     });
   }

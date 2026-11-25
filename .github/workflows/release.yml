@@ -51,9 +51,11 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           flutter build web --base-href /app/ --no-wasm-dry-run --build-name "${version%%-*}" --build-number "$GITHUB_RUN_NUMBER"
+          python3 tool/check_generated_web.py
           mkdir -p dist
           (cd build/web && zip -qr "../../dist/otpanda-web-${GITHUB_REF_NAME}.zip" .)
           flutter build web --csp --no-web-resources-cdn --base-href / --no-wasm-dry-run --build-name "${version%%-*}" --build-number "$GITHUB_RUN_NUMBER"
+          python3 tool/check_generated_web.py
           node tool/extension/package.mjs
           (cd build/extension-preview && zip -qr "../../dist/otpanda-extension-${GITHUB_REF_NAME}.zip" .)
       - uses: actions/upload-artifact@v4

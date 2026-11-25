@@ -28,7 +28,11 @@ class ReadWorkspaceController extends ChangeNotifier {
   String message = '';
   bool rateLimited = false, sessionEnded = false, hasLoaded = false;
   int publishedRevision = 0;
-  int _epoch = 0, _nextRefreshAt = 0, _nextAutomaticAt = 0;
+  bool _transportLost = false, _readLost = false;
+  bool get connectionLost => _transportLost || _readLost;
+  int _readFailures = 0;
+  Timer? _readRetryTimer, _readLossTimer;
+  int _epoch = 0, _nextRefreshAt = 0;
   void Function()? _unsubscribeRealtime;
   Timer? _hintTimer;
   bool _hintPending = false;
@@ -44,7 +48,7 @@ class ReadWorkspaceController extends ChangeNotifier {
 
   /// Subscribes to content-free realtime hints while signed in and visible.
   /// Idempotent. A hint only asks for the ordinary refresh, so every existing
-  /// rule (15 s gate, epoch guard, 401 handling) still applies.
+  /// rule (refresh gate, epoch guard, 401 handling) still applies.
   void _ensureRealtime() {
     if (_unsubscribeRealtime != null || _disposed || suspended || !signedIn) {
       return;
@@ -56,6 +60,7 @@ class ReadWorkspaceController extends ChangeNotifier {
   }
 
   void _stopRealtime() {
+    _transportLost = false;
     final stop = _unsubscribeRealtime;
     _unsubscribeRealtime = null;
     _hintTimer?.cancel();
@@ -66,6 +71,12 @@ class ReadWorkspaceController extends ChangeNotifier {
 
   void _onHint(String reason) {
     if (_disposed || suspended || !signedIn) return;
+    if (reason == 'connection-lost' || reason == 'connection-restored') {
+      _transportLost = reason == 'connection-lost';
+      _notify();
+      return;
+    }
+    if (reason != 'connect' && reason != 'changed') return;
     _hintPending = true;
     _drainHint();
   }
@@ -91,15 +102,56 @@ class ReadWorkspaceController extends ChangeNotifier {
     }
   }
 
+  void _cancelReadRetry({bool reset = true}) {
+    _readRetryTimer?.cancel();
+    _readRetryTimer = null;
+    _readLossTimer?.cancel();
+    _readLossTimer = null;
+    if (reset) {
+      _readFailures = 0;
+      _readLost = false;
+    }
+  }
+
+  void _retryFailedRead([int? retryAfterSeconds]) {
+    if (_disposed || suspended || !signedIn) return;
+    _readFailures++;
+    final delay = (15000 * (1 << (_readFailures - 1).clamp(0, 2))).clamp(
+      15000,
+      60000,
+    );
+    final headerDelay = retryAfterSeconds == null
+        ? 0
+        : retryAfterSeconds.clamp(0, 300) * 1000;
+    final next = clock() + (headerDelay > delay ? headerDelay : delay);
+    if (_nextRefreshAt < next) _nextRefreshAt = next;
+    _readLossTimer ??= Timer(const Duration(seconds: 120), () {
+      _readLossTimer = null;
+      if (_disposed || suspended || !signedIn || _readFailures == 0) return;
+      _readLost = true;
+      _notify();
+    });
+    _readRetryTimer?.cancel();
+    _readRetryTimer = Timer(
+      Duration(milliseconds: (_nextRefreshAt - clock()).clamp(0, 2147483647)),
+      () {
+        _readRetryTimer = null;
+        if (_disposed || suspended || !signedIn) return;
+        refresh();
+      },
+    );
+  }
+
   void _notify() {
     if (!_disposed) notifyListeners();
   }
 
   Future<void> refresh() async {
     if (!canRefresh || _disposed) return;
+    _readRetryTimer?.cancel();
+    _readRetryTimer = null;
     final epoch = ++_epoch;
     _nextRefreshAt = clock() + 15000;
-    _nextAutomaticAt = clock() + 30000;
     loading = true;
     message = '';
     rateLimited = false;
@@ -122,6 +174,7 @@ class ReadWorkspaceController extends ChangeNotifier {
         store = staged;
         publishedRevision++;
         hasLoaded = true;
+        _cancelReadRetry();
       }
     } on ClientFailure catch (error) {
       if (_disposed || epoch != _epoch) return;
@@ -130,15 +183,18 @@ class ReadWorkspaceController extends ChangeNotifier {
         hasLoaded = false;
         sessionEnded = true;
         _stopRealtime();
+        _cancelReadRetry();
         bridge.clear();
       }
       rateLimited = error.status == 429;
       if (rateLimited) _nextRefreshAt = clock() + 60000;
       message = error.toString();
+      if (!error.signedOut) _retryFailedRead(error.retryAfterSeconds);
     } catch (_) {
       if (_disposed || epoch != _epoch) return;
       message =
           'Waiting for your connection. Updates will retry automatically.';
+      _retryFailedRead();
     } finally {
       if (!_disposed && epoch == _epoch) {
         loading = false;
@@ -170,9 +226,6 @@ class ReadWorkspaceController extends ChangeNotifier {
       message = 'Your session ended. Sign in again.';
     }
     _ensureRealtime();
-    if (canRefresh && (!hasLoaded || clock() >= _nextAutomaticAt)) {
-      refresh();
-    }
     _notify();
   }
 
@@ -180,12 +233,15 @@ class ReadWorkspaceController extends ChangeNotifier {
     ++_epoch;
     loading = false;
     hasLoaded = false;
+    _transportLost = false;
+    _cancelReadRetry();
     store.clear();
     _notify();
   }
 
   void suspend({bool preserve = false}) {
     suspended = true;
+    _cancelReadRetry();
     _stopRealtime();
     if (preserve) {
       ++_epoch;
@@ -238,6 +294,7 @@ class ReadWorkspaceController extends ChangeNotifier {
   @override
   void dispose() {
     _stopRealtime();
+    _cancelReadRetry();
     _disposed = true;
     ++_epoch;
     store.clear();

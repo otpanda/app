@@ -454,12 +454,16 @@ class _ProductShellState extends State<ProductShell> {
           ],
           body(),
           const SizedBox(height: 20),
-          Text(
-            widget.controller.message.isNotEmpty
-                ? 'Connection interrupted. Updates will retry automatically.'
-                : 'Updates arrive automatically.',
-            style: TextStyle(fontSize: 12, color: muted),
-          ),
+          if (widget.controller.connectionLost) ...[
+            const Text('Connection to the server was lost. Reload the page.'),
+            if (widget.pageReload != null)
+              TextButton.icon(
+                key: const Key('connection-reload'),
+                onPressed: () => widget.pageReload!.call(),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Reload'),
+              ),
+          ],
           if (widget.controller.bridge is TotpManagementBridge)
             const SizedBox(height: 80),
         ],

@@ -88,6 +88,7 @@ extension type _Session(JSObject _) implements JSObject {
 }
 
 extension type _ReadResponse(JSObject _) implements JSObject {
+  external JSNumber? get retryAfterSeconds;
   external JSNumber get status;
   external JSString get body;
 }
@@ -355,6 +356,10 @@ class _Browser
   @override
   Future<SessionResponse> read(String path) async {
     final response = await _session.read(path.toJS).toDart;
-    return SessionResponse(response.status.toDartInt, response.body.toDart);
+    return SessionResponse(
+      response.status.toDartInt,
+      response.body.toDart,
+      retryAfterSeconds: response.retryAfterSeconds?.toDartInt,
+    );
   }
-        }
+}

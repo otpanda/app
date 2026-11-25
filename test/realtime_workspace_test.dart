@@ -85,6 +85,153 @@ Future<void> settle() async {
 }
 
 void main() {
+  testWidgets('transport loss clears across preserved settings lifecycle', (
+    tester,
+  ) async {
+    final b = Bridge();
+    final c = ReadWorkspaceController(bridge: b, clock: () => 100);
+    c.resume();
+    b.hint('connection-lost');
+    expect(c.connectionLost, true);
+    c.suspend(preserve: true);
+    c.resume();
+    expect(c.connectionLost, false);
+    c.dispose();
+  });
+  testWidgets('huge read Retry-After is capped at 300 seconds', (tester) async {
+    var now = 100;
+    final b = Bridge()
+      ..handler = (_) async =>
+          const SessionResponse(429, '{}', retryAfterSeconds: 999999999);
+    final c = ReadWorkspaceController(bridge: b, clock: () => now);
+    await c.refresh();
+    now += 299000;
+    await tester.pump(const Duration(seconds: 299));
+    expect(b.paths.length, 1);
+    b.handler = null;
+    now += 1000;
+    await tester.pump(const Duration(seconds: 1));
+    expect(c.hasLoaded, true);
+    c.dispose();
+  });
+  testWidgets(
+    'failed read retries once without hints and stops after success',
+    (tester) async {
+      var now = 100;
+      final b = Bridge();
+      b.handler = (_) async => const SessionResponse(503, '{}');
+      final c = ReadWorkspaceController(bridge: b, clock: () => now);
+      c.resume();
+      await c.refresh();
+      expect(b.paths.length, 1);
+      b.handler = null;
+      now += 15000;
+      await tester.pump(const Duration(seconds: 15));
+      expect(c.hasLoaded, true);
+      expect(b.paths.length, 6);
+      now += 180000;
+      await tester.pump(const Duration(seconds: 180));
+      expect(b.paths.length, 6);
+      expect(c.connectionLost, false);
+      c.dispose();
+    },
+  );
+  testWidgets('429 retry honors server delay beyond the existing floor', (
+    tester,
+  ) async {
+    var now = 100;
+    final b = Bridge()
+      ..handler = (_) async =>
+          const SessionResponse(429, '{}', retryAfterSeconds: 90);
+    final c = ReadWorkspaceController(bridge: b, clock: () => now);
+    await c.refresh();
+    now += 60000;
+    await tester.pump(const Duration(seconds: 60));
+    expect(b.paths.length, 1);
+    b.handler = null;
+    now += 30000;
+    await tester.pump(const Duration(seconds: 30));
+    expect(c.hasLoaded, true);
+    c.dispose();
+  });
+  testWidgets(
+    'persistent read loss survives transport restore; clear cancels retries',
+    (tester) async {
+      var now = 100;
+      final b = Bridge()
+        ..handler = (_) async => const SessionResponse(503, '{}');
+      final c = ReadWorkspaceController(bridge: b, clock: () => now);
+      c.resume();
+      await c.refresh();
+      for (var i = 0; i < 8; i++) {
+        now += 15000;
+        await tester.pump(const Duration(seconds: 15));
+      }
+      expect(c.connectionLost, true);
+      b.hint('connection-restored');
+      expect(c.connectionLost, true);
+      final count = b.paths.length;
+      c.clear();
+      now += 180000;
+      await tester.pump(const Duration(seconds: 180));
+      expect(b.paths.length, count);
+      expect(c.connectionLost, false);
+      c.dispose();
+    },
+  );
+  testWidgets('suspend and dispose cancel failure retry and warning timers', (
+    tester,
+  ) async {
+    for (final dispose in [false, true]) {
+      var now = 100;
+      final b = Bridge()
+        ..handler = (_) async => const SessionResponse(503, '{}');
+      final c = ReadWorkspaceController(bridge: b, clock: () => now);
+      await c.refresh();
+      if (dispose) {
+        c.dispose();
+      } else {
+        c.suspend(preserve: true);
+      }
+      now += 180000;
+      await tester.pump(const Duration(seconds: 180));
+      expect(b.paths.length, 1);
+      if (!dispose) c.dispose();
+    }
+  });
+
+  test(
+    'clock ticks never poll and state-only or unknown reasons never fetch',
+    () async {
+      var now = 100;
+      final b = Bridge();
+      final c = ReadWorkspaceController(bridge: b, clock: () => now);
+      c.resume();
+      await c.refresh();
+      expect(b.paths.length, 5);
+      for (var i = 0; i < 200; i++) {
+        now += 1000;
+        c.tick();
+      }
+      await settle();
+      expect(b.paths.length, 5);
+      b.hint('connection-lost');
+      expect(c.connectionLost, true);
+      b.hint('unknown');
+      b.hint('connection-restored');
+      expect(c.connectionLost, false);
+      await settle();
+      expect(b.paths.length, 5);
+      b.hint('connect');
+      await settle();
+      expect(b.paths.length, 10);
+      b.hint('connection-lost');
+      c.resetSession();
+      expect(c.connectionLost, false);
+      c.dispose();
+    },
+  );
+
   TestWidgetsFlutterBinding.ensureInitialized();
   test('subscribes once while signed in, never when signed out', () {
     var now = 100;
@@ -145,7 +292,8 @@ void main() {
     final pending = Completer<SessionResponse>();
     b.handler = (_) => pending.future;
     final c = ReadWorkspaceController(bridge: b, clock: () => now);
-    c.tick();
+    c.resume();
+    unawaited(c.refresh());
     await settle();
     expect(c.loading, true);
     b.hint();
