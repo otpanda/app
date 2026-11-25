@@ -627,5 +627,5 @@ final Uint8List googleGImage = base64Decode(
   'u/fJmM9so2iKBhH/f3ijEvBSbFoaOsm/FGoK1T4qvPWJ2yY63d55elTvAunchVL+i6Sw50vX'
   'zxXyW2UAZ+uaUHpCCv0WxbqPWo0prQ2B1Z83tOllFa1FuYgFwWal/YdFf1jpQ7KSV2VPL4s3'
   'y6QX5bi+1213Xlxe7b906AN//ap4rR/0rb7dwAAAABVJREFUkwG3vZpW9PQZ7yXWF1JA/xfN'
-  'qYtndwDpNQAAAABJRU5ErkJggg=='
+  'qYtndwDpNQAAAABJRU5ErkJggg==',
 );
