@@ -186,7 +186,7 @@ void main() {
     final users = <String>[];
     for (final f in Directory('lib').listSync(recursive: true)) {
       if (f is! File || !f.path.endsWith('.dart')) continue;
-      final n = f.path.split('/').last;
+      final n = f.path.replaceAll('\\', '/').split('/').last;
       if (RegExp(r'\.catalogId\b').hasMatch(f.readAsStringSync())) users.add(n);
     }
     users.sort();
