@@ -123,6 +123,11 @@ class _EntryManageDialogState extends State<EntryManageDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (widget.entry.issuer != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text('Issuer: ${widget.entry.issuer}'),
+              ),
             TextField(
               key: const Key('entry-name'),
               controller: name,
@@ -135,7 +140,7 @@ class _EntryManageDialogState extends State<EntryManageDialog> {
                 maxLength,
               }) => null,
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(labelText: 'Service name'),
+              decoration: const InputDecoration(labelText: 'Display name'),
             ),
             TextField(
               key: const Key('entry-account'),

@@ -6,10 +6,11 @@
 class OtpauthImport {
   final String name;
   final String account;
+  final String? issuer;
 
   /// The full validated otpauth URI, including the secret. Never print it.
   final String uri;
-  const OtpauthImport(this.name, this.account, this.uri);
+  const OtpauthImport(this.name, this.account, this.uri, [this.issuer]);
   @override
   String toString() => 'OtpauthImport(redacted)';
 }
@@ -161,7 +162,7 @@ OtpauthImport parseOtpauth(String input) {
       ? accountName.substring(0, 120)
       : accountName;
   if (account == name) account = '';
-  return OtpauthImport(name, account, input);
+  return OtpauthImport(name, account, input, issuer);
 }
 
 /// Manual entry: an otpauth URI, or a bare Base32 setup key as services show

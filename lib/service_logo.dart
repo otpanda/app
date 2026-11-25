@@ -12,6 +12,9 @@ import 'service_directory.dart';
 class ServiceAvatar extends StatefulWidget {
   final String service;
 
+  /// Immutable scanned issuer, separate from the editable display name.
+  final String? issuer;
+
   /// Persisted identity, when the entry has one. Wins over the label.
   final String? serviceId, websiteHost;
   final Color color;
@@ -21,6 +24,7 @@ class ServiceAvatar extends StatefulWidget {
   const ServiceAvatar({
     super.key,
     required this.service,
+    this.issuer,
     this.serviceId,
     this.websiteHost,
     required this.color,
@@ -50,6 +54,7 @@ class _ServiceAvatarState extends State<ServiceAvatar> {
   void didUpdateWidget(ServiceAvatar old) {
     super.didUpdateWidget(old);
     if (old.service != widget.service ||
+        old.issuer != widget.issuer ||
         old.serviceId != widget.serviceId ||
         old.websiteHost != widget.websiteHost ||
         old.directory != widget.directory) {
@@ -75,7 +80,7 @@ class _ServiceAvatarState extends State<ServiceAvatar> {
         .resolve(
           serviceId: widget.serviceId,
           host: widget.websiteHost,
-          name: widget.service,
+          name: widget.issuer ?? widget.service,
         )
         ?.icon;
     if (icon == null || icon == _wanted) return;

@@ -123,7 +123,7 @@ void main() {
 
   testWidgets('no pick sends no catalogue identity', (t) async {
     final b = await _open(t);
-    await t.enterText(find.widgetWithText(TextField, 'Name'), 'Mine');
+    await t.enterText(find.widgetWithText(TextField, 'Display name'), 'Mine');
     await t.tap(find.text('Verify and add'));
     await t.pumpAndSettle();
     expect(b.adds.single, ['Mine', '', null]);

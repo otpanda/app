@@ -11,6 +11,7 @@ class AuthEntry extends StatefulWidget {
   final BrowserSessionBridge bridge;
   final String status, message;
   final bool busy;
+
   /// Native clients always remember the device, so they hide the checkbox.
   final bool showRemember;
   final VoidCallback? onLostAccess;

@@ -28,6 +28,40 @@ Map<String, Object> code(String id, {int received = 100, int expires = 200}) =>
       'expiresAt': expires,
     };
 void main() {
+  test(
+    'issuer stays distinct from display name and survives optimistic rename',
+    () async {
+      final row = {
+        ...entry('id'),
+        'label': 'Mozilla',
+        'issuer': 'Mozilla',
+        'service_id': 'custom-totp',
+      };
+      final store = CodeStore(
+        FakeTransport((path) async {
+          if (path.endsWith('/session')) {
+            return ok({'ownerId': 'owner', 'expiresAt': 9999999999999});
+          }
+          if (path.endsWith('/entries')) {
+            return ok({
+              'entries': [row],
+            });
+          }
+          if (path.endsWith('/active-codes')) return ok({'records': []});
+          if (path.endsWith('/sources')) return ok({'sources': []});
+          return ok({'codes': []});
+        }),
+      );
+      final original = ManagedEntry.fromJson(row);
+      expect(original.issuer, 'Mozilla');
+      expect(ManagedEntry.fromJson(entry('old')).issuer, isNull);
+      await store.load(() => 100);
+      store.replaceEntry('id', service: 'Mozilla Firefox');
+      expect(store.entries.single.service, 'Mozilla Firefox');
+      expect(store.entries.single.issuer, 'Mozilla');
+    },
+  );
+
   test('persisted entry label wins over catalogue name on initial load and refresh', () {
     final row = entry('id');
     row['label'] = 'Fictional service';
