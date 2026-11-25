@@ -51,8 +51,9 @@ class ApprovalStatus {
 ApprovalStatus? parseApprovalStatus(Map<String, dynamic>? b) {
   if (b == null || b.length != 3) return null;
   final o = b['ownerId'], g = b['generation'], p = b['pending'];
-  if (o is! String || o.isEmpty || g is! int || g < 0 || p is! List)
+  if (o is! String || o.isEmpty || g is! int || g < 0 || p is! List) {
     return null;
+  }
   if (p.length > 8) return null;
   final rows = <ApprovalRow>[];
   for (final r in p) {

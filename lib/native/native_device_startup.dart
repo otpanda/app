@@ -279,8 +279,9 @@ class NativeStartupRecovery extends ChangeNotifier {
   Future<({String? owner, int? retryAfter})> _ownerOf(NativeSession s) async {
     try {
       final r = await request('GET', '/v1/manage/session', bearer: s.access);
-      if (r.status != 200)
+      if (r.status != 200) {
         return (owner: null, retryAfter: r.retryAfterSeconds);
+      }
       final j = jsonDecode(r.body);
       final o = j is Map ? j['ownerId'] : null;
       return (owner: o is String && o.isNotEmpty ? o : null, retryAfter: null);

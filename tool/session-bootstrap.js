@@ -61,9 +61,26 @@
   globalThis.addEventListener?.('popstate',receiveRoute);globalThis.addEventListener?.('hashchange',receiveRoute);
   Object.defineProperty(globalThis,'OTPandaNavigation',{value:Object.freeze({current:()=>route??ROUTES[Math.min(view,4)],go:r=>{const wasPublic=route?.startsWith('recovery')||route==='demo';showRoute(r);if(wasPublic&&persistentRoute(r)&&status==='idle'){let hint=false;try{hint=localStorage.getItem('otpanda-session-present')==='yes';}catch{}if(hint)Promise.resolve().then(()=>globalThis.OTPandaSession.start('restore'));}},listen:f=>routeListeners.add(f),unlisten:f=>routeListeners.delete(f)}),writable:false,configurable:false});
   if(routeHash)saveRoute();
-  const pending = routeHash?'':location.hash;
+  // Native app handoff. The fragment carries only a one-use challenge and state. It is parsed strictly,
+  // removed before any promise, fetch or Flutter load, and kept only in this tab's sessionStorage (10
+  // minutes) until a sign-in finishes here. Nothing is forwarded except those two values to the API-owned
+  // approve page, which shows its own explicit Continue. A malformed intent is dropped.
+  const NATIVE_KEY='otpanda.native.intent.v1',nativeLaunch=!routeHash&&location.hash.startsWith('#native=');
+  if(nativeLaunch){
+    const intent=location.origin+location.pathname===REDIRECT&&!location.search?globalThis.OTPandaNativeIntent?.parseNativeIntent(location.hash):null;
+    try{if(intent)sessionStorage.setItem(NATIVE_KEY,JSON.stringify({challenge:intent.challenge,state:intent.state,created:Date.now()}));else sessionStorage.removeItem(NATIVE_KEY);}catch{}
+  }
+  const continueNative=()=>{
+    let m;try{m=JSON.parse(sessionStorage.getItem(NATIVE_KEY)??'null');sessionStorage.removeItem(NATIVE_KEY);}catch{return false;}
+    const lib=globalThis.OTPandaNativeIntent,now=Date.now();
+    if(!lib||!m||typeof m!=='object'||Object.keys(m).sort().join(',')!=='challenge,created,state'||!Number.isSafeInteger(m.created)||now<m.created||now-m.created>600000)return false;
+    const intent=lib.parseNativeIntent('#native=1&challenge='+m.challenge+'&state='+m.state);
+    if(!intent)return false;
+    location.assign(lib.nativeApproveUrl(intent));return true;
+  };
+  const pending = (routeHash||nativeLaunch)?'':location.hash;
   // Callback fragment is always removed before a promise, fetch or Flutter load.
-  if (pending) history.replaceState(null, '', location.pathname + location.search);
+  if (pending||nativeLaunch) history.replaceState(null, '', location.pathname + location.search);
   let saved;
   if (pending) { try { saved = sessionStorage.getItem(KEY); sessionStorage.removeItem(KEY); } catch {} }
   // First-party restore, optionally carrying a one-time link result to show once.
@@ -181,6 +198,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       serverOffset=nextOffset;access=result.access;expires=result.accessExpiresAt;status='restored';realtime?.nudge();if(p.linkNotice)linkResult=p.linkNotice;
       if(candidateKey&&validRenewal(result.renewal,result.access)&&result.renewal.firstPartyExpiresAt!==undefined) {signingKey=candidateKey;renewal=result.renewal;}
       const grant=values.get('enrollment');if(grant&&/^otpda_[A-Za-z0-9_-]{55}$/.test(grant))enrollment=grant;
+      continueNative();
     } catch { if(attempt===generation){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='sign-in-required';} }
   })();
   function validateAccess(result,tabKey=false) {

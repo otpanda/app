@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart' show green, ink, line, muted;
@@ -357,8 +356,9 @@ class NativeDevicesService extends ChangeNotifier {
   /// This is the NEW phone asking an enrolled phone to approve it.
   Future<void> requestAdd() => _guard(() async {
     final n = _take();
-    if (n == null)
+    if (n == null) {
       return _say('Could not read the account. Nothing was changed.');
+    }
     final r = await _add(n).request();
     if (!_alive(n.epoch, n.deviceId)) return;
     if (r.outcome == AddOutcome.requested) addFingerprint = r.fingerprint;
@@ -373,8 +373,9 @@ class NativeDevicesService extends ChangeNotifier {
 
   Future<void> checkAdd() => _guard(() async {
     final n = _take();
-    if (n == null)
+    if (n == null) {
       return _say('Could not read the account. Nothing was changed.');
+    }
     final r = await _add(n).checkApprovalAndFinish();
     if (!_alive(n.epoch, n.deviceId)) return;
     _say(switch (r.outcome) {
@@ -559,8 +560,9 @@ class _NativeDevicesPageState extends State<NativeDevicesPage> {
         v.serverStatus == ServerKeyStatus.revoked) {
       return 'This phone key was revoked. Sign in with another method to add it again.';
     }
-    if (rec == RecoveryOutcome.waiting)
+    if (rec == RecoveryOutcome.waiting) {
       return 'Checking an earlier attempt. Try again in a minute.';
+    }
     return 'This phone is not set up for approvals yet.';
   }
 }

@@ -1,7 +1,7 @@
 """Fail CI when the compiled web package carries stale session scripts."""
 from pathlib import Path
 
-for name in ('session-bootstrap.js', 'realtime-client.js', 'recovery-bridge.js'):
+for name in ('session-bootstrap.js', 'realtime-client.js', 'recovery-bridge.js', 'native-launch-intent.js'):
     source = Path('tool') / name
     for folder in ('web', 'build/web'):
         generated = Path(folder) / name

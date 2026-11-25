@@ -4,7 +4,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -50,8 +49,9 @@ class _Src implements DeviceProofSource {
   Future<Uint8List> sign(DeviceProofFields f, {String? displayText}) async {
     signs++;
     text = displayText;
-    if (!signOk)
+    if (!signOk) {
       throw const DeviceProofFailure(DeviceProofFailureKind.unsupportedOs);
+    }
     return Uint8List(64);
   }
 }
@@ -169,7 +169,7 @@ class _Server {
         out = {
           'ownerId': 'O',
           'generation': 1,
-          'pending': [if (approvalRow != null) approvalRow!],
+          'pending': [?approvalRow],
         };
       case '/v1/manage/approval/approve-begin':
         out = challenge(

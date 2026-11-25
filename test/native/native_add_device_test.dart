@@ -1,5 +1,5 @@
+// ignore_for_file: library_private_types_in_public_api
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -368,8 +368,9 @@ void main() {
     final s = _Src();
     var statusCalls = 0;
     Future<_R> post(String p, Map<String, dynamic> b) async {
-      if (p.endsWith('approve-begin'))
+      if (p.endsWith('approve-begin')) {
         return (status: 200, body: aChallenge(row));
+      }
       if (p.endsWith('approve-finish')) throw Exception('lost');
       statusCalls++;
       return (
@@ -401,8 +402,9 @@ void main() {
     expect(statusCalls, 1);
     // Row gone after a lost finish: approved OR expired, never success.
     final gone = appr(_Src(), (p, b) async {
-      if (p.endsWith('approve-begin'))
+      if (p.endsWith('approve-begin')) {
         return (status: 200, body: aChallenge(row));
+      }
       if (p.endsWith('approve-finish')) throw Exception('lost');
       return (
         status: 200,
@@ -542,7 +544,7 @@ void main() {
     },
   );
 
-  AddPendingRecord _sent() => AddPendingRecord(
+  AddPendingRecord sent() => AddPendingRecord(
     state: AddState.finishSent,
     ownerId: 'O',
     sessionDeviceId: 'D',
@@ -563,7 +565,7 @@ void main() {
       bool noRoutes = false,
       int now = 1000 + 600000 + 1,
     }) async {
-      final st = _Store()..st = AddPendingRead.record(_sent());
+      final st = _Store()..st = AddPendingRead.record(sent());
       final posted = <String>[];
       final d = AddDeviceDriver(
         source: _Src(),
@@ -612,7 +614,7 @@ void main() {
     );
     expect(lastStore.cleared, isFalse);
     // absent, but before the floor: wait. After: record cleared.
-    final c = _Store()..st = AddPendingRead.record(_sent());
+    final c = _Store()..st = AddPendingRead.record(sent());
     expect(c.st.record, isNotNull);
     expect(
       (await run({'status': 'absent'}, 200, now: 1000 + 600001)).outcome,

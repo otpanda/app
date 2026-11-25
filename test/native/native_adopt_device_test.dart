@@ -114,7 +114,7 @@ void main() {
       final log = <String>[];
       final r = await mk(_Src(), {
         beg: (status: 200, body: _begin()),
-        if (fr != null) fin: fr,
+        fin: ?fr,
       }, log: log).adopt();
       expect(r, AdoptOutcome.notConfirmed, reason: '$fr');
       expect(log.contains('clear'), isFalse);

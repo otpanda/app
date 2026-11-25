@@ -110,8 +110,9 @@ class NativeAuth {
 
   Future<String> _newRenewalKey() async {
     final p = await keystore.beginNewKey();
-    if (p.length != 65 || p[0] != 4)
+    if (p.length != 65 || p[0] != 4) {
       throw const NativeAuthException('protocol');
+    }
     return encodeRenewalKey(p.sublist(1, 33), p.sublist(33));
   }
 

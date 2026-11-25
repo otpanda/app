@@ -154,8 +154,7 @@ void main() {
       });
       // approval/status is a POST; the helper above returns {} for it, so use a
       // dedicated request that also serves the status rows.
-      final both =
-          (
+      Future<SessionResponse> both(
             String m,
             String p, {
             String? body,
@@ -183,7 +182,7 @@ void main() {
               );
             }
             return req(m, p, body: body, query: query, bearer: bearer);
-          };
+          }
       final v = _svc(src, both);
       await t.pumpWidget(_app(v));
       await t.pumpAndSettle();

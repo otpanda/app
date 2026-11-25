@@ -1,3 +1,4 @@
+// ignore_for_file: library_private_types_in_public_api
 // REAL-SERVER contract test for native assignment and entry edit. Same bridge
 // as server872_contract_test.dart (real assignment-intent-http, assignment
 // intents, entry-manage-http with native=true, SQLite migrations, ECDSA
@@ -46,6 +47,7 @@ Future<SessionResponse> req(
   final resp = await r.close();
   final out = await resp.transform(utf8.decoder).join();
   if (Platform.environment['TRACE'] == '1') {
+    // ignore: avoid_print
     print('$m $p -> ${resp.statusCode} $out');
   }
   return SessionResponse(resp.statusCode, out);

@@ -273,7 +273,7 @@ class ChannelDeviceProofSource implements DeviceProofSource {
       _run(
         () => _c.invokeMethod<Uint8List>('sign', {
           ...fields.args,
-          if (displayText != null) 'displayText': displayText,
+          'displayText': ?displayText,
         }),
       );
 

@@ -47,6 +47,7 @@ Future<SessionResponse> req(
   try {
     r = await hc.openUrl(m, Uri.parse('http://127.0.0.1:$port$p'));
   } catch (e) {
+    // ignore: avoid_print
     print('OPENERR $e');
     rethrow;
   }
@@ -57,6 +58,7 @@ Future<SessionResponse> req(
   final resp = await r.close();
   final out = await resp.transform(utf8.decoder).join();
   if (Platform.environment['TRACE'] == '1') {
+    // ignore: avoid_print
     print('$m $p -> ${resp.statusCode} $out');
   }
   return SessionResponse(resp.statusCode, out);

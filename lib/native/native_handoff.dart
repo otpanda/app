@@ -64,8 +64,9 @@ AppReturn? parseAppReturn(
     return null;
   }
   final code = p['code'], state = p['state'];
-  if (code == null || code.isEmpty || state == null || state.isEmpty)
+  if (code == null || code.isEmpty || state == null || state.isEmpty) {
     return null;
+  }
   if (state.length != expectedState.length) return null;
   var diff = 0;
   for (var i = 0; i < state.length; i++) {
