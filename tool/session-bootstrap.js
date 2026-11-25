@@ -47,7 +47,7 @@
   // No bearer or ceremony is persisted or passed to Flutter.
   const assignment=typeof globalThis.OTPandaAssignmentController==='function'&&typeof globalThis.OTPandaAssignmentTransport==='function'?new globalThis.OTPandaAssignmentController(globalThis.OTPandaAssignmentTransport({access:()=>serverNow()<expires?access:undefined,generation:()=>generation,fetchImpl:(...args)=>fetch(...args),credentials:{get:options=>globalThis.navigator.credentials.get(options)}})):null;
   // Route identifiers contain no record ids, query, proof or free-form return URL.
-  const ROUTES=['codes','sources','unassigned','entries','settings','settings/account-security','settings/devices','settings/organization','settings/account-security/passkeys','recovery','recovery/start','recovery/finish','demo'];
+  const ROUTES=['codes','sources','unassigned','entries','settings','settings/account-security','settings/devices','settings/organization','settings/about','settings/account-security/passkeys','recovery','recovery/start','recovery/finish','demo'];
   const ROUTE_KEY='otpanda.route.tab.v1',validRoute=r=>ROUTES.includes(r);
   let route;const routeListeners=new Set();
   const persistentRoute=r=>validRoute(r)&&!r.startsWith('recovery')&&r!=='demo';

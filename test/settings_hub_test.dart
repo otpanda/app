@@ -84,22 +84,35 @@ void main() {
     // The approved hub keeps its stable category even during a failed read.
     expect(find.text('Organization'), findsOneWidget);
     expect(find.text('Sign-in methods'), findsNothing);
-    // Licenses come just before Sign out.
-    expect(find.text('Licenses'), findsOneWidget);
-    expect(
-      t.getTopLeft(find.text('Licenses')).dy,
-      lessThan(t.getTopLeft(find.text('Sign out')).dy),
-    );
-    await t.tap(find.text('Licenses'));
+    // No Licenses row in the hub: it lives under About.
+    expect(find.text('Licenses'), findsNothing);
+    expect(find.text('About'), findsOneWidget);
+    await t.tap(find.text('About'));
+    await t.pumpAndSettle();
+    expect(log.last, 'settings/about');
+    expect(find.text('Version'), findsOneWidget);
+    expect(find.text('Development build'), findsOneWidget);
+    expect(find.text('Source code'), findsOneWidget);
+    expect(find.text('Website'), findsOneWidget);
+    await t.tap(find.text('Open-source licenses'));
     await t.pumpAndSettle();
     expect(find.byType(LicensePage), findsOneWidget);
     await t.pageBack();
     await t.pumpAndSettle();
+    await t.tap(find.byTooltip('Back to settings'));
+    await t.pumpAndSettle();
+    // Sign out is pinned to the bottom edge of the screen.
+    final screen = t.getRect(find.byType(Scaffold).first);
+    expect(
+      screen.bottom -
+          t.getRect(find.byKey(const Key('browser-sign-out'))).bottom,
+      lessThanOrEqualTo(16),
+    );
     // Sign out sits at the bottom of the main list.
     expect(find.widgetWithText(OutlinedButton, 'Sign out'), findsOneWidget);
     await t.tap(find.text('Account & security'));
     await t.pumpAndSettle();
-    expect(log, ['settings/account-security']);
+    expect(log, ['settings/about', 'settings', 'settings/account-security']);
     expect(find.text('Sign-in methods'), findsOneWidget);
     expect(find.text('Google'), findsOneWidget);
     await t.tap(find.byTooltip('Back to settings'));

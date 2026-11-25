@@ -1,3 +1,4 @@
+import 'about_page.dart';
 import 'auth_entry.dart';
 import 'product_shell.dart';
 import 'read_workspace_controller.dart';
@@ -50,7 +51,7 @@ class BrowserAccountPage extends StatefulWidget {
   /// Route id chosen from outside (the router). Null keeps the legacy
   /// behavior of restoring the saved view. One of the allow-listed ids:
   /// codes, sources, unassigned, entries, settings, settings/account-security,
-  /// settings/devices, settings/organization. Anything else is ignored.
+  /// settings/devices, settings/organization, settings/about. Anything else is ignored.
   final String? navigation;
 
   /// Called with a route id when the person navigates inside the page. It is
@@ -1486,6 +1487,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                               'Organization could not load. Your saved choices have not changed.',
                             ),
                           ]),
+                    SettingsCategory.about: const AboutPage(),
                   },
                 ),
               ),
