@@ -1,7 +1,7 @@
 import 'auth_entry.dart';
 import 'product_shell.dart';
 import 'read_workspace_controller.dart';
-import 'main.dart' show ClientHome;
+import 'main.dart' show ClientHome, ink, line, muted;
 
 import 'dart:async';
 import 'dart:convert';
@@ -16,11 +16,17 @@ import 'package:material_ui/material_ui.dart';
 
 import 'browser_session.dart';
 import 'browser_session_contract.dart';
+import 'google_link.dart';
 import 'lost_access_page.dart';
 import 'recovery_contract.dart';
 import 'recovery_panel.dart';
 import 'session_contract.dart';
 import 'settings_hub.dart';
+
+const _verificationCopy = [
+  'New devices need a passkey. Approval from another enrolled device is not available yet.',
+  'Google sign-in alone is enough. Turn this on for another check on new devices.',
+];
 
 class _ReadTransport implements SessionTransport {
   final BrowserSessionBridge bridge;
@@ -72,6 +78,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   bool accountOpen = false;
   int productTab = 0;
   SettingsCategory? settingsCategory;
+  bool passkeysOpen = false;
   bool securityRequested = false;
   bool securityLoading = false;
   int securityTicks = 0;
@@ -86,6 +93,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       if (!widget.workspaceEnabled) return;
       productTab = tab;
       settingsCategory = null;
+      passkeysOpen = false;
       if (accountOpen) {
         accountOpen = false;
         if (!direct) {
@@ -99,7 +107,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       return;
     }
     if (!isSettingsRoute(id)) return;
-    settingsCategory = settingsCategoryForRoute(id);
+    passkeysOpen = id == settingsPasskeysRoute;
+    settingsCategory = passkeysOpen
+        ? SettingsCategory.account
+        : settingsCategoryForRoute(id);
     if (!accountOpen && widget.workspaceEnabled) {
       accountOpen = true;
       if (!direct) {
@@ -127,6 +138,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     setState(() {
       accountOpen = true;
       settingsCategory = null;
+      passkeysOpen = false;
     });
     navigated(settingsHubRoute);
     refresh();
@@ -138,6 +150,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     setState(() {
       accountOpen = false;
       settingsCategory = null;
+      passkeysOpen = false;
     });
     navigated(productRoutes[productTab]);
     workspace.refresh();
@@ -718,112 +731,191 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     ),
   );
 
-  Widget stableSettingsCard(String title, List<Widget> children) {
-    final height = switch (title) {
-      'Protection' => 300.0,
-      'Sign-in methods' => 220.0,
-      _ => 170.0,
-    };
-    return settingsCard(title, [
-      SizedBox(
-        height: height,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: children,
+  /// Cards size to their content. Loading rows show a skeleton in place of
+  /// each value, so the height does not depend on whether data has arrived.
+  Widget stableSettingsCard(String title, List<Widget> children) =>
+      settingsCard(title, children);
+
+  bool get _canFirstPasskey =>
+      overview?['passkeys'] == 0 &&
+      bridge is FirstPasskeyBridge &&
+      (bridge as FirstPasskeyBridge).firstPasskeyAvailable;
+
+  bool get _canAddPasskey =>
+      overview != null &&
+      (_canFirstPasskey ||
+          ((overview!['passkeys'] as int) > 0 &&
+              bridge is AdditionalPasskeyBridge));
+
+  Future<void> addPasskey() => run(() async {
+    if (_canFirstPasskey) {
+      await (bridge as FirstPasskeyBridge).firstPasskey();
+    } else {
+      await (bridge as AdditionalPasskeyBridge).addPasskey();
+    }
+    await loadAccount(revision);
+  });
+
+  bool get _canDisconnectGoogle =>
+      bridge is GoogleLinkBridge &&
+      (bridge as GoogleLinkBridge).googleDisconnectAvailable;
+
+  Future<void> disconnectGoogle() async {
+    final passkeys = overview?['passkeys'];
+    if (passkeys is! int) return;
+    if (passkeys < 1) {
+      await showDialog<void>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Add a passkey first'),
+          content: const Text(
+            'Google is your only way to sign in right now. Add a passkey, then you can disconnect Google.',
           ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(c),
+              child: const Text('OK'),
+            ),
+          ],
         ),
+      );
+      return;
+    }
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Disconnect Google?'),
+        content: const Text(
+          'Devices signed in with Google are signed out, including this one if you signed in with Google. Sign-ins with a passkey stay signed in, and your Gmail connections are not affected. You can connect Google again later.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Disconnect'),
+          ),
+        ],
       ),
-    ]);
+    );
+    if (yes != true || !mounted) return;
+    var result = 'Google disconnected. You sign in with your passkeys.';
+    var refused = false;
+    try {
+      await (bridge as GoogleLinkBridge).disconnectGoogle();
+    } on RecoveryRefused {
+      refused = true;
+    } catch (_) {
+      // Anything else could have committed. Never claim it did not.
+      result = 'We could not confirm that. Google may have been disconnected. Check below before trying again.';
+    }
+    if (!mounted) return;
+    await refresh();
+    if (!mounted) return;
+    if (refused) {
+      // A refusal is generic (a cancelled passkey check, a stale change, or
+      // nothing left to disconnect). The fresh account state says which.
+      result = overview?['google'] == true
+          ? 'Google was not disconnected. Try again if you still want to.'
+          : 'Google is already disconnected.';
+    }
+    setState(() => message = result);
   }
 
   Widget signInMethods() {
     final o = overview;
-    if (o == null) {
-      return stableSettingsCard('Sign-in methods', const [
-        ListTile(title: Text('Passkeys'), subtitle: Text(' ')),
-        ListTile(title: Text('Google'), subtitle: Text(' ')),
-      ]);
-    }
-    final first =
-        o['passkeys'] == 0 &&
-        bridge is FirstPasskeyBridge &&
-        (bridge as FirstPasskeyBridge).firstPasskeyAvailable;
-    final more =
-        (o['passkeys'] as int) > 0 && bridge is AdditionalPasskeyBridge;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        stableSettingsCard('Sign-in methods', [
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text(
-              'Passkeys',
-              style: TextStyle(fontWeight: FontWeight.w700),
+    final loading = o == null;
+    final google = o?['google'];
+    final passkeys = o?['passkeys'];
+    return stableSettingsCard('Sign-in methods', [
+      ListTile(
+        key: const Key('settings-passkeys-row'),
+        contentPadding: EdgeInsets.zero,
+        title: const Text(
+          'Passkeys',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: loading
+            ? const RedactedText('0 registered')
+            : Text('$passkeys registered'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () {
+          setState(() => passkeysOpen = true);
+          navigated(settingsPasskeysRoute);
+        },
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Google',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      color: ink,
+                    ),
+                  ),
+                  loading
+                      ? const RedactedText('Connected')
+                      : Text(
+                          google == true ? 'Connected' : 'Not connected',
+                          style: const TextStyle(color: muted),
+                        ),
+                ],
+              ),
             ),
-            subtitle: Text('${o['passkeys']} registered'),
-            trailing: first || more
-                ? TextButton(
-                    onPressed: busy
-                        ? null
-                        : () => run(() async {
-                            if (first) {
-                              await (bridge as FirstPasskeyBridge)
-                                  .firstPasskey();
-                            } else {
-                              await (bridge as AdditionalPasskeyBridge)
-                                  .addPasskey();
-                            }
-                            await loadAccount(revision);
-                          }),
-                    child: const Text('Add'),
-                  )
-                : null,
-          ),
-          if (o['google'] == true)
-            const ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                'Google',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              subtitle: Text('Connected'),
-            ),
-          if (o['google'] == false)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'Google',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              subtitle: const Text(
-                'Choose the Google account with the same email as this OTPanda account. Your passkeys will keep working.',
-              ),
-              trailing: TextButton(
+            const SizedBox(width: 8),
+            if (loading)
+              // Invisible, but as tall as the real button, so the row does
+              // not change height when the status arrives.
+              ExcludeSemantics(
+                child: Opacity(
+                  opacity: 0,
+                  child: OutlinedButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.link_off),
+                    label: const Text('Disconnect'),
+                  ),
+                ),
+              )
+            else if (google == true)
+              if (_canDisconnectGoogle)
+                OutlinedButton.icon(
+                  onPressed: busy ? null : disconnectGoogle,
+                  icon: const Icon(Icons.link_off),
+                  label: const Text('Disconnect'),
+                )
+              else
+                const SizedBox(height: 40)
+            else
+              OutlinedButton.icon(
                 onPressed: busy
                     ? null
                     : () => run(() => bridge.start('google')),
-                child: const Text('Connect'),
+                icon: const Icon(Icons.link),
+                label: const Text('Connect'),
               ),
-            ),
-          if (o['passkeys'] == 0 &&
-              o['google'] == true &&
-              (bridge is! FirstPasskeyBridge ||
-                  !(bridge as FirstPasskeyBridge).firstPasskeyAvailable))
-            TextButton(
-              onPressed: busy ? null : () => run(() => bridge.start('google')),
-              child: const Text('Sign in with Google again to add a passkey'),
-            ),
-          if (o['passkeys'] == 0)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                'Add a passkey as another way in. Your Google sign-in will keep working.',
-              ),
-            ),
-        ]),
-      ],
-    );
+          ],
+        ),
+      ),
+      if (!loading &&
+          passkeys == 0 &&
+          google == true &&
+          (bridge is! FirstPasskeyBridge ||
+              !(bridge as FirstPasskeyBridge).firstPasskeyAvailable))
+        OutlinedButton.icon(
+          onPressed: busy ? null : () => run(() => bridge.start('google')),
+          icon: const Icon(Icons.login),
+          label: const Text('Sign in with Google again to add a passkey'),
+        ),
+    ]);
   }
 
   List<Widget> protectionItems() {
@@ -844,7 +936,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         const SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: Text('Extra verification on new devices'),
-          subtitle: Text('Checking automatically...'),
+          subtitle: StableText(shown: null, versions: _verificationCopy),
           value: false,
           onChanged: null,
         )
@@ -852,21 +944,23 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Extra verification on new devices'),
-          subtitle: Text(
-            securityInfo!['enabled'] == true
-                ? 'New devices need a passkey. Approval from another enrolled device is not available yet.'
-                : 'Google sign-in alone is enough. Turn this on for another check on new devices.',
+          subtitle: StableText(
+            shown: securityInfo!['enabled'] == true
+                ? _verificationCopy[0]
+                : _verificationCopy[1],
+            versions: _verificationCopy,
           ),
           value: securityInfo!['enabled'] as bool,
           onChanged: busy ? null : (enabled) => changeSecurity(enabled, false),
         ),
         if (clientApprovalAvailable)
-          TextButton(
+          OutlinedButton.icon(
             onPressed: busy
                 ? null
                 : () =>
                       changeSecurity(!(securityInfo!['enabled'] as bool), true),
-            child: const Text('Verify change with another signed-in device'),
+            icon: const Icon(Icons.devices),
+            label: const Text('Verify change with another signed-in device'),
           ),
         if (clientApprovalAvailable && settingChange != null)
           OutlinedButton(
@@ -905,7 +999,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       spacing: 12,
                       children: [
                         if (clientApprovalAvailable)
-                          TextButton(
+                          OutlinedButton.icon(
                             onPressed: busy
                                 ? null
                                 : () => run(() async {
@@ -916,9 +1010,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                                     );
                                     await loadSecurity();
                                   }),
-                            child: const Text('Approve sign-in'),
+                            icon: const Icon(Icons.check),
+                            label: const Text('Approve sign-in'),
                           ),
-                        TextButton(
+                        OutlinedButton.icon(
                           onPressed: busy
                               ? null
                               : () => run(() async {
@@ -929,7 +1024,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                                   );
                                   await loadSecurity();
                                 }),
-                          child: const Text('Deny'),
+                          icon: const Icon(Icons.close),
+                          label: const Text('Deny'),
                         ),
                       ],
                     ),
@@ -954,7 +1050,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       const Text(
                         'Approve only if you requested this exact change on your other device.',
                       ),
-                      TextButton(
+                      OutlinedButton.icon(
                         onPressed: busy
                             ? null
                             : () => run(() async {
@@ -965,7 +1061,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                                 );
                                 await loadSecurity();
                               }),
-                        child: const Text('Approve security change'),
+                        icon: const Icon(Icons.verified_user_outlined),
+                        label: const Text('Approve security change'),
                       ),
                     ],
                   ),
@@ -990,10 +1087,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         if (r != null)
           RecoveryPanel(
             bridge: r,
-            sections: const {
-              RecoverySection.passkeys,
-              RecoverySection.emailRecovery,
-            },
+            sections: const {RecoverySection.emailRecovery},
             beforeEmailRecovery: items.isEmpty ? null : Column(children: items),
             sectionCard: stableSettingsCard,
           )
@@ -1003,27 +1097,88 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     );
   }
 
-  Widget devicesPage() {
+  Widget passkeysPage() {
     final r = _recovery;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (r != null)
-          RecoveryPanel(
+    return r == null
+        ? settingsCard('Passkeys', const [
+            Text('Passkeys could not load here.'),
+          ])
+        : RecoveryPanel(
             bridge: r,
-            sections: const {RecoverySection.devices},
-            sectionCard: stableSettingsCard,
-          ),
-        settingsCard('This browser', [
-          if (status != 'unsupported' && widget.loginEnabled)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton(
-                onPressed: busy ? null : signOutBrowser,
-                child: const Text('Sign out'),
+            sections: const {RecoverySection.passkeys},
+            sectionCard: (title, children) => Padding(
+              padding: const EdgeInsets.only(bottom: 72),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: children,
               ),
             ),
-        ]),
+          );
+  }
+
+  /// Fills the screen: the device list scrolls inside its card and the
+  /// browser's own Sign out stays pinned below it.
+  Widget devicesPage() {
+    final r = _recovery;
+    final canSignOut = status != 'unsupported' && widget.loginEnabled;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: r == null
+              ? const SizedBox.shrink()
+              : RecoveryPanel(
+                  bridge: r,
+                  sections: const {RecoverySection.devices},
+                  sectionCard: (title, children) => Expanded(
+                    child: Card(
+                      margin: EdgeInsets.zero,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: ink,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Divider(height: 1, color: line),
+                            Expanded(
+                              child: ListView(
+                                key: const Key('devices-list'),
+                                padding: const EdgeInsets.only(top: 8),
+                                children: children,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+        ),
+        if (canSignOut) ...[
+          const SizedBox(height: 12),
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  key: const Key('browser-sign-out'),
+                  onPressed: busy ? null : signOutBrowser,
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Sign out'),
+                ),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1048,8 +1203,25 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         final wide = box.maxWidth > settingsWideBreakpoint;
         final inCategory = !wide && settingsCategory != null;
         return Scaffold(
+          floatingActionButton: passkeysOpen && _canAddPasskey
+              ? FloatingActionButton.extended(
+                  key: const Key('add-passkey-fab'),
+                  onPressed: busy ? null : addPasskey,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add passkey'),
+                )
+              : null,
           appBar: AppBar(
-            leading: inCategory
+            leading: passkeysOpen
+                ? IconButton(
+                    tooltip: 'Back to account and security',
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () {
+                      setState(() => passkeysOpen = false);
+                      navigated(SettingsCategory.account.route);
+                    },
+                  )
+                : inCategory
                 ? IconButton(
                     tooltip: 'Back to settings',
                     icon: const Icon(Icons.arrow_back),
@@ -1065,11 +1237,21 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     onPressed: leaveSettings,
                   )
                 : null,
-            title: Text(inCategory ? settingsCategory!.title : 'Settings'),
+            title: Text(
+              passkeysOpen
+                  ? 'Passkeys'
+                  : inCategory
+                  ? settingsCategory!.title
+                  : 'Settings',
+            ),
           ),
           body: Column(
             children: [
-              if (busy) const LinearProgressIndicator(),
+              // Always 4px tall, so content does not shift when it appears.
+              SizedBox(
+                height: 4,
+                child: busy ? const LinearProgressIndicator() : null,
+              ),
               if (message.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.all(16),
@@ -1077,14 +1259,20 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 ),
               Expanded(
                 child: SettingsHub(
+                  fillPages: const {SettingsCategory.devices},
                   email: overview?['email'] as String?,
                   selected: settingsCategory,
                   onSelect: (c) {
-                    setState(() => settingsCategory = c);
+                    setState(() {
+                      settingsCategory = c;
+                      passkeysOpen = false;
+                    });
                     navigated(c.route);
                   },
                   pages: {
-                    SettingsCategory.account: accountSecurityPage(),
+                    SettingsCategory.account: passkeysOpen
+                        ? passkeysPage()
+                        : accountSecurityPage(),
                     SettingsCategory.devices: devicesPage(),
                     SettingsCategory.organization: organizationReady
                         ? organizationPage()
