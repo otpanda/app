@@ -15,42 +15,6 @@ p=Path('android/app/build.gradle.kts')
 s=p.read_text().replace('            signingConfig = signingConfigs.getByName("debug")\n','')
 p.write_text(s)
 PY
-# Android identity is app.otpanda (user choice, Nov 25). Applies to namespace,
-# applicationId and the MainActivity package; flutter create used the
-# development prefix. Idempotent.
-python3 - <<'PY'
-from pathlib import Path
-old='org.otpanda.development.otpanda_client'
-new='app.otpanda'
-g=Path('android/app/build.gradle.kts')
-t=g.read_text()
-if old in t: g.write_text(t.replace(old,new))
-src=Path('android/app/src/main/kotlin/'+old.replace('.','/'))
-if src.is_dir():
-    dst=Path('android/app/src/main/kotlin/app/otpanda')
-    dst.mkdir(parents=True,exist_ok=True)
-    for f in src.glob('*.kt'):
-        (dst/f.name).write_text(f.read_text().replace('package '+old,'package '+new))
-        f.unlink()
-    import shutil
-    shutil.rmtree(Path('android/app/src/main/kotlin/org/otpanda/development'))
-PY
-# Store flavors (google / fdroid), same applicationId.
-python3 - <<'PY'
-from pathlib import Path
-p=Path('android/app/build.gradle.kts');s=p.read_text()
-if 'productFlavors' not in s:
-    blk='''    // google: may bundle Google sign-in (Credential Manager) when it exists.
-    // fdroid: no Google or Play Services dependency, browser sign-in only.
-    flavorDimensions += "store"
-    productFlavors {
-        create("google") { dimension = "store" }
-        create("fdroid") { dimension = "store" }
-    }
-
-'''
-    p.write_text(s.replace('    buildTypes {',blk+'    buildTypes {',1))
-PY
 # Manifest: camera (optional feature so devices without one can still use
 # manual entry), INTERNET (the debug/profile manifests add it, main does not),
 # and removal of audio/storage permissions the camera plugin would merge.
