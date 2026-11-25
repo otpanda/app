@@ -1,7 +1,7 @@
 function streaming(r){if(r&&typeof r.text==='function'&&!r.body){r.body={getReader(){let sent=false;return {async read(){if(sent)return {done:true};sent=true;return {done:false,value:new TextEncoder().encode(await r.text())};},async cancel(){},releaseLock(){}};}};}return r;}
 const {test}=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');const fs=require('node:fs');const script=fs.readFileSync('tool/session-bootstrap.js','utf8');
 const NOW=1800000000000,token='otpda_'+'a'.repeat(55),state='s'.repeat(43);
-function env({hash='',saved,now=NOW,response={access:token,accessExpiresAt:NOW+300000},hint,navigator,fetchImpl,sessionValues=new Map(),events,lib,path='/app/',query=''}={}){let stored=saved,cleaned=false,calls=0;const location={origin:'https://otpanda.github.io',pathname:path,search:query,hash,assign(url){location.assigned=url;}};const hints=new Map(hint?[['otpanda-session-present','yes']]:[]);const context={AbortController,setTimeout,clearTimeout,localStorage:{getItem:k=>hints.get(k),setItem:(k,v)=>hints.set(k,v),removeItem:k=>hints.delete(k)},location,history:{replaceState(){cleaned=true;location.hash='';}},sessionStorage:{getItem(k){return k==='otpanda.restore.tab.v1'?stored:sessionValues.get(k)??null;},removeItem(k){if(k==='otpanda.restore.tab.v1')stored=undefined;else sessionValues.delete(k);},setItem(k,v){if(k==='otpanda.restore.tab.v1')stored=v;else sessionValues.set(k,v);}},fetch:async(url,options)=>{assert.ok(cleaned);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');calls++;return {ok:true,text:async()=>JSON.stringify(response)};},URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),crypto:require('node:crypto').webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Date:class extends Date{static now(){return now;}}};if(navigator)context.navigator=navigator;if(fetchImpl)context.fetch=fetchImpl;let fetchValue=context.fetch;Object.defineProperty(context,'fetch',{get(){return async(...args)=>streaming(await fetchValue(...args));},set(v){fetchValue=v;},enumerable:true,configurable:true});if(events)context.addEventListener=(n,f)=>{events[n]=f;};vm.createContext(context);if(lib)vm.runInContext(fs.readFileSync('tool/native-launch-intent.js','utf8'),context);vm.runInContext(script,context);return {context,get cleaned(){return cleaned;},get stored(){return stored;},get calls(){return calls;}};}
+function env({hash='',saved,now=NOW,response={access:token,accessExpiresAt:NOW+300000},hint,navigator,fetchImpl,sessionValues=new Map(),events,lib,path='/app/',query=''}={}){let stored=saved,cleaned=false,calls=0;const location={origin:'https://otpanda.github.io',pathname:path,search:query,hash,assign(url){location.assigned=url;}};const hints=new Map(hint?[['otpanda-session-present','yes']]:[]);const context={AbortController,setTimeout,clearTimeout,localStorage:{getItem:k=>hints.get(k),setItem:(k,v)=>hints.set(k,v),removeItem:k=>hints.delete(k)},location,history:{replaceState(){cleaned=true;location.hash='';}},sessionStorage:{getItem(k){return k==='otpanda.restore.tab.v1'?stored:sessionValues.get(k)??null;},removeItem(k){if(k==='otpanda.restore.tab.v1')stored=undefined;else sessionValues.delete(k);},setItem(k,v){if(k==='otpanda.restore.tab.v1')stored=v;else sessionValues.set(k,v);}},fetch:async(url,options)=>{assert.ok(cleaned);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');calls++;return {ok:true,text:async()=>JSON.stringify(response)};},URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),crypto:require('node:crypto').webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Date:class extends Date{static now(){return now;}}};if(navigator)context.navigator=navigator;if(fetchImpl)context.fetch=fetchImpl;let fetchValue=context.fetch;Object.defineProperty(context,'fetch',{get(){return async(...args)=>streaming(await fetchValue(...args));},set(v){fetchValue=v;},enumerable:true,configurable:true});if(events)context.addEventListener=(n,f)=>{events[n]=f;};vm.createContext(context);if(lib){vm.runInContext(fs.readFileSync('tool/native-launch-intent.js','utf8'),context);vm.runInContext(fs.readFileSync('tool/extension-launch-intent.js','utf8'),context);}vm.runInContext(script,context);return {context,get cleaned(){return cleaned;},get stored(){return stored;},get calls(){return calls;}};}
 test('callback cleans synchronously before exchange; state consumed and memory access returned',async()=>{const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(e.calls,1);assert.equal(e.stored,undefined);assert.equal(e.context.OTPandaSession.status(),'restored');assert.equal(e.context.OTPandaSession.access(),token);e.context.OTPandaSession.clear();assert.equal(e.context.OTPandaSession.access(),undefined);});
 test('wrong state duplicates missing pending and future/expired state never exchange',async()=>{for(const change of [{saved:undefined},{hash:'#code='+token+'&state=wrong'},{hash:'#code='+token+'&state='+state+'&state='+state},{now:NOW+300001},{now:NOW-1}]){const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),...change});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');}});
 test('invalid response never becomes access; secrets absent from storage',async()=>{const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),response:{access:token,refresh:'bad',accessExpiresAt:NOW+300000}});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaSession.access(),undefined);assert.equal(e.stored,undefined);});
@@ -606,3 +606,59 @@ test('an invalid restore callback (bad state) also falls back to Google once for
   assert.ok(e.context.location.assigned.startsWith('https://otpanda-api.abrahammurciano.workers.dev/auth/google/start?'));
   assert.equal(e.calls,0);
 });
+
+const XKEY='otpanda.extension.intent.v1',XID='abcdefghijklmnopabcdefghijklmnop',XHASH=`#extension=1&challenge=${NC}&redirect=chrome&state=${NS}`;
+const XCODE='c'.repeat(43),XRETURN=`https://${XID}.chromiumapp.org/#code=${XCODE}&state=${NS}`;
+const xRestored=async(begin,sv=new Map())=>{
+  sv.set(XKEY,JSON.stringify({challenge:NC,state:NS,redirect:'chrome',created:NOW}));
+  const seen=[];
+  const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues:sv,lib:true,
+    fetchImpl:async(url,o)=>{if(url.endsWith('/auth/exchange'))return {ok:true,text:async()=>JSON.stringify({access:token,accessExpiresAt:NOW+300000})};seen.push({url,o});return begin(url,o);}});
+  await e.context.OTPandaSession.ready;return {e,seen,sv};
+};
+test('extension launch fragment is removed synchronously, stored only as a tab-scoped intent, and never calls begin by itself',async()=>{
+  const sv=new Map(),e=env({hash:XHASH,sessionValues:sv,lib:true});
+  assert.ok(e.cleaned);await e.context.OTPandaSession.ready;
+  assert.equal(e.context.location.hash,'');assert.equal(e.context.location.assigned,undefined);assert.equal(e.calls,0);
+  assert.deepEqual(JSON.parse(sv.get(XKEY)),{challenge:NC,state:NS,redirect:'chrome',created:NOW});
+  assert.equal(e.context.OTPandaSession.extensionIntent(),'chrome');
+});
+test('malformed, extended or URL-style extension fragments are stripped and store nothing',async()=>{
+  for(const h of [`#extension=1&challenge=${NC}&redirect=https://evil.example/&state=${NS}`,`#extension=1&challenge=${NC}&redirect=chrome&state=${NS}&x=1`,`#extension=1&challenge=${NC}&redirect=chrome`,`#extension=2&challenge=${NC}&redirect=chrome&state=${NS}`,`#extension=1&challenge=${NC}&redirect=Chrome&state=${NS}`,`#extension=1&challenge=${NC}&redirect=chrome&redirect=chrome&state=${NS}`]){
+    const sv=new Map([[XKEY,'stale']]),e=env({hash:h,sessionValues:sv,lib:true});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;
+    assert.equal(sv.has(XKEY),false,h);assert.equal(e.context.OTPandaSession.extensionIntent(),'');assert.equal(e.context.location.assigned,undefined);
+  }
+});
+test('signed in, the intent alone calls nothing; only extensionConnect calls begin, once, with the confirm literal and no extras',async()=>{
+  const {e,seen}=await xRestored(async()=>({ok:true,status:200,text:async()=>JSON.stringify({redirect:XRETURN,expires_at:NOW+60000})}));
+  assert.equal(e.context.OTPandaSession.status(),'restored');assert.equal(seen.length,0);assert.equal(e.context.location.assigned,undefined);
+  assert.equal(e.context.OTPandaSession.extensionIntent(),'chrome');
+  assert.equal(await e.context.OTPandaSession.extensionConnect(),'');
+  assert.equal(seen.length,1);assert.equal(seen[0].url,'https://otpanda-api.abrahammurciano.workers.dev/auth/extension/begin');
+  assert.equal(seen[0].o.method,'POST');assert.equal(seen[0].o.credentials,'omit');assert.equal(seen[0].o.redirect,'error');assert.equal(seen[0].o.headers.Authorization,'Bearer '+token);
+  assert.deepEqual(JSON.parse(seen[0].o.body),{challenge:NC,confirm:true,redirect:'chrome',state:NS});assert.deepEqual(Object.keys(JSON.parse(seen[0].o.body)).sort(),['challenge','confirm','redirect','state']);
+  assert.equal(e.context.location.assigned,XRETURN);assert.equal(e.context.OTPandaSession.extensionIntent(),'');
+  assert.equal(await e.context.OTPandaSession.extensionConnect(),'expired');assert.equal(seen.length,1);
+});
+test('extensionConnect refuses unsafe returns and maps failures; cancel and expiry clear the intent',async()=>{
+  for(const bad of [`https://evil.example/#code=${XCODE}&state=${NS}`,`https://${XID}.chromiumapp.org/?x=1#code=${XCODE}&state=${NS}`,`https://${XID}.chromiumapp.org/#code=${XCODE}&state=other`.replace('other','z'.repeat(43)),`https://${XID}.chromiumapp.org/#code=${XCODE}&state=${NS}&extra=1`,`http://${XID}.chromiumapp.org/#code=${XCODE}&state=${NS}`,`https://${XID}.chromiumapp.org:8443/#code=${XCODE}&state=${NS}`,`https://${XID}.chromiumapp.org.evil.example/#code=${XCODE}&state=${NS}`,`https://${XID}.chromiumapp.org/x#code=${XCODE}&state=${NS}`]){
+    const {e}=await xRestored(async()=>({ok:true,status:200,text:async()=>JSON.stringify({redirect:bad,expires_at:1})}));
+    assert.equal(await e.context.OTPandaSession.extensionConnect(),'unavailable',bad);assert.equal(e.context.location.assigned,undefined);assert.equal(e.context.OTPandaSession.extensionIntent(),'');
+  }
+  const codes={429:'retry',409:'restart',401:'signin',403:'signin',500:'unavailable'};
+  for(const [st,reason] of Object.entries(codes)){
+    const {e}=await xRestored(async()=>({ok:false,status:Number(st),text:async()=>'{}'}));
+    assert.equal(await e.context.OTPandaSession.extensionConnect(),reason);assert.equal(e.context.location.assigned,undefined);
+    assert.equal(e.context.OTPandaSession.extensionIntent(),['409','401','403'].includes(st)?'':'chrome','retry keeps the intent except after restart');
+  }
+  const {e:c}=await xRestored(async()=>assert.fail('no call'));c.context.OTPandaSession.extensionCancel();assert.equal(c.context.OTPandaSession.extensionIntent(),'');assert.equal(await c.context.OTPandaSession.extensionConnect(),'expired');
+  const sv=new Map([[XKEY,JSON.stringify({challenge:NC,state:NS,redirect:'chrome',created:NOW-600001})]]);const x=env({sessionValues:sv,lib:true});await x.context.OTPandaSession.ready;assert.equal(x.context.OTPandaSession.extensionIntent(),'');
+});
+test('a normal sign-in callback with no extension intent never calls begin',async()=>{
+  const {e,seen}=await xRestored(async()=>assert.fail('no call'),new Map());e.context.OTPandaSession.extensionCancel();assert.equal(seen.length,0);assert.equal(e.context.location.assigned,undefined);
+});
+
+test('logout and explicit clear remove both pending handoff intents',async()=>{for(const action of ['logout','clear']){const sv=new Map([[NKEY,JSON.stringify({challenge:NC,state:NS,created:NOW})],[XKEY,JSON.stringify({challenge:NC,state:NS,redirect:'chrome',created:NOW})]]);const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;sv.set(NKEY,'pending-native');sv.set(XKEY,'pending-extension');e.context.OTPandaSession[action]();assert.equal(sv.has(NKEY),false);assert.equal(sv.has(XKEY),false);}});
+test('a new native or extension launch clears the opposite old tab intent',async()=>{for(const [hash,old] of [[launchHash,XKEY],[XHASH,NKEY]]){const sv=new Map([[old,'stale']]);const e=env({hash,sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;assert.equal(sv.has(old),false);}});
+
+test('signed-out chooser clear retains the intended handoff for another login method',async()=>{const sv=new Map([[XKEY,JSON.stringify({challenge:NC,state:NS,redirect:'chrome',created:NOW})]]);const e=env({sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;e.context.OTPandaSession.clear();assert.equal(e.context.OTPandaSession.extensionIntent(),'chrome');});

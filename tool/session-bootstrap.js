@@ -67,6 +67,7 @@
   // approve page, which shows its own explicit Continue. A malformed intent is dropped.
   const NATIVE_KEY='otpanda.native.intent.v1',nativeLaunch=!routeHash&&location.hash.startsWith('#native=');
   if(nativeLaunch){
+    try{sessionStorage.removeItem('otpanda.extension.intent.v1');}catch{}
     const intent=location.origin+location.pathname===REDIRECT&&!location.search?globalThis.OTPandaNativeIntent?.parseNativeIntent(location.hash):null;
     try{if(intent)sessionStorage.setItem(NATIVE_KEY,JSON.stringify({challenge:intent.challenge,state:intent.state,...(intent.provider?{provider:intent.provider}:{}),...(intent.remember!==undefined?{remember:intent.remember}:{}),created:Date.now()}));else sessionStorage.removeItem(NATIVE_KEY);}catch{}
   }
@@ -99,9 +100,26 @@
     if(!intent)return false;
     location.assign(lib.nativeApproveUrl(intent));return true;
   };
-  const pending = (routeHash||nativeLaunch)?'':location.hash;
-  // Callback fragment is always removed before a promise, fetch or Flutter load.
-  if (pending||nativeLaunch) history.replaceState(null, '', location.pathname + location.search);
+  // Browser-extension handoff. The fragment carries a PKCE challenge, state and a redirect KEY. It is parsed
+  // strictly, removed before any promise, fetch or Flutter load, and kept only in this tab's sessionStorage
+  // (10 minutes). Nothing happens until the signed-in user clicks Connect: only that click calls begin.
+  const EXT_KEY='otpanda.extension.intent.v1',extensionLaunch=!routeHash&&location.hash.startsWith('#extension=');
+  if(extensionLaunch){
+    try{sessionStorage.removeItem(NATIVE_KEY);}catch{}
+    const intent=location.origin+location.pathname===REDIRECT&&!location.search?globalThis.OTPandaExtensionIntent?.parseExtensionIntent(location.hash):null;
+    try{if(intent)sessionStorage.setItem(EXT_KEY,JSON.stringify({challenge:intent.challenge,state:intent.state,redirect:intent.redirect,created:Date.now()}));else sessionStorage.removeItem(EXT_KEY);}catch{}
+  }
+  const readExtIntent=()=>{
+    const lib=globalThis.OTPandaExtensionIntent;let m;
+    try{m=JSON.parse(sessionStorage.getItem(EXT_KEY)??'null');}catch{return null;}
+    const now=Date.now();
+    if(!lib||!m||typeof m!=='object'||Array.isArray(m)||!Number.isSafeInteger(m.created)||now<m.created||now-m.created>600000||Object.keys(m).sort().join(',')!=='challenge,created,redirect,state')return null;
+    return lib.parseExtensionIntent('#extension=1&challenge='+m.challenge+'&state='+m.state+'&redirect='+m.redirect);
+  };
+  const dropExtIntent=()=>{try{sessionStorage.removeItem(EXT_KEY);}catch{}};
+  const dropHandoffIntents=()=>{dropExtIntent();try{sessionStorage.removeItem(NATIVE_KEY);}catch{}};
+  const pending = (routeHash||nativeLaunch||extensionLaunch)?'':location.hash;
+  if(pending||nativeLaunch||extensionLaunch) history.replaceState(null, '', location.pathname + location.search);
   let saved;
   if (pending) { try { saved = sessionStorage.getItem(KEY); sessionStorage.removeItem(KEY); } catch {} }
   // First-party restore, optionally carrying a one-time link result to show once.
@@ -237,7 +255,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     return value&&Number.isSafeInteger(value.serverTime)&&value.serverTime>=0&&['firstPartyExpiresAt,handleId,lineageId,serverTime','handleId,lineageId,serverTime'].includes(Object.keys(value).sort().join(','))&&/^[A-Za-z0-9_-]{8,64}$/.test(value.lineageId)&&/^[A-Za-z0-9_-]{8,64}$/.test(value.handleId)&&token.slice(6,18)===value.handleId&&(value.firstPartyExpiresAt===undefined||(Number.isSafeInteger(value.firstPartyExpiresAt)&&(tabKey?value.firstPartyExpiresAt>0:value.firstPartyExpiresAt>now)&&value.firstPartyExpiresAt<=now+30*86400000));
   }
   async function restoreAfterUnauthorized() {
-    clear();status='session-paused';
+    dropHandoffIntents();clear();status='session-paused';
     // Persist only a cooldown timestamp across the first-party redirect, never access.
     try {
       const previous=Number(sessionStorage.getItem(READ_RESTORE_KEY));
@@ -378,6 +396,23 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       location.assign(API+'/auth/google/link/start?'+new URLSearchParams({ticket:v.ticket}));return '';
     },
     googleLinkResult:()=>{const r=linkResult;linkResult=undefined;return r??'';},
+    // Extension handoff, confirmation side. extensionIntent is '' or the redirect key. Only extensionConnect (the
+    // Connect click) calls begin. Returns '' once it navigates, otherwise a reason code.
+    extensionIntent:()=>readExtIntent()?.redirect??'',
+    extensionCancel:()=>{dropExtIntent();},
+    extensionConnect:async()=>{
+      const intent=readExtIntent();if(!intent)return 'expired';
+      const attempt=generation;
+      if(!await maintainSession(true)||attempt!==generation)return 'signin';
+      const token=serverNow()<expires?access:undefined;if(!token)return 'signin';
+      let r;try{r=await fetch(API+'/auth/extension/begin',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({challenge:intent.challenge,confirm:true,redirect:intent.redirect,state:intent.state})});}catch{return 'unavailable';}
+      let v;try{v=JSON.parse(await readBounded(r,4096));}catch{return 'unavailable';}
+      if(attempt!==generation)return 'unavailable';
+      if(!r.ok){if([401,403,409].includes(r.status)){dropHandoffIntents();return r.status===409?'restart':'signin';}return r.status===429?'retry':r.status===401||r.status===403?'signin':'unavailable';}
+      const target=globalThis.OTPandaExtensionIntent.validReturn(v?.redirect,intent.state,intent.redirect);
+      if(!target){dropExtIntent();return 'unavailable';}
+      dropExtIntent();location.assign(target);return '';
+    },
     signupEmail:async(email,proof='')=>{
       if(location.origin+location.pathname!==REDIRECT||location.search||typeof email!=='string'||email.length>254||typeof proof!=='string'||(proof&&!/^otpda_[A-Za-z0-9_-]{55}$/.test(proof)&&! /^[A-HJ-NP-Z2-9]{8}$/i.test(proof.replaceAll(' ','').replaceAll('-',''))))throw Error('Valid signup details required');
       clear();const attempt=generation,verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;
@@ -385,8 +420,8 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const u=new URL(API+'/auth/signup/app');u.search=new URLSearchParams({challenge,state,redirect_uri:REDIRECT});u.hash=new URLSearchParams({action:proof?'begin':'email',email,...(proof?{email_token:proof}:{})});location.assign(u.href);
     },
     access:()=>{if(access!==undefined&&serverNow()>=expires){status='session-paused';return undefined;}return access;},
-    clear:()=>{showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
-    logout:()=>{showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}location.assign(API+'/auth/device/logout');},
+    clear:()=>{if(access)dropHandoffIntents();showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
+    logout:()=>{dropHandoffIntents();showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}location.assign(API+'/auth/device/logout');},
     read:async path=>{
       if(!['/v1/manage/account','/v1/manage/session','/v1/manage/session?view=cache-v1','/v1/manage/entries','/v1/manage/active-codes','/v1/manage/sources','/v1/manage/unassigned'].includes(path))throw Error('Read path required');
       if(!await maintainSession(true))return {status:access||status==='restoring'||status==='session-paused'?503:401,body:'{}'};

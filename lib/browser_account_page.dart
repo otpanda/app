@@ -17,6 +17,8 @@ import 'package:material_ui/material_ui.dart';
 
 import 'browser_session.dart';
 import 'browser_session_contract.dart';
+import 'extension_connect.dart';
+import 'extension_popup.dart';
 import 'google_link.dart';
 import 'lost_access_page.dart';
 import 'recovery_contract.dart';
@@ -270,7 +272,11 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         }
       }
       if (mounted && status == 'restored') {
-        if (widget.workspaceEnabled) workspace.tick();
+        // The extension popup owns its single live socket; the hidden workspace
+        // controller must not open a second one.
+        if (widget.workspaceEnabled && !isExtensionPopup(bridge)) {
+          workspace.tick();
+        }
         if (bridge is! SessionContinuityBridge &&
             ((widget.accountOnly &&
                     accountExpiresAt != null &&
@@ -313,6 +319,16 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         }
         await refresh();
         if (mounted) setState(showGoogleLinkResult);
+        // A browser extension waiting for approval gets one explicit
+        // confirmation. The bridge sends nothing until the user presses Connect.
+        if (mounted && bridge is ExtensionConnectBridge) {
+          unawaited(
+            showExtensionConnectDialog(
+              context,
+              bridge as ExtensionConnectBridge,
+            ),
+          );
+        }
         if (view == 5 && mounted && bridge.status == 'restored') {
           await loadSecurity();
         }
@@ -1539,6 +1555,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         onNavigate: widget.onNavigate,
         onExit: widget.onNavigate == null ? null : () => navigated('codes'),
       );
+    }
+    if (isExtensionPopup(bridge)) {
+      return ExtensionPopupView(bridge: bridge, clock: widget.clock);
     }
     final codes = store.visibleCodes(now());
     if (widget.workspaceEnabled &&
