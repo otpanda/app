@@ -65,7 +65,7 @@
       // ticket (never the bearer). Any failure backs off 5s to 5min with jitter. A closed socket never clears the
       // record: 4401 forces one signed renew through the worker, and only a definitive renew 401 signs out.
       realtimeSubscribe: listener => {
-        let stopped = false, ws, timer, attempt = 0, lost = false, stable, resetAttempt;
+        let stopped = false, ws, timer, attempt = 0, t4408 = [], lost = false, stable, resetAttempt;
         const tell = r => { try { listener(r); } catch { /* listener errors never stop the socket */ } };
         const down = () => { if (!lost) { lost = true; tell('connection-lost'); } };
         const later = ms => { if (!stopped) timer = setTimeout(connect, ms); };
@@ -93,6 +93,10 @@
             if (ws === w) ws = undefined;
             if (stopped) return;
             down();
+            // A repeated 4408 inside 30s counts as an ordinary failure: normal backoff, no forced renew.
+            const repeat4408 = e.code === 4408 && (t4408 = t4408.filter(t => Date.now() - t < 30000)).length > 0;
+            if (e.code === 4408) t4408.push(Date.now());
+            if (repeat4408) return backoff();
             if (e.code === 4401 || e.code === 4408) {
               try { const m = await send({ type: 'maintain', force: true }); if (m && m.signedOut === true) { status = 'idle'; return; } } catch { /* unavailable */ }
               if (e.code === 4408) return later(1000 + Math.random() * 1000);

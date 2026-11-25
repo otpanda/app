@@ -196,15 +196,19 @@ class _ExtensionPopupViewState extends State<ExtensionPopupView> {
           for (final x in raw)
             if (!es.any((e) => e.id == x.entryId)) x.entryId,
         };
-      } else if (entriesDirty) {
-        // A hint arrived inside the 30s window: one trailing refresh after it.
-        metaTimer ??= Timer(
-          Duration(milliseconds: 30000 - (now() - lastEntries)),
-          () {
-            metaTimer = null;
-            requestRefresh();
-          },
-        );
+      } else if (entriesDirty || fresh) {
+        // Inside a window: one trailing refresh. A new unknown id is waiting on the
+        // 10s unknown-entry limit, so its metadata is scheduled at 10s remaining
+        // (not 30s) and the new code is not hidden for long.
+        final waits = [
+          if (fresh) 10000 - (now() - lastUnknownFetch),
+          if (entriesDirty) 30000 - (now() - lastEntries),
+        ];
+        final wait = waits.reduce((x, y) => x < y ? x : y);
+        metaTimer ??= Timer(Duration(milliseconds: wait < 0 ? 0 : wait), () {
+          metaTimer = null;
+          requestRefresh();
+        });
       }
       final ids = es.map((x) => x.id).toSet();
       final cs = raw.where((x) => ids.contains(x.entryId)).toList()
