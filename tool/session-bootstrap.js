@@ -9,13 +9,17 @@
   const READ_RESTORE_KEY = 'otpanda.read.restore.v1';
   const resetReadRestore=()=>{try{sessionStorage.removeItem(READ_RESTORE_KEY);}catch{}};
   const VIEW_KEY = 'otpanda.view.tab.v1';
+  // Signed-in "Connect Google": one tab-scoped marker holding only an opaque
+  // state and the route to come back to. No token, key or bearer is stored.
+  const LINK_KEY = 'otpanda.google-link.tab.v1';
+  const LINK_NOTICES = ['connected', 'restart', 'mismatch', 'cancelled'];
   const validView = v => Number.isInteger(v) && v >= 0 && v <= 5;
   let view = 0;
   try { const stored=sessionStorage.getItem(VIEW_KEY);if(stored!==null&&/^[0-5]$/.test(stored))view=Number(stored); } catch {}
   const forgetView=()=>{view=0;try{sessionStorage.removeItem(VIEW_KEY);}catch{}};
   let signingKey, renewal, renewing, restoring, serverOffset=0, renewalRetryAt=0;
   const serverNow=()=>Date.now()+serverOffset;
-  let access, expires = 0, status = 'idle', generation = 0, loginPending, entryEmail='',enrollment,googlePending,protectionPending;
+  let linkResult, access, expires = 0, status = 'idle', generation = 0, loginPending, entryEmail='',enrollment,googlePending,protectionPending;
   const encode = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
   const random = () => encode(crypto.getRandomValues(new Uint8Array(32)));
   const clear = () => { assignment?.clear();generation++; renewalRetryAt=0;signingKey=undefined;renewal=undefined;renewing=undefined;restoring=undefined;access = undefined; expires = 0; loginPending=undefined;enrollment=undefined;googlePending=undefined;protectionPending=undefined; };
@@ -52,6 +56,44 @@
   if (pending) history.replaceState(null, '', location.pathname + location.search);
   let saved;
   if (pending) { try { saved = sessionStorage.getItem(KEY); sessionStorage.removeItem(KEY); } catch {} }
+  // First-party restore, optionally carrying a one-time link result to show once.
+  const startRestore=async notice=>{
+    const verifier=random(),state=random(),attempt=generation;status='restoring';
+    const challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
+    if(attempt!==generation)return;
+    sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),...(LINK_NOTICES.includes(notice)?{linkNotice:notice}:{})}));
+    location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));
+  };
+  // A link return counts only with a live marker whose state matches. Anything
+  // else returns false and goes through the ordinary (strict) parsing.
+  const linkReturn=async (pending,hasOrdinaryRecord)=>{
+    let m;try{m=JSON.parse(sessionStorage.getItem(LINK_KEY)??'null');}catch{return false;}
+    const now=Date.now();
+    if(!m||typeof m!=='object'||!/^[A-Za-z0-9_-]{43}$/.test(m.state)||!Number.isSafeInteger(m.created)||now<m.created||!validRoute(m.route))return false;
+    if(location.origin+location.pathname!==REDIRECT||location.search||pending.length>8192)return false;
+    const values=new URLSearchParams(pending.slice(1)),keys=[...values.keys()].sort().join(','),state=values.get('state');
+    const consume=()=>{try{sessionStorage.removeItem(LINK_KEY);}catch{}route=m.route;saveRoute();};
+    // A link that ended, or came back too late, only restores the session and
+    // says so. It never accepts a token, state or sign-in from the hash.
+    const ended=async(notice='restart')=>{consume();await startRestore(notice);return true;};
+    // Success needs a fresh marker (10 minutes) and the exact state.
+    const fresh=now-m.created<=600000;
+    if(keys==='google,state'&&state===m.state){
+      if(!fresh)return ended();
+      // A matching state that is not a valid pending link ends the attempt and
+      // restores; it must not fall through to the sign-in parser.
+      let g;try{g=JSON.parse(values.get('google'));}catch{return ended();}
+      if(!g||typeof g!=='object'||Object.keys(g).sort().join(',')!=='email,expiresAt,kind,token'||g.kind!=='link-only'||!/^otpda_[A-Za-z0-9_-]{55}$/.test(g.token)||typeof g.email!=='string'||g.email.length>254||!Number.isSafeInteger(g.expiresAt)||g.expiresAt<=now||g.expiresAt>now+600000)return ended();
+      consume();googlePending={...g,linkOnly:true};entryEmail=g.email;status='google-link-only';return true;
+    }
+    if(keys==='link,state')return ended(['restart','mismatch'].includes(values.get('link'))?values.get('link'):'restart');
+    // A link-shaped return with a live marker never reaches the sign-in parser,
+    // whatever its state: restore only, hint kept, unknown reason means restart.
+    // The ordinary failure shape, but only when no ordinary sign-in is in
+    // flight (it saves its own record first) and a link marker exists.
+    if(keys==='auth,state'&&['restart','retry'].includes(values.get('auth'))&&!hasOrdinaryRecord)return ended();
+    return false;
+  };
   const ready = (async () => {
     if (!pending) {
       // This hint describes an active session, not remembered-device recognition.
@@ -60,6 +102,7 @@
       return;
     }
     if(pending==='#auth=logout-incomplete&state='){try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='logout-incomplete';return;}
+    if(/^#(google|link|auth)=/.test(pending)&&await linkReturn(pending,Boolean(saved)))return;
     status = 'restoring';const attempt=generation;
     try {
       if (location.origin + location.pathname !== REDIRECT || location.search || pending.length > 8192 || !saved) throw Error();
@@ -67,6 +110,7 @@
       const state=values.get('state'),p=JSON.parse(saved),now=Date.now();
       if(!/^[A-Za-z0-9_-]{43}$/.test(state)||state!==p.state||!/^[A-Za-z0-9_-]{43}$/.test(p.verifier)||!Number.isSafeInteger(p.created)||now<p.created||now-p.created>((values.has('signup')||values.has('auth'))?900000:300000))throw Error();
       if(p.route!==undefined&&!validRoute(p.route))throw Error();
+      if(p.linkNotice!==undefined&&!LINK_NOTICES.includes(p.linkNotice))throw Error();
       if(p.route!==undefined){route=p.route;saveRoute();}
       if([...values.keys()].sort().join(',')==='auth,state'){
         const value=values.get('auth');if(!['email-sent','email-invalid','code-invalid','restart','retry','existing-account','sign-in','legacy-account'].includes(value))throw Error();
@@ -77,7 +121,7 @@
           if(attempt!==generation)return;
           const verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
           if(attempt!==generation)return;
-          sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),view,restoreRetried:true}));
+          sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),view,restoreRetried:true,...(p.linkNotice?{linkNotice:p.linkNotice}:{})}));
           location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));return;
         }
         if(['restart','retry','sign-in'].includes(value))try{localStorage.removeItem('otpanda-session-present');}catch{}
@@ -124,7 +168,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const nextOffset=validateAccess(result);
       if(attempt!==generation)return;
       try{localStorage.setItem('otpanda-session-present','yes');}catch{}
-      serverOffset=nextOffset;access=result.access;expires=result.accessExpiresAt;status='restored';
+      serverOffset=nextOffset;access=result.access;expires=result.accessExpiresAt;status='restored';if(p.linkNotice)linkResult=p.linkNotice;
       if(candidateKey&&validRenewal(result.renewal,result.access)&&result.renewal.firstPartyExpiresAt!==undefined) {signingKey=candidateKey;renewal=result.renewal;}
       const grant=values.get('enrollment');if(grant&&/^otpda_[A-Za-z0-9_-]{55}$/.test(grant))enrollment=grant;
     } catch { if(attempt===generation){try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='sign-in-required';} }
@@ -252,6 +296,22 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     setView:value=>{if(!validView(value))throw Error('View identifier required');view=value;try{sessionStorage.setItem(VIEW_KEY,String(value));}catch{}},
     email:()=>entryEmail,
     googleStart:async remember=>globalThis.OTPandaSession.start('google',remember),
+    // Signed-in connect. Never clears the session or the restore hint. Returns
+    // '' once it navigates to Google, otherwise a reason code to show.
+    connectGoogle:async()=>{
+      const attempt=generation;
+      if(!await maintainSession(true)||attempt!==generation)return 'signin';
+      const token=serverNow()<expires?access:undefined;if(!token)return 'signin';
+      const state=random();
+      let r;try{r=await fetch(API+'/v1/manage/google/link/ticket',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({state})});}catch{return 'unavailable';}
+      let v;try{v=JSON.parse(await readBounded(r,2048));}catch{return 'unavailable';}
+      if(attempt!==generation)return 'unavailable';
+      if(!r.ok)return r.status===429?'retry':r.status===409&&v?.error==='no_passkey'?'no_passkey':r.status===409&&v?.error==='already_linked'?'already_linked':r.status===401||r.status===403?'signin':'unavailable';
+      if(typeof v?.ticket!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(v.ticket))return 'unavailable';
+      try{sessionStorage.setItem(LINK_KEY,JSON.stringify({state,route:validRoute(route)&&route!=='demo'&&!route.startsWith('recovery')?route:'settings/account-security',created:Date.now()}));}catch{return 'unavailable';}
+      location.assign(API+'/auth/google/link/start?'+new URLSearchParams({ticket:v.ticket}));return '';
+    },
+    googleLinkResult:()=>{const r=linkResult;linkResult=undefined;return r??'';},
     signupEmail:async(email,proof='')=>{
       if(location.origin+location.pathname!==REDIRECT||location.search||typeof email!=='string'||email.length>254||typeof proof!=='string'||(proof&&!/^otpda_[A-Za-z0-9_-]{55}$/.test(proof)&&! /^[A-HJ-NP-Z2-9]{8}$/i.test(proof.replaceAll(' ','').replaceAll('-',''))))throw Error('Valid signup details required');
       clear();const attempt=generation,verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;
@@ -305,6 +365,30 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const value={enabled,warningAccepted:true},c=await post('begin',value),response=await assertion(c);if(attempt!==generation)return '{}';await post('finish',{...value,token:c.token,response});return '{}';
     },
     googleContinue:async(action,proof='')=>{
+      if(googlePending?.linkOnly){
+        const g=googlePending,attempt=generation;
+        if(action==='link-cancel'){googlePending=undefined;await startRestore('cancelled');return;}
+        if(action!=='link-only')throw Error('Verify with your passkey or cancel.');
+        if(g.expiresAt<=Date.now()){googlePending=undefined;await startRestore('restart');return;}
+        const post=async(path,value)=>{const r=await fetch(API+'/auth/google/continue/'+path,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json','X-OTPanda-Continuation':g.token},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,16384));if(!r.ok)throw Error('refused');return v;};
+        let c,credential;
+        const decode=v=>Uint8Array.from(atob(v.replaceAll('-','+').replaceAll('_','/')),x=>x.charCodeAt(0));
+        try{
+          c=await post('begin',{});const o=c.options;
+          if(!/^otpda_[A-Za-z0-9_-]{55}$/.test(c.token)||o?.rpId!=='otpanda.github.io'||o.userVerification!=='required'||!/^[A-Za-z0-9_-]{43}$/.test(o.challenge)||!Array.isArray(o.allowCredentials)||o.allowCredentials.length>20)throw Error('invalid');
+          if(attempt!==generation)return;
+          try{credential=await navigator.credentials.get({publicKey:{rpId:'otpanda.github.io',challenge:decode(o.challenge),userVerification:'required',timeout:120000,allowCredentials:o.allowCredentials.map(v=>({type:'public-key',id:decode(v.id)}))}});}catch{credential=null;}
+        }catch{if(attempt===generation){googlePending=undefined;await startRestore('restart');}return;}
+        // Dismissed prompt: keep the pending link so the person can try again or cancel.
+        if(!credential||attempt!==generation)throw Error('Account verification cancelled');
+        try{
+          const done=await post('verify',{ceremony:c.token,emailProof:'',response:{id:credential.id,rawId:encode(new Uint8Array(credential.rawId)),type:credential.type,clientExtensionResults:credential.getClientExtensionResults(),response:{clientDataJSON:encode(new Uint8Array(credential.response.clientDataJSON)),authenticatorData:encode(new Uint8Array(credential.response.authenticatorData)),signature:encode(new Uint8Array(credential.response.signature)),userHandle:credential.response.userHandle?encode(new Uint8Array(credential.response.userHandle)):null}}});
+          if(done?.status!=='ok')throw Error('refused');
+        }catch{if(attempt===generation){googlePending=undefined;await startRestore('restart');}return;}
+        if(attempt!==generation)return;
+        googlePending=undefined;await startRestore('connected');return;
+      }
+      if(action==='link-only'||action==='link-cancel')throw Error('Start Google sign-in again.');
       const g=googlePending,attempt=generation;if(!g||g.expiresAt<=Date.now()||!['email','verify-email','link'].includes(action))throw Error('Start Google sign-in again.');
       const post=async(path,value)=>{const r=await fetch(API+'/auth/google/continue/'+path,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json','X-OTPanda-Continuation':g.token},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,16384));if(!r.ok||attempt!==generation)throw Error('Could not verify this account. Start Google sign-in again.');return v;};
       if(action==='email'){await post('email',{});return;}
