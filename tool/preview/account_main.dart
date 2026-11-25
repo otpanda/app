@@ -28,9 +28,12 @@ class Fake
         SessionContinuityBridge,
         TotpManagementBridge,
         RecoveryBridge,
+        PasskeyLabelBridge,
         GoogleLinkBridge {
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+  @override
+  Future<void> renamePasskey(String credentialId, String? label) async {}
   @override
   bool get googleDisconnectAvailable => true;
   @override
@@ -81,8 +84,25 @@ class Fake
     return RecoveryStatus.fromJson({
       'emailEscape': {'enabled': previewEscape, 'delayDays': 7},
       'passkeys': [
-        {'id': 'p1', 'createdAt': n - 86400000 * 20, 'lastUsedAt': n - 3600000},
-        {'id': 'p2', 'createdAt': n - 86400000 * 3, 'lastUsedAt': null},
+        {
+          'id': 'p1',
+          'createdAt': n - 86400000 * 20,
+          'lastUsedAt': n - 3600000,
+          if (Uri.base.queryParameters['labels'] == '1') ...{
+            'provider': 'Bitwarden',
+            'label': 'Work laptop',
+          },
+        },
+        if (Uri.base.queryParameters['one'] != '1')
+          {
+            'id': 'p2',
+            'createdAt': n - 86400000 * 3,
+            'lastUsedAt': null,
+            if (Uri.base.queryParameters['labels'] == '1')
+              'provider': 'Google Password Manager',
+          },
+        if (Uri.base.queryParameters['labels'] == '1')
+          {'id': 'p3', 'createdAt': n - 86400000 * 2, 'lastUsedAt': null},
       ],
       'sessions': [
         if (Uri.base.queryParameters['many'] == '1')
@@ -100,6 +120,10 @@ class Fake
           'createdAt': n - 86400000,
           'lastUsedAt': n,
           'current': true,
+          if (Uri.base.queryParameters['described'] == '1') ...{
+            'browser': 'firefox',
+            'os': 'linux',
+          },
         },
         {
           'id': 's2',
@@ -107,7 +131,36 @@ class Fake
           'createdAt': n - 86400000 * 5,
           'lastUsedAt': n - 7200000,
           'current': false,
+          if (Uri.base.queryParameters['described'] == '1')
+            'name': "Alex's Pixel 8a",
         },
+        if (Uri.base.queryParameters['described'] == '1') ...[
+          {
+            'id': 's3',
+            'clientKind': 'web',
+            'createdAt': n - 86400000 * 3,
+            'lastUsedAt': n - 86400000,
+            'current': false,
+            'browser': 'edge',
+            'os': 'windows',
+          },
+          {
+            'id': 's4',
+            'clientKind': 'web',
+            'createdAt': n - 86400000 * 4,
+            'lastUsedAt': n - 86400000 * 2,
+            'current': false,
+            'browser': 'safari',
+            'os': 'mac',
+          },
+          {
+            'id': 's5',
+            'clientKind': 'web',
+            'createdAt': n - 86400000 * 9,
+            'lastUsedAt': null,
+            'current': false,
+          },
+        ],
       ],
     });
   }
