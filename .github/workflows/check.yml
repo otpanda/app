@@ -33,7 +33,7 @@ jobs:
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
       - run: python3 tool/test_service_catalog.py
-      - run: node --test test/assignment*.mjs test/session_bootstrap_test.cjs
+      - run: node --test test/assignment*.mjs test/session_bootstrap_test.cjs test/realtime*.cjs
       - run: flutter analyze
       - name: Check formatting (advisory until a one-time reformat lands after the App53 merge)
         continue-on-error: true
