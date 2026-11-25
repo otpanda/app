@@ -3,11 +3,13 @@ import 'dart:convert';
 import 'dart:math';
 
 import '../browser_session_contract.dart';
+import '../google_link.dart';
 import '../recovery_contract.dart';
 import '../session_contract.dart';
 import 'native_assignment.dart';
 import 'native_device_routes.dart';
 import 'native_email_recovery.dart';
+import 'native_google_link.dart';
 import 'native_manage_settings.dart';
 import 'native_passkey.dart';
 import 'native_realtime.dart';
@@ -62,6 +64,7 @@ class NativeSessionBridge
         AdditionalPasskeyBridge,
         RecoveryBridge,
         PasskeyLabelBridge,
+        GoogleConnectBridge,
         RealtimeBridge {
   /// Set once after construction (the driver needs this bridge's transport).
   NativeAssignmentDriver? assignment;
@@ -314,6 +317,22 @@ class NativeSessionBridge
 
   @override
   bool get recoveryAvailable => _manage != null;
+
+  late final NativeGoogleConnect? _connect = _manage == null
+      ? null
+      : NativeGoogleConnect(
+          settings: _manage,
+          browser: controller.auth.browser,
+          apiOrigin: controller.auth.apiOrigin,
+          nowMs: _now,
+        );
+
+  @override
+  bool get googleConnectAvailable => _connect != null;
+  @override
+  Future<String> connectGoogle() async => _connect?.connect() ?? 'unavailable';
+  @override
+  String takeGoogleLinkResult() => _connect?.takeResult() ?? '';
 
   /// Local-verification approval is not available on any client.
   @override

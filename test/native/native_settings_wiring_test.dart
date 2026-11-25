@@ -113,6 +113,8 @@ void main() {
     await c.start();
     final b = make(c, on: false);
     expect(b.recoveryAvailable, isFalse);
+    expect(b.googleConnectAvailable, isFalse);
+    expect(await b.connectGoogle(), 'unavailable');
     expect(b.enrolledClientApprovalAvailable, isFalse);
     await expectLater(b.security('status'), throwsUnsupportedError);
     await expectLater(b.renamePasskey('c', 'n'), throwsUnsupportedError);
@@ -125,6 +127,7 @@ void main() {
     await c.start();
     final b = make(c, on: true);
     expect(b.recoveryAvailable, isTrue);
+    expect(b.googleConnectAvailable, isTrue);
     expect(await b.security('status'), '{"x":1}');
     expect(calls.single.$1, 'GET');
     expect(calls.single.$2, '/v1/manage/security/status');

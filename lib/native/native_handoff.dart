@@ -89,3 +89,71 @@ Uri pagesNativeLaunchUrl(
   }
   return Uri.parse('$appEntry#native=1&challenge=$challenge&state=$state');
 }
+
+/// What the Google link browser leg returns on the Pages app URL.
+class GoogleLinkReturn {
+  const GoogleLinkReturn(this.email, this.token, this.expiresAt);
+  final String email, token;
+  final int expiresAt;
+}
+
+/// Parses the API /app-return (https://api-host/app-return)#google={...}&state=... (the same
+/// fragment tool/session-bootstrap.js accepts for kind "link-only"). Null for
+/// any other origin or path, a query string, extra or duplicated keys, a
+/// state mismatch, a wrong kind or token shape, or an expiry outside
+/// (now, now + 10 min]. The state is compared in constant time.
+GoogleLinkReturn? parseGoogleLinkReturn(
+  Uri uri, {
+  required String expectedState,
+  required int nowMs,
+  String origin = 'https://otpanda-api.abrahammurciano.workers.dev',
+  String path = '/app-return',
+}) {
+  final base = Uri.parse(origin);
+  if (uri.scheme != 'https' || uri.host != base.host) return null;
+  if (uri.userInfo.isNotEmpty || uri.hasPort && uri.port != 443) return null;
+  if (uri.path != path || uri.hasQuery || !uri.hasFragment) return null;
+  if (uri.fragment.length > 8192) return null;
+  final Map<String, String> p = {};
+  try {
+    for (final kv in uri.fragment.split('&')) {
+      final i = kv.indexOf('=');
+      if (i <= 0) return null;
+      final k = Uri.decodeQueryComponent(kv.substring(0, i));
+      if (p.containsKey(k)) return null;
+      p[k] = Uri.decodeQueryComponent(kv.substring(i + 1));
+    }
+  } on FormatException {
+    return null;
+  }
+  if (p.length != 2) return null;
+  final state = p['state'], raw = p['google'];
+  if (state == null || raw == null || state.length != expectedState.length) {
+    return null;
+  }
+  var diff = 0;
+  for (var i = 0; i < state.length; i++) {
+    diff |= state.codeUnitAt(i) ^ expectedState.codeUnitAt(i);
+  }
+  if (diff != 0) return null;
+  final Object? g;
+  try {
+    g = jsonDecode(raw);
+  } on FormatException {
+    return null;
+  }
+  if (g is! Map || g.length != 4) return null;
+  final email = g['email'], token = g['token'], exp = g['expiresAt'];
+  if (g['kind'] != 'link-only' ||
+      token is! String ||
+      !RegExp(r'^otpda_[A-Za-z0-9_-]{55}$').hasMatch(token) ||
+      email is! String ||
+      email.isEmpty ||
+      email.length > 254 ||
+      exp is! int ||
+      exp <= nowMs ||
+      exp > nowMs + 600000) {
+    return null;
+  }
+  return GoogleLinkReturn(email, token, exp);
+}
