@@ -9,8 +9,13 @@ set -euo pipefail
 OUT="${1:-directory-cache-out}"
 mkdir -p "$OUT"
 set +e
-flutter test integration_test/service_directory_android_test.dart --flavor google -d "${DEVICE:-emulator-5554}" 2>&1 | tee "$OUT/test.log"
+timeout --signal=INT --kill-after=20s 600 flutter test --reporter expanded integration_test/service_directory_android_test.dart --flavor google -d "${DEVICE:-emulator-5554}" 2>&1 | tee "$OUT/test.log"
 result=${PIPESTATUS[0]}
 set -e
+adb logcat -d > "$OUT/logcat.txt" 2>&1 || true
+adb shell dumpsys activity activities > "$OUT/activities.txt" 2>&1 || true
+adb shell uiautomator dump /sdcard/cache-ui.xml > "$OUT/uiautomator.log" 2>&1 || true
+adb pull /sdcard/cache-ui.xml "$OUT/ui.xml" >> "$OUT/uiautomator.log" 2>&1 || true
+adb exec-out screencap -p > "$OUT/last-screen.png" 2>/dev/null || true
 python3 "$(dirname "$0")/extract-shots.py" "$OUT/test.log" "$OUT/shots"
 exit "$result"

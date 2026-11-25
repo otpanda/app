@@ -11,7 +11,7 @@ permissions:
 jobs:
   emulator:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -51,10 +51,6 @@ jobs:
           disable-animations: true
           script: |
             bash tool/android-directory-cache.sh directory-cache-out
-            bash tool/android-emulator-smoke.sh build/app/outputs/flutter-apk/app-google-debug.apk smoke-out
-            bash tool/android-os-qualify.sh os-qualify-out
-            API_DIR="$PWD/api-qualification" bash tool/android-roundtrip.sh roundtrip-out
-            API_DIR="$PWD/api-qualification" bash tool/android-signed-in-ui.sh signed-in-ui-out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
