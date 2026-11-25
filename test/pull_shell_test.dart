@@ -47,7 +47,7 @@ Future<(FakeTransport, int Function(), void Function(int))> setup(
 
 Future<void> pullDown(WidgetTester t) async {
   await t.drag(
-    find.text('Your codes'),
+    find.byType(ListView).first,
     const Offset(0, 400),
     kind: PointerDeviceKind.touch,
   );

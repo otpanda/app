@@ -1,0 +1,231 @@
+import 'package:material_ui/material_ui.dart';
+
+import '../branding.dart';
+import '../main.dart' show green, ink, line, muted, otpandaTheme;
+import 'native_session.dart';
+
+/// Native shell: renews at start, then shows sign-in, an honest signed-in
+/// page, or the offline / sign-in-required states. Account data screens are
+/// not native yet, so signed-in shows status and Sign out only.
+class NativeApp extends StatelessWidget {
+  const NativeApp({
+    super.key,
+    required this.controller,
+    required this.googleAvailable,
+    this.version = '',
+    this.signedInBuilder,
+  });
+  final NativeSessionController controller;
+  final bool googleAvailable;
+  final String version;
+
+  /// Replaces the status page when signed in (the shared account UI).
+  final WidgetBuilder? signedInBuilder;
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'OTPanda',
+    debugShowCheckedModeBanner: false,
+    theme: otpandaTheme(),
+    home: NativeSessionPage(
+      controller: controller,
+      googleAvailable: googleAvailable,
+      version: version,
+      signedInBuilder: signedInBuilder,
+    ),
+  );
+}
+
+class NativeSessionPage extends StatefulWidget {
+  const NativeSessionPage({
+    super.key,
+    required this.controller,
+    required this.googleAvailable,
+    this.version = '',
+    this.signedInBuilder,
+  });
+  final NativeSessionController controller;
+  final bool googleAvailable;
+  final String version;
+  final WidgetBuilder? signedInBuilder;
+  @override
+  State<NativeSessionPage> createState() => _State();
+}
+
+class _State extends State<NativeSessionPage> {
+  bool busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.start();
+  }
+
+  Future<void> _run(Future<void> Function() f) async {
+    setState(() => busy = true);
+    try {
+      await f();
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  String? _error(String? k) => switch (k) {
+    null => null,
+    'cancelled' => null,
+    'rate_limited' => 'Too many attempts. Try again in a minute.',
+    'unavailable' => 'OTPanda could not be reached. Try again later.',
+    'network' => 'No connection. Check your network and try again.',
+    'busy' => null,
+    'browser_required' => 'This account needs sign-in in the browser.',
+    _ => 'Sign-in did not complete. Try again.',
+  };
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.controller,
+    builder: (context, _) {
+      final c = widget.controller;
+      if (c.phase == NativeSessionPhase.signedIn &&
+          widget.signedInBuilder != null) {
+        return widget.signedInBuilder!(context);
+      }
+      final err = _error(c.lastError);
+      final (title, body) = switch (c.phase) {
+        NativeSessionPhase.unknown => ('OTPanda', 'Checking your session...'),
+        NativeSessionPhase.signedIn => (
+          'You are signed in',
+          'Your account screens are not on this device yet. Open OTPanda in the browser for them.',
+        ),
+        NativeSessionPhase.signInRequired => (
+          'Sign in again',
+          'This device could not renew its session. Sign in to continue.',
+        ),
+        NativeSessionPhase.offline => (
+          'Cannot reach OTPanda',
+          'Your session is kept on this device. Try again when you are online.',
+        ),
+        NativeSessionPhase.signedOut => (
+          'Sign in to OTPanda',
+          'Use your Google account or sign in with the browser.',
+        ),
+      };
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Image.memory(
+                      ottyImage,
+                      width: 72,
+                      height: 72,
+                      semanticLabel: 'OTPanda mascot',
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: ink,
+                        fontFamily: 'BricolageGrotesque',
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      body,
+                      style: const TextStyle(
+                        color: muted,
+                        fontSize: 15,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    if (c.phase == NativeSessionPhase.signedOut ||
+                        c.phase == NativeSessionPhase.signInRequired) ...[
+                      if (widget.googleAvailable)
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            key: const Key('native-google'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: green,
+                            ),
+                            onPressed: busy
+                                ? null
+                                : () => _run(c.signInWithGoogle),
+                            child: const Text('Continue with Google'),
+                          ),
+                        ),
+                      if (widget.googleAvailable) const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child:
+                            (widget.googleAvailable
+                            ? OutlinedButton.new
+                            : FilledButton.new)(
+                              key: const Key('native-browser'),
+                              onPressed: busy
+                                  ? null
+                                  : () => _run(c.signInWithBrowser),
+                              child: const Text('Sign in with browser'),
+                            ),
+                      ),
+                    ],
+                    if (c.phase == NativeSessionPhase.offline)
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          key: const Key('native-retry'),
+                          style: FilledButton.styleFrom(backgroundColor: green),
+                          onPressed: busy ? null : () => _run(c.start),
+                          child: const Text('Try again'),
+                        ),
+                      ),
+                    if (c.phase == NativeSessionPhase.signedIn)
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          key: const Key('native-signout'),
+                          onPressed: busy ? null : () => _run(c.signOut),
+                          child: const Text('Sign out'),
+                        ),
+                      ),
+                    if (err != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: line),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          err,
+                          key: const Key('native-error'),
+                          style: const TextStyle(color: ink, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                    if (widget.version.isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      Text(
+                        'Version ${widget.version}',
+                        style: const TextStyle(color: muted, fontSize: 12),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}

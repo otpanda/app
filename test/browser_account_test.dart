@@ -132,7 +132,7 @@ void main() {
     await t.tap(find.byTooltip('Back to codes'));
     await t.pumpAndSettle();
     expect(bridge.restoredView, 0);
-    expect(find.text('Your codes'), findsOneWidget);
+    expect(find.byKey(const Key('product-top-bar')), findsOneWidget);
     await t.pumpWidget(const SizedBox.shrink());
     expect(t.takeException(), isNull);
   });

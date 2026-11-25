@@ -67,6 +67,10 @@ class ProductShell extends StatefulWidget {
 enum _Phase { loading, loaded, cleared, failed, rateLimited, signedOut }
 
 class _ProductShellState extends State<ProductShell> {
+  bool get _canAddTotp =>
+      widget.controller.bridge is TotpManagementBridge &&
+      (widget.controller.bridge is! TotpCreationCapability ||
+          (widget.controller.bridge as TotpCreationCapability).canAddTotp);
   static const names = ['Codes', 'Sources', 'Unassigned', 'Entries'];
   static const icons = [
     Icons.password,
@@ -87,6 +91,21 @@ class _ProductShellState extends State<ProductShell> {
       : _Phase.cleared;
   late int tab = widget.initialTab.clamp(0, 3);
   String query = '';
+  final searchController = TextEditingController();
+
+  /// Search only filters Codes and Entries.
+  bool get searchable => tab == 0 || tab == 3;
+
+  void clearSearch() {
+    query = '';
+    searchController.clear();
+  }
+
+  void selectTab(int i) => setState(() {
+    tab = i;
+    widget.onTabChanged?.call(i);
+    clearSearch();
+  });
 
   /// Codes that arrived this recently sit on top, highlighted.
   static const freshForMs = 120000;
@@ -107,7 +126,7 @@ class _ProductShellState extends State<ProductShell> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initialTab != widget.initialTab) {
       tab = widget.initialTab.clamp(0, 3);
-      query = '';
+      clearSearch();
     }
   }
 
@@ -119,6 +138,7 @@ class _ProductShellState extends State<ProductShell> {
   void dispose() {
     freshTimer?.cancel();
     widget.controller.removeListener(changed);
+    searchController.dispose();
     super.dispose();
   }
 
@@ -626,6 +646,40 @@ class _ProductShellState extends State<ProductShell> {
     }
   }
 
+  Widget searchField(bool compact) => Semantics(
+    label: 'Search services or accounts',
+    child: TextField(
+      key: ValueKey('search-$tab'),
+      controller: searchController,
+      textInputAction: TextInputAction.search,
+      decoration: InputDecoration(
+        hintText: compact ? 'Search' : 'Search services or accounts',
+        prefixIcon: const Icon(Icons.search, size: 20),
+        suffixIcon: query.isEmpty
+            ? null
+            : IconButton(
+                key: const Key('search-clear'),
+                tooltip: 'Clear search',
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () => setState(clearSearch),
+              ),
+        filled: true,
+        fillColor: const Color(0xfff2f5f3),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(vertical: 11),
+        border: const OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(24)),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: const BorderRadius.all(Radius.circular(24)),
+          borderSide: BorderSide(color: green, width: 1.5),
+        ),
+      ),
+      onChanged: (v) => setState(() => query = v),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, size) {
@@ -634,46 +688,11 @@ class _ProductShellState extends State<ProductShell> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.fromLTRB(
           desktop ? 0 : 12,
-          20,
+          desktop ? 20 : 14,
           desktop ? 0 : 12,
           30,
         ),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  tab == 0 ? 'Your codes' : names[tab],
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontFamily: 'BricolageGrotesque',
-                    fontSize: 28,
-                    letterSpacing: -0.8,
-                    color: ink,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (phase == _Phase.loaded && (tab == 0 || tab == 3)) ...[
-            TextField(
-              key: ValueKey(tab),
-              decoration: const InputDecoration(
-                hintText: 'Search services or accounts',
-                prefixIcon: Icon(Icons.search, size: 20),
-                filled: true,
-                fillColor: Colors.white,
-                isDense: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(12)),
-                  borderSide: BorderSide(color: line),
-                ),
-              ),
-              onChanged: (v) => setState(() => query = v),
-            ),
-            const SizedBox(height: 14),
-          ],
           body(),
           const SizedBox(height: 20),
           if (widget.controller.connectionLost) ...[
@@ -686,15 +705,14 @@ class _ProductShellState extends State<ProductShell> {
                 label: const Text('Reload'),
               ),
           ],
-          if (widget.controller.bridge is TotpManagementBridge)
-            const SizedBox(height: 80),
+          if (_canAddTotp) const SizedBox(height: 80),
         ],
       );
       final content = widget.pageReload == null
           ? list
           : PullToRefresh(onRefresh: pull, child: list);
       return Scaffold(
-        floatingActionButton: widget.controller.bridge is TotpManagementBridge
+        floatingActionButton: _canAddTotp
             ? FloatingActionButton.extended(
                 tooltip: 'Add authenticator',
                 backgroundColor: green,
@@ -708,6 +726,7 @@ class _ProductShellState extends State<ProductShell> {
           child: Column(
             children: [
               Container(
+                key: const Key('product-top-bar'),
                 height: desktop ? 76 : 64,
                 padding: EdgeInsets.symmetric(horizontal: desktop ? 32 : 16),
                 decoration: const BoxDecoration(
@@ -717,18 +736,36 @@ class _ProductShellState extends State<ProductShell> {
                 child: Row(
                   children: [
                     Image.memory(ottyImage, width: 42, height: 42),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'OTPanda',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontFamily: 'BricolageGrotesque',
-                        fontSize: 23,
-                        letterSpacing: -1,
-                        color: ink,
+                    if (desktop) ...[
+                      const SizedBox(width: 8),
+                      const Text(
+                        'OTPanda',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontFamily: 'BricolageGrotesque',
+                          fontSize: 23,
+                          letterSpacing: -1,
+                          color: ink,
+                        ),
+                      ),
+                    ],
+                    SizedBox(width: desktop ? 32 : 10),
+                    Expanded(
+                      child: Align(
+                        alignment: desktop
+                            ? Alignment.centerLeft
+                            : Alignment.center,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: desktop ? 560 : double.infinity,
+                          ),
+                          child: phase == _Phase.loaded && searchable
+                              ? searchField(!desktop)
+                              : const SizedBox.shrink(),
+                        ),
                       ),
                     ),
-                    const Spacer(),
+                    SizedBox(width: desktop ? 16 : 6),
                     IconButton(
                       tooltip: 'Account & security',
                       onPressed: widget.onOpenAccount,
@@ -793,11 +830,7 @@ class _ProductShellState extends State<ProductShell> {
                                             ),
                                             leading: Icon(icons[i], size: 18),
                                             title: Text(names[i]),
-                                            onTap: () => setState(() {
-                                              tab = i;
-                                              widget.onTabChanged?.call(i);
-                                              query = '';
-                                            }),
+                                            onTap: () => selectTab(i),
                                           ),
                                         ),
                                     ],
@@ -819,11 +852,7 @@ class _ProductShellState extends State<ProductShell> {
             ? null
             : NavigationBar(
                 selectedIndex: tab,
-                onDestinationSelected: (i) => setState(() {
-                  tab = i;
-                  widget.onTabChanged?.call(i);
-                  query = '';
-                }),
+                onDestinationSelected: selectTab,
                 destinations: [
                   for (var i = 0; i < names.length; i++)
                     NavigationDestination(
