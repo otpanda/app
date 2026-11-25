@@ -45,6 +45,10 @@ void _registerFontLicenses() {
       ('Figtree', 'assets/fonts/Figtree-OFL.txt'),
       ('Bricolage Grotesque', 'assets/fonts/BricolageGrotesque-OFL.txt'),
       ('@zxing/library', 'assets/zxing/zxing-library-LICENSE.txt'),
+      (
+        'Font Awesome Free brand icons (CC BY 4.0)',
+        'assets/brand-icons/FontAwesome-Free-LICENSE.txt',
+      ),
     ]) {
       yield LicenseEntryWithLineBreaks([
         name,

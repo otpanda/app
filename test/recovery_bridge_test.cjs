@@ -1,11 +1,12 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');const fs=require('node:fs');
 const src=fs.readFileSync('tool/recovery-bridge.js','utf8');
+const timers=()=>({setTimeout:(f,ms)=>{const t=setTimeout(f,ms);if(ms>=10000)t.unref();return t},clearTimeout,AbortController});
 const TOK='otpda_'+'a'.repeat(55),ACCESS='otpda_'+'b'.repeat(55),CH='A'.repeat(43);
 const encode=b=>Buffer.from(b).toString('base64url'),decode=v=>new Uint8Array(Buffer.from(v,'base64url'));
 function setup({signed=true,get,create,reply}={}){
   const calls=[],store=new Map();let n=0;
   const storage={getItem:k=>store.has(k)?store.get(k):null,setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)};
-  const ctx={};vm.createContext(ctx);vm.runInContext(src,ctx);
+  const ctx=timers();vm.createContext(ctx);vm.runInContext(src,ctx);
   const f=ctx.OTPandaRecoveryFactory;
   const resp=(status,obj)=>({ok:status<400,status,headers:{get:()=>null},body:{getReader(){let s=false;return{async read(){if(s)return{done:true};s=true;return{done:false,value:new TextEncoder().encode(JSON.stringify(obj))}},async cancel(){},releaseLock(){}}}}});
   const bridge=f({api:'https://api.test',access:()=>signed?ACCESS:undefined,generation:()=>1,
@@ -126,4 +127,84 @@ test('change: google-unlink is a known kind that sends no target and finishes af
   assert.equal(await s.bridge.change('google-unlink'),'ok');
   assert.deepEqual(s.calls.map(c=>c.path.split('/').pop()),['begin','finish']);
   assert.equal(s.calls[0].body.kind,'google-unlink');assert.ok(!('target' in s.calls[0].body));assert.ok(!('warningAccepted' in s.calls[0].body));
+});
+
+test('renamePasskey posts exact id and normalized label with the bearer and no passkey check',async()=>{
+  const s=setup({reply:()=>({body:{ok:true}})});
+  assert.equal(await s.bridge.renamePasskey('k1','  Cafe\u0301 key  '),'ok');
+  assert.deepEqual(s.calls.map(c=>c.path),['/v1/manage/passkey/rename']);
+  assert.deepEqual(s.calls[0].body,{credentialId:'k1',label:'Caf\u00e9 key'});
+  assert.equal(s.calls[0].opts.headers.Authorization,'Bearer '+ACCESS);assert.equal(s.calls[0].opts.credentials,'omit');
+  assert.equal(await s.bridge.renamePasskey('k1',null),'ok');assert.deepEqual(s.calls[1].body,{credentialId:'k1',label:null});
+  assert.equal(await s.bridge.renamePasskey('k1',''),'ok');assert.deepEqual(s.calls[2].body,{credentialId:'k1',label:null});
+});
+test('renamePasskey refuses bad input without a request and treats a bad reply as unknown',async()=>{
+  const s=setup({reply:()=>({body:{ok:true}})});
+  for(const [id,label] of [['','x'],[7,'x'],['k','a'.repeat(41)],['k','bad\u0007'],['k',5],['k','   x']]){
+    const before=s.calls.length;const r=await s.bridge.renamePasskey(id,label);
+    if(id==='k'&&label==='   x')assert.equal(r,'ok');else{assert.equal(r,'refused');assert.equal(s.calls.length,before);}
+  }
+  const u=setup();assert.equal(await u.bridge.renamePasskey('k','x'),'unknown');
+  const n=setup({reply:()=>{throw Error('network')}});assert.equal(await n.bridge.renamePasskey('k','x'),'unknown');
+  const nosign=setup({signed:false});assert.equal(await nosign.bridge.renamePasskey('k','x'),'refused');
+});
+
+const UA_FF='Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0';
+const UA_CH='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const UA_ED=UA_CH+' Edg/130.0.0.0';
+const UA_SF='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
+test('detectDevice maps to closed enums only',()=>{
+  const ctx=timers();vm.createContext(ctx);vm.runInContext(src,ctx);const d=ctx.OTPandaDetectDevice;
+  assert.deepEqual({...d({userAgent:UA_FF})},{browser:'firefox',os:'linux'});
+  assert.deepEqual({...d({userAgent:UA_CH})},{browser:'chrome',os:'windows'});
+  assert.deepEqual({...d({userAgent:UA_ED})},{browser:'edge',os:'windows'});
+  assert.deepEqual({...d({userAgent:UA_SF})},{browser:'safari',os:'mac'});
+  assert.deepEqual({...d({userAgent:'x',userAgentData:{brands:[{brand:'Google Chrome',version:'1'}],platform:'Android'}})},{browser:'chrome',os:'android'});
+  assert.deepEqual({...d({userAgent:'Mozilla/5.0 (Linux; Android 14; Pixel 8a) Chrome/130 Mobile Safari/537.36'})},{browser:'chrome',os:'android'});
+  assert.deepEqual({...d(undefined)},{browser:'other',os:'other'});
+});
+test('status describes the session once per generation and value, then reads status; failure is ignored',async()=>{
+  const s=setup({reply:(p)=>p.endsWith('/describe')?{body:{ok:true}}:{body:{passkeys:[],sessions:[]}}});
+  await s.bridge.status();await s.bridge.status();
+  assert.deepEqual(s.calls.map(c=>c.path),['/v1/manage/session/describe','/v1/manage/recovery/status','/v1/manage/recovery/status']);
+  const b=s.calls[0].body;assert.deepEqual(Object.keys(b).sort(),['browser','name','os']);assert.equal(b.name,null);
+  assert.equal(s.calls[0].opts.headers.Authorization,'Bearer '+ACCESS);assert.equal(s.calls[0].opts.credentials,'omit');
+  const f=setup({reply:(p)=>p.endsWith('/describe')?{status:500,body:{}}:{body:{passkeys:[],sessions:[]}}});
+  await f.bridge.status();await f.bridge.status();
+  assert.equal(f.calls.filter(c=>c.path.endsWith('/describe')).length,2);
+  assert.equal(f.calls.filter(c=>c.path.endsWith('/status')).length,2);
+});
+
+test('a describe that never resolves delays status by the short deadline only and is sent once',async()=>{
+  const ctx=timers();vm.createContext(ctx);vm.runInContext(src,ctx);
+  const calls=[];
+  const never=new Promise(()=>{});
+  const resp=obj=>({ok:true,status:200,headers:{get:()=>null},body:{getReader(){let s=false;return{async read(){if(s)return{done:true};s=true;return{done:false,value:new TextEncoder().encode(JSON.stringify(obj))}},async cancel(){},releaseLock(){}}}}});
+  const bridge=ctx.OTPandaRecoveryFactory({api:'https://api.test',access:()=>ACCESS,generation:()=>1,
+    readBounded:async r=>{const {value}=await r.body.getReader().read();return value?new TextDecoder().decode(value):''},
+    encode,decode,random:()=>'x',storage:{getItem:()=>null,setItem(){},removeItem(){}},credentials:{},
+    fetchImpl:async(url)=>{const path=url.replace('https://api.test','');calls.push(path);if(path.endsWith('/describe'))return never;return resp({passkeys:[],sessions:[]})}});
+  const t0=Date.now();
+  const a=await bridge.status();const b=await bridge.status();
+  assert.ok(a&&b);
+  assert.ok(Date.now()-t0<6000);
+  assert.equal(calls.filter(p=>p.endsWith('/describe')).length,1);
+  assert.equal(calls.filter(p=>p.endsWith('/status')).length,2);
+});
+
+test('the 15s deadline settles a describe that ignores abort, so a later status can describe again',async()=>{
+  const slow=[];
+  const ctx={setTimeout:(f,ms)=>{if(ms>=10000){slow.push(f);return slow.length}return setTimeout(f,1)},clearTimeout:()=>{},AbortController};
+  vm.createContext(ctx);vm.runInContext(src,ctx);
+  const calls=[];
+  const resp=obj=>({ok:true,status:200,headers:{get:()=>null},body:{getReader(){let s=false;return{async read(){if(s)return{done:true};s=true;return{done:false,value:new TextEncoder().encode(JSON.stringify(obj))}},async cancel(){},releaseLock(){}}}}});
+  const bridge=ctx.OTPandaRecoveryFactory({api:'https://api.test',access:()=>ACCESS,generation:()=>1,
+    readBounded:async r=>{const {value}=await r.body.getReader().read();return value?new TextDecoder().decode(value):''},
+    encode,decode,random:()=>'x',storage:{getItem:()=>null,setItem(){},removeItem(){}},credentials:{},
+    fetchImpl:async(url)=>{const path=url.replace('https://api.test','');calls.push(path);if(path.endsWith('/describe'))return new Promise(()=>{});return resp({passkeys:[],sessions:[]})}});
+  await bridge.status();await bridge.status();
+  assert.equal(calls.filter(p=>p.endsWith('/describe')).length,1);
+  slow.forEach(f=>f());await new Promise(r=>setTimeout(r,5));
+  await bridge.status();
+  assert.equal(calls.filter(p=>p.endsWith('/describe')).length,2);
 });

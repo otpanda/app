@@ -8,6 +8,32 @@
   const TOKEN = /^otpda_[A-Za-z0-9_-]{55}$/, CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
   const BINDING_KEY = 'otpanda.recovery.binding.v1.', BINDING_TTL = 30 * 60 * 1000; // matches the server's mailbox code lifetime (30 min);
   const KINDS = ['email-escape-on', 'email-escape-off', 'passkey-revoke', 'session-revoke', 'google-unlink'];
+  // Low-entropy browser and OS family for the device list. Closed enums, never
+  // a version, model or identifier. Client Hints brands/platform first, then
+  // the UA string. Unknown is 'other'.
+  const BROWSERS = ['chrome', 'edge', 'firefox', 'safari', 'opera', 'samsung', 'other'];
+  const SYSTEMS = ['android', 'windows', 'mac', 'ios', 'linux', 'chromeos', 'other'];
+  const detectDevice = nav => {
+    const ua = String(nav?.userAgent ?? ''), hints = nav?.userAgentData;
+    const brands = Array.isArray(hints?.brands) ? hints.brands.map(b => String(b?.brand ?? '')) : [];
+    let browser = 'other';
+    if (brands.includes('Microsoft Edge') || /\b(Edg|EdgA|EdgiOS)\//.test(ua)) browser = 'edge';
+    else if (brands.includes('Opera') || /\b(OPR|OPT)\/|Opera/.test(ua)) browser = 'opera';
+    else if (/SamsungBrowser\//.test(ua) || brands.includes('Samsung Internet')) browser = 'samsung';
+    else if (/Firefox\/|FxiOS\//.test(ua)) browser = 'firefox';
+    else if (brands.includes('Google Chrome') || /Chrome\/|CriOS\//.test(ua)) browser = 'chrome';
+    else if (/Safari\//.test(ua)) browser = 'safari';
+    const plat = String(hints?.platform ?? '');
+    let os = 'other';
+    if (plat === 'Android' || /Android/.test(ua)) os = 'android';
+    else if (plat === 'Windows' || /Windows/.test(ua)) os = 'windows';
+    else if (plat === 'Chrome OS' || /CrOS/.test(ua)) os = 'chromeos';
+    else if (/iPhone|iPad|iPod/.test(ua) || plat === 'iOS') os = 'ios';
+    else if (plat === 'macOS' || /Mac OS X|Macintosh/.test(ua)) os = 'mac';
+    else if (plat === 'Linux' || /Linux|X11/.test(ua)) os = 'linux';
+    return { browser, os };
+  };
+  globalThis.OTPandaDetectDevice = detectDevice;
   globalThis.OTPandaRecoveryFactory = caps => {
     const { api, access, generation, readBounded, encode, decode, random, fetchImpl, credentials, storage } = caps;
     const canonical = email => {
@@ -32,12 +58,12 @@
     // outcome cannot be read (network loss, timeout, 5xx, unreadable body) the
     // change may or may not have happened: that is `unknown`, never `refused`.
     const unknown = () => Object.assign(Error('Outcome unknown'), { unknown: true });
-    const call = async (path, { method = 'POST', body, bearer, final = false } = {}) => {
+    const call = async (path, { method = 'POST', body, bearer, final = false, signal } = {}) => {
       const headers = {};
       if (bearer) headers.Authorization = 'Bearer ' + bearer;
       if (method === 'POST') headers['Content-Type'] = 'application/json';
       let r;
-      try { r = await fetchImpl(api + path, { method, credentials: 'omit', cache: 'no-store', redirect: 'error', headers, ...(method === 'POST' ? { body: JSON.stringify(body) } : {}) }); }
+      try { r = await fetchImpl(api + path, { method, credentials: 'omit', cache: 'no-store', redirect: 'error', headers, ...(signal ? { signal } : {}), ...(method === 'POST' ? { body: JSON.stringify(body) } : {}) }); }
       catch { throw final ? unknown() : Error('Network error'); }
       if (!r.ok) {
         // 408 and 5xx are unknown. Any other 4xx means this request was not accepted; after an earlier unknown, a 403/409 replay may reflect the earlier request, so callers must not read it as history.
@@ -75,8 +101,49 @@
     const outcome = fn => async (...args) => {
       try { await fn(...args); return 'ok'; } catch (e) { return e?.unknown ? 'unknown' : 'refused'; }
     };
+    // Tells the server which browser and OS this session runs on, so the
+    // device list can name it. Label only: nothing here is an identity. Once
+    // per session generation and value; any failure is ignored.
+    let described = '', inflight = null, inflightKey = '';
+    const DESCRIBE_WAIT_MS = 2000, DESCRIBE_DEADLINE_MS = 15000;
+    const describeSelf = async () => {
+      try {
+        const nav = caps.navigator ?? globalThis.navigator;
+        const { browser, os } = detectDevice(nav);
+        if (!BROWSERS.includes(browser) || !SYSTEMS.includes(os)) return;
+        const gen = generation(), key = gen + ':' + browser + ':' + os;
+        if (key === described) return;
+        // One request per generation and value, even if status runs again
+        // while it is still pending. It may hang: nothing waits on it beyond
+        // the short deadline below, and a late answer for an older session
+        // marks nothing.
+        if (!inflight || inflightKey !== key) {
+          const ctl = typeof AbortController === 'function' ? new AbortController() : undefined;
+          const bearer = signed();
+          inflightKey = key;
+          // The 15 s deadline settles this promise itself, so a fetch or body
+          // read that ignores the abort cannot hold it open: inflight clears
+          // and a later status may describe again.
+          let timer;
+          const deadline = new Promise(r => { timer = setTimeout(() => { try { ctl?.abort(); } catch {} r(); }, DESCRIBE_DEADLINE_MS); });
+          const work = (async () => {
+            try {
+              const done = await call('/v1/manage/session/describe', { body: { browser, os, name: null }, bearer, signal: ctl?.signal });
+              if (done.ok === true && generation() === gen) described = key;
+            } catch {}
+          })();
+          const mine = inflight = Promise.race([work, deadline]).finally(() => { clearTimeout(timer); if (inflight === mine) inflight = null; });
+        }
+        let wait;
+        await Promise.race([inflight, new Promise(r => { wait = setTimeout(r, DESCRIBE_WAIT_MS); })]);
+        clearTimeout(wait);
+      } catch {}
+    };
     const ops = {
-      status: async () => JSON.stringify(await call('/v1/manage/recovery/status', { method: 'GET', bearer: signed() })),
+      status: async () => {
+        await describeSelf();
+        return JSON.stringify(await call('/v1/manage/recovery/status', { method: 'GET', bearer: signed() }));
+      },
       change: async (kind, target = '', warningAccepted = false) => {
         if (!KINDS.includes(kind)) throw Error('Known change required');
         const bearer = signed(), attempt = generation();
@@ -90,6 +157,18 @@
         // Success may legitimately end this very session (self sign-out): no
         // authenticated follow-up is required or attempted here.
         await call('/v1/manage/recovery/finish', { body: { ...base, response, token: c.token }, bearer, final: true });
+      },
+      // Display name only: no passkey check. Null removes the name.
+      renamePasskey: async (credentialId, label) => {
+        if (typeof credentialId !== 'string' || !credentialId || credentialId.length > 512) throw Error('Passkey required');
+        let name = null;
+        if (label !== null && label !== undefined && label !== '') {
+          if (typeof label !== 'string') throw Error('Name required');
+          name = label.normalize('NFC').trim();
+          if (name.length < 1 || name.length > 40 || /[\u0000-\u001f\u007f-\u009f]/.test(name)) throw Error('Name required');
+        }
+        const done = await call('/v1/manage/passkey/rename', { body: { credentialId, label: name }, bearer: signed(), final: true });
+        if (done.ok !== true) throw unknown();
       },
       cancelRequest: async requestId => {
         if (typeof requestId !== 'string' || !requestId || requestId.length > 128) throw Error('Request required');
@@ -124,6 +203,7 @@
       ...ops,
       change: outcome(ops.change),
       cancelRequest: outcome(ops.cancelRequest),
+      renamePasskey: outcome(ops.renamePasskey),
       complete: outcome(ops.complete),
     };
   };

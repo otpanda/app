@@ -63,21 +63,91 @@ class RecoveryPasskey {
   final String id;
   final int createdAt;
   final int? lastUsedAt;
-  const RecoveryPasskey(this.id, this.createdAt, this.lastUsedAt);
+
+  /// Display hints from the server. [provider] is a best-effort name for the
+  /// passkey manager (never proof of where the key is stored); [label] is the
+  /// name the person chose. Either is null when unknown.
+  final String? provider, label;
+  const RecoveryPasskey(
+    this.id,
+    this.createdAt,
+    this.lastUsedAt, {
+    this.provider,
+    this.label,
+  });
+
+  /// What the list shows first: the person's name, else the provider, else a
+  /// plain "Passkey".
+  String get title => label ?? provider ?? 'Passkey';
 }
+
+/// Longest passkey name the server accepts.
+const passkeyLabelMax = 40;
+
+/// Renames a passkey. A null [label] removes the name. This changes only what
+/// is displayed, so it needs no passkey check. Same outcome rules as
+/// [RecoveryBridge.recoveryChange].
+abstract interface class PasskeyLabelBridge {
+  Future<void> renamePasskey(String credentialId, String? label);
+}
+
+String? _shown(Object? v) =>
+    v is String && v.isNotEmpty && v.length <= 80 ? v : null;
 
 class RecoverySession {
   final String id, clientKind;
   final int createdAt;
   final int? lastUsedAt;
   final bool current;
+
+  /// Self-reported by the session, closed lists, null until it describes
+  /// itself. A label only, never an identity. [name] is the native device name.
+  final String? browser, os, name;
   const RecoverySession(
     this.id,
     this.clientKind,
     this.createdAt,
     this.lastUsedAt,
-    this.current,
-  );
+    this.current, {
+    this.browser,
+    this.os,
+    this.name,
+  });
+
+  static const _browsers = {
+    'chrome': 'Chrome',
+    'edge': 'Edge',
+    'firefox': 'Firefox',
+    'safari': 'Safari',
+    'opera': 'Opera',
+    'samsung': 'Samsung Internet',
+  };
+  static const _systems = {
+    'android': 'Android',
+    'windows': 'Windows',
+    'mac': 'Mac',
+    'ios': 'iOS',
+    'linux': 'Linux',
+    'chromeos': 'ChromeOS',
+  };
+
+  /// "Firefox on Linux", "Chrome", "Linux", or "Web" when nothing is known. A
+  /// native client shows its device name, else "Android app".
+  String get title {
+    if (clientKind == 'android') return name ?? 'Android app';
+    final b = _browsers[browser], o = _systems[os];
+    if (b != null && o != null) return '$b on $o';
+    return b ?? o ?? 'Web';
+  }
+}
+
+String? _enum(Object? v, Set<String> allowed) =>
+    v is String && allowed.contains(v) ? v : null;
+
+String? _deviceName(Object? v) {
+  if (v is! String) return null;
+  final t = v.trim();
+  return t.isEmpty || t.length > 60 ? null : t;
 }
 
 class EmailRecoveryRequest {
@@ -127,6 +197,8 @@ class RecoveryStatus {
             s((p as Map)['id']),
             i(p['createdAt']),
             p['lastUsedAt'] == null ? null : i(p['lastUsedAt']),
+            provider: _shown(p['provider']),
+            label: _shown(p['label']),
           ),
       ],
       sessions: [
@@ -137,6 +209,12 @@ class RecoveryStatus {
             i(p['createdAt']),
             p['lastUsedAt'] == null ? null : i(p['lastUsedAt']),
             p['current'] == true,
+            browser: _enum(
+              p['browser'],
+              RecoverySession._browsers.keys.toSet(),
+            ),
+            os: _enum(p['os'], RecoverySession._systems.keys.toSet()),
+            name: _deviceName(p['name']),
           ),
       ],
       request: r is Map

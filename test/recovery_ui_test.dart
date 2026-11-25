@@ -184,18 +184,17 @@ void main() {
     (t) async {
       final one = FakeRecovery(st(keys: 1));
       await panel(t, one);
-      expect(
-        find.textContaining('only passkey cannot be removed here'),
-        findsOneWidget,
-      );
-      expect(
-        t
-            .widget<IconButton>(
-              find.widgetWithIcon(IconButton, Icons.delete_outline).first,
-            )
-            .onPressed,
-        isNull,
-      );
+      // No inline limitation text; the reason shows only when delete is tapped.
+      expect(find.textContaining('only passkey'), findsNothing);
+      expect(find.textContaining('different passkey'), findsNothing);
+      await t.tap(find.widgetWithIcon(IconButton, Icons.delete_outline).first);
+      await t.pumpAndSettle();
+      expect(find.text('This is your only passkey'), findsOneWidget);
+      expect(find.textContaining('Add another passkey first'), findsOneWidget);
+      await t.tap(find.text('OK'));
+      await t.pumpAndSettle();
+      expect(find.text('This is your only passkey'), findsNothing);
+      expect(one.log.where((l) => l.startsWith('change')), isEmpty);
       final f = FakeRecovery(st());
       await panel(t, f);
       await t.tap(find.byTooltip('Remove passkey').first);

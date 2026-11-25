@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'device_brand_icon.dart';
 import 'recovery_contract.dart';
 import 'settings_hub.dart'
     show RedactedText, StableText, settingsDialogConstraints;
@@ -210,6 +211,65 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
     );
   }
 
+  Future<void> renamePasskey(RecoveryPasskey p) async {
+    final c = TextEditingController(text: p.label ?? '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Name this passkey'),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          maxLength: passkeyLabelMax,
+          textInputAction: TextInputAction.done,
+          decoration: InputDecoration(
+            hintText: p.provider ?? 'Passkey',
+            helperText: 'Only shown to you. Leave empty to remove the name.',
+            helperMaxLines: 3,
+          ),
+          onSubmitted: (_) => Navigator.pop(d, true),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(d, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(d, true),
+            icon: const Icon(Icons.check),
+            label: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    // Not disposed here: the closing dialog still draws with it.
+    final name = c.text.trim();
+    if (ok != true || !mounted) return;
+    final next = name.isEmpty ? null : name;
+    if (next == p.label) return;
+    await act(
+      () => (widget.bridge as PasskeyLabelBridge).renamePasskey(p.id, next),
+      next == null ? 'Name removed.' : 'Name saved.',
+    );
+  }
+
+  /// The only passkey cannot be removed: say why only when asked.
+  Future<void> explainLastPasskey() => showDialog<void>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: const Text('This is your only passkey'),
+      content: const Text(
+        'Removing a passkey needs a different passkey of yours to confirm, so your only passkey cannot be removed. Add another passkey first.',
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.pop(c),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
+
   Future<void> removePasskey(RecoveryPasskey p) async {
     if (!await confirm(
       'Remove this passkey?',
@@ -254,45 +314,67 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: card == null ? const Icon(Icons.key) : null,
-          title: Text('Passkey added ${recoveryDate(p.createdAt)}'),
-          subtitle: Text(
-            p.lastUsedAt == null
-                ? 'Not used yet'
-                : 'Last used ${recoveryDate(p.lastUsedAt!)}',
+          title: Text(p.title),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // The provider is a hint, so it sits under a name the person set.
+              if (p.label != null && p.provider != null) Text(p.provider!),
+              Text('Added ${recoveryDate(p.createdAt)}'),
+              Text(
+                p.lastUsedAt == null
+                    ? 'Not used yet'
+                    : 'Last used ${recoveryDate(p.lastUsedAt!)}',
+              ),
+            ],
           ),
-          trailing: IconButton(
-            tooltip: 'Remove passkey',
-            icon: const Icon(Icons.delete_outline),
-            onPressed: busy || s.passkeys.length < 2
-                ? null
-                : () => removePasskey(p),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.bridge is PasskeyLabelBridge)
+                IconButton(
+                  tooltip: 'Rename passkey',
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: busy ? null : () => renamePasskey(p),
+                ),
+              IconButton(
+                tooltip: 'Remove passkey',
+                icon: const Icon(Icons.delete_outline),
+                onPressed: busy
+                    ? null
+                    : s.passkeys.length < 2
+                    ? explainLastPasskey
+                    : () => removePasskey(p),
+              ),
+            ],
           ),
         ),
-      Text(
-        s.passkeys.isEmpty
-            ? 'Add a passkey before changing recovery settings or signing out another device.'
-            : s.passkeys.length < 2
-            ? 'Removing a passkey needs a different passkey of yours to confirm. Your only passkey cannot be removed here. Add another passkey first.'
-            : 'Removing a passkey needs a different passkey of yours to confirm.',
-        style: const TextStyle(fontSize: 12),
-      ),
+      if (s.passkeys.isEmpty)
+        const Text(
+          'Add a passkey before changing recovery settings or signing out another device.',
+          style: TextStyle(fontSize: 12),
+        ),
     ];
     final deviceKids = <Widget>[
       for (final d in s.sessions)
         ListTile(
           contentPadding: EdgeInsets.zero,
-          leading: Icon(
-            d.clientKind == 'android' ? Icons.phone_android : Icons.language,
+          leading: DeviceBrandIcon(
+            brand: deviceBrandOf(d),
+            fallback: d.clientKind == 'android'
+                ? Icons.phone_android
+                : Icons.language,
           ),
-          title: Text(
-            d.current
-                ? 'This device'
-                : 'Signed in ${recoveryDate(d.createdAt)}',
-          ),
+          title: Text(d.title),
           subtitle: Text(
-            d.lastUsedAt == null
-                ? d.clientKind
-                : '${d.clientKind}, last used ${recoveryDate(d.lastUsedAt!)}',
+            [
+                  if (d.current) 'This device',
+                  'signed in ${recoveryDate(d.createdAt)}',
+                  if (d.lastUsedAt != null)
+                    'last used ${recoveryDate(d.lastUsedAt!)}',
+                ]
+                .join(', ')
+                .replaceFirstMapped(RegExp(r'^.'), (m) => m[0]!.toUpperCase()),
           ),
           trailing: d.current
               ? null

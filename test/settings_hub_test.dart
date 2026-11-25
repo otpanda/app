@@ -84,6 +84,19 @@ void main() {
     // The approved hub keeps its stable category even during a failed read.
     expect(find.text('Organization'), findsOneWidget);
     expect(find.text('Sign-in methods'), findsNothing);
+    // Licenses come just before Sign out.
+    expect(find.text('Licenses'), findsOneWidget);
+    expect(
+      t.getTopLeft(find.text('Licenses')).dy,
+      lessThan(t.getTopLeft(find.text('Sign out')).dy),
+    );
+    await t.tap(find.text('Licenses'));
+    await t.pumpAndSettle();
+    expect(find.byType(LicensePage), findsOneWidget);
+    await t.pageBack();
+    await t.pumpAndSettle();
+    // Sign out sits at the bottom of the main list.
+    expect(find.widgetWithText(OutlinedButton, 'Sign out'), findsOneWidget);
     await t.tap(find.text('Account & security'));
     await t.pumpAndSettle();
     expect(log, ['settings/account-security']);
@@ -96,8 +109,11 @@ void main() {
     await t.pumpAndSettle();
     expect(log.last, 'settings/devices');
     expect(find.text('This browser'), findsNothing);
-    expect(find.widgetWithText(OutlinedButton, 'Sign out'), findsOneWidget);
+    expect(find.text('Signed-in devices'), findsNothing);
+    expect(find.text('Sign out'), findsNothing);
     expect(find.text('Clear local access'), findsNothing);
+    await t.tap(find.byTooltip('Back to settings'));
+    await t.pumpAndSettle();
     await t.tap(find.text('Sign out'));
     await t.pumpAndSettle();
     expect(find.text('Devices & sessions'), findsNothing);
