@@ -433,6 +433,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     final accepted = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        constraints: settingsDialogConstraints,
         title: Text(
           enabled
               ? 'Require extra verification?'
@@ -756,6 +757,11 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     await loadAccount(revision);
   });
 
+  bool get _hasPasskey {
+    final n = overview?['passkeys'];
+    return n is int && n >= 1;
+  }
+
   bool get _canDisconnectGoogle =>
       bridge is GoogleLinkBridge &&
       (bridge as GoogleLinkBridge).googleDisconnectAvailable;
@@ -763,27 +769,13 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   Future<void> disconnectGoogle() async {
     final passkeys = overview?['passkeys'];
     if (passkeys is! int) return;
-    if (passkeys < 1) {
-      await showDialog<void>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Add a passkey first'),
-          content: const Text(
-            'Google is your only way to sign in right now. Add a passkey, then you can disconnect Google.',
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(c),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
+    // Never offered without a passkey (the button is disabled); a stale tap
+    // does nothing either. The server enforces the same rule.
+    if (passkeys < 1) return;
     final yes = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
+        constraints: settingsDialogConstraints,
         title: const Text('Disconnect Google?'),
         content: const Text(
           'Devices signed in with Google are signed out, including this one if you signed in with Google. Sign-ins with a passkey stay signed in, and your Gmail connections are not affected. You can connect Google again later.',
@@ -817,9 +809,11 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     if (refused) {
       // A refusal is generic (a cancelled passkey check, a stale change, or
       // nothing left to disconnect). The fresh account state says which.
-      result = overview?['google'] == true
-          ? 'Google was not disconnected. Try again if you still want to.'
-          : 'Google is already disconnected.';
+      result = overview?['google'] != true
+          ? 'Google is already disconnected.'
+          : !_hasPasskey
+          ? 'Add a passkey first, then you can disconnect Google.'
+          : 'Google was not disconnected. Try again if you still want to.';
     }
     setState(() => message = result);
   }
@@ -865,7 +859,11 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                   loading
                       ? const RedactedText('Connected')
                       : Text(
-                          google == true ? 'Connected' : 'Not connected',
+                          google != true
+                              ? 'Not connected'
+                              : _hasPasskey
+                              ? 'Connected'
+                              : 'Connected. Add a passkey to disconnect.',
                           style: const TextStyle(color: muted),
                         ),
                 ],
@@ -888,7 +886,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
             else if (google == true)
               if (_canDisconnectGoogle)
                 OutlinedButton.icon(
-                  onPressed: busy ? null : disconnectGoogle,
+                  onPressed: busy || !_hasPasskey ? null : disconnectGoogle,
                   icon: const Icon(Icons.link_off),
                   label: const Text('Disconnect'),
                 )
