@@ -83,6 +83,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       addStore: ChannelAddPendingStore(),
       saveConfirmed: proof.saveConfirmed,
       startup: startup,
+      onGrantSpent: controller.consumeEnrollGrant,
     );
     controller.addListener(_maybeRecover);
     bridge = NativeSessionBridge(

@@ -27,6 +27,7 @@ class NativeDevicesService extends ChangeNotifier {
     required this.addStore,
     required this.saveConfirmed,
     required this.startup,
+    this.onGrantSpent,
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch) {
     if (enrollStore is! LockedPendingStore ||
@@ -36,6 +37,10 @@ class NativeDevicesService extends ChangeNotifier {
       );
     }
   }
+  /// Called once the one-time enrollment grant has been sent to the server
+  /// (the server consumes it on finish). The same grant also backs the first
+  /// passkey, so the owner of the session must stop offering it.
+  final void Function()? onGrantSpent;
   final BearerRequest request;
   final NativeSession? Function() session;
   final DeviceProofSource source;
@@ -247,6 +252,9 @@ class NativeDevicesService extends ChangeNotifier {
       store: enrollStore,
       now: _now,
     );
+    // Anything past a refused start may have reached the server (an unknown
+    // finish included): the grant is treated as spent and never reused.
+    if (r.outcome != EnrollmentOutcome.notStarted) onGrantSpent?.call();
     if (!_alive(n.epoch, n.deviceId)) return;
     _say(switch (r.outcome) {
       EnrollmentOutcome.enrolled => 'This phone is set up.',

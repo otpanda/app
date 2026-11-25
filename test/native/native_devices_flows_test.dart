@@ -203,7 +203,12 @@ class _Server {
   NativeStartupRecovery st,
   List<NativeSession?> cur,
 })
-_mk({bool key = false, NativeSession? s, String keyStatus = 'absent'}) {
+_mk({
+  bool key = false,
+  NativeSession? s,
+  String keyStatus = 'absent',
+  void Function()? spent,
+}) {
   final now = DateTime.now().millisecondsSinceEpoch;
   final srv = _Server(now)..keyStatus = keyStatus;
   final src = _Src(key: key), raw = _Raw(), add = _Add();
@@ -239,6 +244,7 @@ _mk({bool key = false, NativeSession? s, String keyStatus = 'absent'}) {
     addStore: add,
     saveConfirmed: (o, k) async => confirmed.add('$o:$k'),
     startup: st,
+    onGrantSpent: spent,
     now: () => now,
   );
   return (
@@ -259,6 +265,21 @@ Widget _app(NativeDevicesService v) => MaterialApp(
 );
 
 void main() {
+  testWidgets('device-key set-up spends the local grant once it is sent', (
+    t,
+  ) async {
+    var spent = 0;
+    final m = _mk(
+      s: const NativeSession('DEV', 'tok', 99999999, enrollGrant: 'otpda_grant'),
+      spent: () => spent++,
+    );
+    await t.pumpWidget(_app(m.v));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Set up this phone'));
+    await t.pumpAndSettle();
+    expect(spent, 1);
+  });
+
   testWidgets(
     'first set-up with the grant: begin carries publicJwk+grant, native confirmation saved after the typed 200, pending record cleared',
     (t) async {
