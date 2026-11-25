@@ -8,6 +8,7 @@ void main() {
         'otpauth://totp/Example%20Co:alice%40example.com?secret=$s&issuer=Example%20Co&algorithm=SHA256&digits=8&period=60';
     final r = parseOtpauth(u);
     expect(r.name, 'Example Co');
+    expect(r.issuer, 'Example Co');
     expect(r.account, 'alice@example.com');
     expect(r.uri, u);
     expect(r.toString(), isNot(contains(s)));
@@ -16,6 +17,7 @@ void main() {
     expect(parseOtpauth('otpauth://totp/GitHub:bob?secret=$s').name, 'GitHub');
     final r = parseOtpauth('otpauth://totp/bob?secret=$s');
     expect(r.name, 'bob');
+    expect(r.issuer, isNull);
     expect(r.account, '');
   });
   test('leading spaces in the account are trimmed like the API', () {

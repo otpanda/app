@@ -150,12 +150,14 @@ class _ProductShellState extends State<ProductShell> {
   String spaced(String c) =>
       c.length == 6 ? '${c.substring(0, 3)} ${c.substring(3)}' : c;
 
-  Widget avatar(String name, [String? serviceId]) => ServiceAvatar(
-    service: name,
-    serviceId: serviceId,
-    color: const Color(0xffdff3e8),
-    ink: ink,
-  );
+  Widget avatar(String name, [String? serviceId, String? issuer]) =>
+      ServiceAvatar(
+        service: name,
+        serviceId: serviceId,
+        issuer: issuer,
+        color: const Color(0xffdff3e8),
+        ink: ink,
+      );
 
   Widget codeTile(
     String title,
@@ -166,6 +168,7 @@ class _ProductShellState extends State<ProductShell> {
     bool fresh = false,
     Widget? trailing,
     String? serviceId,
+    String? issuer,
   ]) => Card(
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
     color: fresh ? const Color(0xffe6f5ec) : null,
@@ -179,7 +182,7 @@ class _ProductShellState extends State<ProductShell> {
       padding: const EdgeInsets.all(12),
       child: Row(
         children: [
-          avatar(title, serviceId),
+          avatar(title, serviceId, issuer),
           const SizedBox(width: 11),
           Expanded(
             child: Column(
@@ -382,6 +385,7 @@ class _ProductShellState extends State<ProductShell> {
                   true,
                   null,
                   e.catalogId,
+                  e.issuer,
                 ),
               ),
             for (final e in withCode)
@@ -396,6 +400,7 @@ class _ProductShellState extends State<ProductShell> {
                   false,
                   null,
                   e.catalogId,
+                  e.issuer,
                 ),
               ),
             for (final e in rest)
@@ -421,6 +426,7 @@ class _ProductShellState extends State<ProductShell> {
                     false,
                     null,
                     e.catalogId,
+                    e.issuer,
                   ),
                 ),
               ),
@@ -527,6 +533,7 @@ class _ProductShellState extends State<ProductShell> {
                         )
                       : null,
                   e.catalogId,
+                  e.issuer,
                 ),
               ),
           ],

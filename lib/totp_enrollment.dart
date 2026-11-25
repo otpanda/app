@@ -477,11 +477,12 @@ class _AddTotpState extends State<_AddTotp> {
       ),
       const SizedBox(height: 8),
       servicePicker(),
+      if (found?.issuer != null) Text('Issuer: ${found!.issuer}'),
       TextField(
         controller: label,
         maxLength: 120,
         enabled: !busy,
-        decoration: const InputDecoration(labelText: 'Name'),
+        decoration: const InputDecoration(labelText: 'Display name'),
       ),
       TextField(
         controller: account,

@@ -696,6 +696,54 @@ void main() {
         expect(ManagedEntry.fromJson(j(7)).catalogId, isNull);
       },
     );
+    testWidgets(
+      'scanned issuer keeps logo when display name changes without catalogue selection',
+      (t) async {
+        final d = ServiceDirectory(
+          client: () => MockClient(
+            (r) async => r.url.toString() == directoryCatalogUrl
+                ? http.Response(catalog, 200)
+                : okSvg(svg),
+          ),
+          store: MemStore(),
+          bundledText: noBundle,
+        );
+        await t.runAsync(d.ensureLoaded);
+        Future<void> show(String display) => t.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ServiceAvatar(
+                service: display,
+                issuer: 'Github',
+                color: Colors.green,
+                ink: Colors.black,
+                directory: d,
+              ),
+            ),
+          ),
+        );
+        await show('Github');
+        for (var i = 0; i < 4; i++) {
+          await t.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await t.pump(const Duration(milliseconds: 50));
+        }
+        expect(find.byType(SvgPicture), findsOneWidget);
+        await show('My renamed account');
+        await t.pump();
+        expect(find.byType(SvgPicture), findsOneWidget);
+        await t.pumpWidget(const SizedBox());
+        await show('My renamed account');
+        for (var i = 0; i < 4; i++) {
+          await t.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await t.pump(const Duration(milliseconds: 50));
+        }
+        expect(find.byType(SvgPicture), findsOneWidget);
+      },
+    );
     testWidgets('a renamed entry keeps its logo', (t) async {
       final d = ServiceDirectory(
         client: () => MockClient(

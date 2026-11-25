@@ -37,6 +37,9 @@ class ManagedEntry {
   /// The catalogue service id the server stores (its primary domain), kept
   /// for cosmetic logo identity only. Null for custom entries.
   final String? catalogId;
+
+  /// Original issuer parsed from the setup URI. Never changed by a rename.
+  final String? issuer;
   const ManagedEntry(
     this.id,
     this.service,
@@ -44,6 +47,7 @@ class ManagedEntry {
     this.manage, [
     this.totp = false,
     this.catalogId,
+    this.issuer,
   ]);
   factory ManagedEntry.fromJson(Map<String, dynamic> json) {
     final capabilities = json['capabilities'];
@@ -69,6 +73,9 @@ class ManagedEntry {
                 RegExp(r'^[a-z0-9-]+(?:\.[a-z0-9-]+)+$')
                     .hasMatch(json['service_id'])
           ? json['service_id'] as String
+          : null,
+      json['issuer'] is String && (json['issuer'] as String).trim().isNotEmpty
+          ? json['issuer'] as String
           : null,
     );
   }
@@ -195,6 +202,7 @@ class CodeStore {
                 e.manage,
                 e.totp,
                 e.catalogId,
+                e.issuer,
               )
             : e,
     ];
