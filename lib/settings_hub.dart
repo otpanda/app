@@ -22,6 +22,12 @@ enum SettingsCategory {
     'Organization',
     'Tags and pinned entries',
     Icons.sell_outlined,
+  ),
+  about(
+    'settings/about',
+    'About',
+    'Version, links, licenses',
+    Icons.info_outline,
   );
 
   final String route;
@@ -173,66 +179,56 @@ class SettingsHub extends StatelessWidget {
   ];
 
   Widget _list(BuildContext context, SettingsCategory? current) {
-    return ListView(
-      padding: const EdgeInsets.all(12),
-      children: [
-        if (email != null || emailLoading)
-          ProfileHeader(email: email, googlePicture: googlePicture),
-        for (final c in categories)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Material(
-              color: c == current ? pale : Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-                side: BorderSide(
-                  color: c == current ? green : line,
-                  width: c == current ? 1.5 : 1,
-                ),
-              ),
-              child: ListTile(
-                key: Key('settings-${c.route}'),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                leading: Icon(c.icon, color: green),
-                title: Text(
-                  c.title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: ink,
-                  ),
-                ),
-                subtitle: Text(c.summary, style: const TextStyle(color: muted)),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => onSelect(c),
-              ),
-            ),
-          ),
+    final top = <Widget>[
+      if (email != null || emailLoading)
+        ProfileHeader(email: email, googlePicture: googlePicture),
+      for (final c in categories)
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
-          child: ListTile(
-            key: const Key('settings-licenses'),
+          child: Material(
+            color: c == current ? pale : Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
-              side: const BorderSide(color: line),
+              side: BorderSide(
+                color: c == current ? green : line,
+                width: c == current ? 1.5 : 1,
+              ),
             ),
-            tileColor: Colors.white,
-            leading: const Icon(Icons.description_outlined, color: green),
-            title: const Text(
-              'Licenses',
-              style: TextStyle(fontWeight: FontWeight.w700, color: ink),
+            child: ListTile(
+              key: Key('settings-${c.route}'),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              leading: Icon(c.icon, color: green),
+              title: Text(
+                c.title,
+                style: const TextStyle(fontWeight: FontWeight.w700, color: ink),
+              ),
+              subtitle: Text(c.summary, style: const TextStyle(color: muted)),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => onSelect(c),
             ),
-            subtitle: const Text(
-              'Open-source and icon licenses',
-              style: TextStyle(color: muted),
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () =>
-                showLicensePage(context: context, applicationName: 'OTPanda'),
           ),
         ),
-        ?footer,
+    ];
+    // The list scrolls when it is taller than the screen. When it is shorter,
+    // Licenses and Sign out sit at the very bottom of the screen.
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          sliver: SliverList(delegate: SliverChildListDelegate(top)),
+        ),
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [?footer],
+            ),
+          ),
+        ),
       ],
     );
   }
