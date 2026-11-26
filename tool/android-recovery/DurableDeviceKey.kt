@@ -23,11 +23,14 @@ class DurableDeviceKey {
 
     fun exists(): Boolean = store().containsAlias(alias)
 
+    /** Public SPKI of the enrolled key, or null when there is none. */
+    fun publicKeyOrNull(): ByteArray? = if (exists()) store().getCertificate(alias).publicKey.encoded else null
+
     /** Call only during explicit enrollment authorized by another fresh method.
      * Never recreate a missing key during recovery. Returns public SPKI only.
      */
     fun createForEnrollment(records: NoBackupEnrollmentStore): ByteArray = synchronized(enrollmentLock) {
-        check(Build.VERSION.SDK_INT >= 30) { "Android 11 required" }
+        if (Build.VERSION.SDK_INT < 30) throw DeviceProofException("unsupported_os")
         val record = records.read()
         validateEnrollmentCandidate(record, if(exists()) store().getCertificate(alias).publicKey.encoded else null)
         // An interrupted enrollment reuses the same public key. Never delete or
@@ -57,12 +60,17 @@ class DurableDeviceKey {
      * Returns fixed64byte P1363 ECDSA for the existing server verifier.
      * No callback flag alone authorizes signing: use the OS-returned operation.
      */
-    fun signWithOsVerification(activity: Activity, proof: DeviceProof, clock: () -> Long = System::currentTimeMillis,
+    fun signWithOsVerification(activity: Activity, proof: DeviceProof, clock: () -> Long = System::currentTimeMillis, displayText: String? = null,
         complete: (Result<ByteArray>) -> Unit): CancellationSignal {
-        check(Build.VERSION.SDK_INT >= 30) { "Android 11 required" }
+        if (Build.VERSION.SDK_INT < 30) throw DeviceProofException("unsupported_os")
         // Sensitive action summaries must be designed and digest-bound before
         // step-up integration. Do not show an opaque digest as informed consent.
-        require(proof.purpose != "step-up") { "Bound human-readable action required before step-up wiring" }
+        // Step-up needs the readable text the caller already validated against
+        // the hashed action; it is shown verbatim as the prompt description.
+        if (proof.purpose == "step-up") {
+            val t = displayText
+            if (t == null || t.isBlank() || t.length > 300 || hasUnsafeChar(t)) throw DeviceProofException("failed")
+        }
         val message = proof.message(clock())
         check(pending.compareAndSet(false, true)) { "Verification already pending" }
         val cancellation = CancellationSignal()
@@ -73,12 +81,16 @@ class DurableDeviceKey {
             else result.getOrNull()?.fill(0)
         }
         cancellation.setOnCancelListener {
-            finish(Result.failure(IllegalStateException("OS verification cancelled")))
+            finish(Result.failure(DeviceProofException("cancelled")))
         }
         try {
             val key = store().getKey(alias, null) as? java.security.PrivateKey
-                ?: error("Enrolled key unavailable; use another recovery method")
-            val operation = Signature.getInstance("SHA256withECDSA").apply { initSign(key) }
+                ?: throw DeviceProofException("key_missing")
+            val operation = Signature.getInstance("SHA256withECDSA").apply {
+                try { initSign(key) } catch (_: android.security.keystore.KeyPermanentlyInvalidatedException) {
+                    throw DeviceProofException("key_invalidated")
+                }
+            }
             val prompt = BiometricPrompt.Builder(activity)
                 .setTitle(when(proof.purpose) {
                     "enroll" -> "Enroll this phone for OTPanda access"
@@ -86,19 +98,29 @@ class DurableDeviceKey {
                     else -> "Confirm OTPanda account action"
                 })
                 
-                .setDescription(if (proof.purpose == "enroll")
-                    "Register this phone's signing key for future account access."
-                    else "Prove possession of this enrolled phone to request account access.")
+                .setDescription(when (proof.purpose) {
+                    "enroll" -> "Register this phone's signing key for future account access."
+                    "step-up" -> displayText!!
+                    else -> "Prove possession of this enrolled phone to request account access."
+                })
                 .setAllowedAuthenticators(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG or
                     android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL)
                 .build()
             prompt.authenticate(BiometricPrompt.CryptoObject(operation), cancellation, activity.mainExecutor,
                 object : BiometricPrompt.AuthenticationCallback() {
                     override fun onAuthenticationError(code: Int, message: CharSequence) {
-                        finish(Result.failure(IllegalStateException("OS verification unavailable or cancelled")))
+                        finish(Result.failure(DeviceProofException(when (code) {
+                            BiometricPrompt.BIOMETRIC_ERROR_CANCELED, BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED,
+                            13 /* BIOMETRIC_ERROR_NEGATIVE_BUTTON */ -> "cancelled"
+                            BiometricPrompt.BIOMETRIC_ERROR_LOCKOUT, BiometricPrompt.BIOMETRIC_ERROR_LOCKOUT_PERMANENT -> "locked_out"
+                            BiometricPrompt.BIOMETRIC_ERROR_NO_DEVICE_CREDENTIAL, BiometricPrompt.BIOMETRIC_ERROR_NO_BIOMETRICS,
+                            BiometricPrompt.BIOMETRIC_ERROR_HW_NOT_PRESENT -> "no_secure_lock"
+                            BiometricPrompt.BIOMETRIC_ERROR_TIMEOUT -> "expired"
+                            else -> "failed"
+                        })))
                     }
                     override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                        if (finished.get() || cancellation.isCanceled) { finish(Result.failure(IllegalStateException("Cancelled"))); return }
+                        if (finished.get() || cancellation.isCanceled) { finish(Result.failure(DeviceProofException("cancelled"))); return }
                         try {
                             proof.message(clock()) // Fail if the prompt outlived the challenge.
                             val verified = result.cryptoObject?.signature ?: error("Verified operation required")
@@ -111,4 +133,10 @@ class DurableDeviceKey {
         } catch (error: Exception) { finish(Result.failure(error)) }
         return cancellation
     }
+}
+
+/** Control, zero-width and bidi-override characters never appear in prompt text. */
+internal fun hasUnsafeChar(t: String): Boolean = t.any {
+    it.code <= 0x1f || it.code in 0x7f..0x9f || it.code in 0x200b..0x200f || it.code == 0x2028 || it.code == 0x2029 || it.code == 0x061c ||
+        it.code in 0x202a..0x202e || it.code in 0x2066..0x2069 || it.code == 0xfeff
 }
