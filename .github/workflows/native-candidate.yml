@@ -1,11 +1,11 @@
 name: Persistent native candidate APK
 on:
   push:
-    branches: [build/native-alpha-current]
+    branches: [build/native-alpha-branded]
 permissions:
   contents: read
 concurrency:
-  group: native-persistent-candidate
+  group: native-persistent-branded-candidate
   cancel-in-progress: true
 env:
   FLUTTER_VERSION: '3.50.1'
@@ -59,7 +59,7 @@ jobs:
           export EXPECTED_CERT_SHA256
           test "$EXPECTED_CERT_SHA256" = 05c62f2d61fbdc150fddda58e7fbc836650a65743ab53f1393ae08d55ca85999
           for flavor in google fdroid; do
-            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "2026112601" --dart-define=APP_VERSION="$version" --dart-define=NATIVE_SIGNIN=true --dart-define=NATIVE_ENTRY_EDIT_ENABLED=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
+            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "2026112602" --dart-define=APP_VERSION="$version" --dart-define=NATIVE_SIGNIN=true --dart-define=NATIVE_ENTRY_EDIT_ENABLED=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
             apk="build/app/outputs/flutter-apk/app-$flavor-release.apk"
             bash .github/scripts/verify-apk-signature.sh "$apk"
             cp "$apk" "dist/otpanda-android-$flavor-native-candidate.apk"
