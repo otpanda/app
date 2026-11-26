@@ -21,8 +21,8 @@ print('Branding metadata and generated image dimensions verified')
 assert 'otty-favicon-t1b-16.png' in html and 'otty-favicon-t1b-32.png' in html
 for size in (16,32):
  b=Path(f'web/otty-favicon-t1b-{size}.png').read_bytes();assert struct.unpack('>II',b[16:24])==(size,size)
- # Preserve the supplied tight-tile PNG encoding byte-for-byte; it may be RGB.
- assert b[25] in (2,6)
+ # Preserve supplied PNG encoding byte-for-byte (indexed, RGB or RGBA).
+ assert b[25] in (2,3,6)
 
 for name in ('otty-favicon-t1b-16.png','otty-favicon-t1b-32.png'):
  assert Path('web',name).read_bytes()==Path('assets/tab-favicon',name).read_bytes()
