@@ -20,8 +20,10 @@ for stale in Path('web').glob('otty-favicon-v2-*.png'): stale.unlink()
 for name in ['social-preview.png','icons/apple-touch-icon.png','icons/Icon-192.png','icons/Icon-512.png','icons/Icon-maskable-192.png','icons/Icon-maskable-512.png']:
  Path('web',name).unlink(missing_ok=True)
 FAVICONS = _payload['favicons']
-for size,data in FAVICONS.items(): write(f'web/otty-favicon-v3-{size}.png',base64.b64decode(data))
-write('web/favicon.png',base64.b64decode(FAVICONS[32]))
+# Browser tab mark only, selected tight tile with exact original badge.
+for name in ('otty-favicon-t1b.svg','otty-favicon-t1b-16.png','otty-favicon-t1b-32.png','favicon-otty-t1b.ico'):
+    write('web/'+name,Path('assets/tab-favicon',name).read_bytes())
+write('web/favicon.png',Path('assets/tab-favicon/otty-favicon-t1b-32.png').read_bytes())
 icon('web/icons/apple-touch-icon-v3.png',180)
 for size in (192,512):
  icon(f'web/icons/Icon-v3-{size}.png',size)
@@ -47,8 +49,8 @@ Path('web/index.html').write_text(f'''<!DOCTYPE html>
 <meta name="apple-mobile-web-app-title" content="OTPanda">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="canonical" href="https://otpanda.github.io/app/">
-<link rel="icon" type="image/png" sizes="16x16" href="otty-favicon-v3-16.png">
-<link rel="icon" type="image/png" sizes="32x32" href="otty-favicon-v3-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="otty-favicon-t1b-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="otty-favicon-t1b-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-v3.png">
 <link rel="manifest" href="manifest.json">
 <meta property="og:type" content="website">
