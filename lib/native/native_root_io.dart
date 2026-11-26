@@ -77,6 +77,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _lockChanged();
     localLock.addListener(_lockChanged);
     WidgetsBinding.instance.addObserver(this);
     controller = NativeSessionController(

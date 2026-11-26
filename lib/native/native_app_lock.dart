@@ -230,6 +230,8 @@ class LocalLockSetting extends StatelessWidget {
 
 /// Registers a veto on every actual Navigator route, including dialogs. The
 /// visual curtain lives above Navigator and cannot own a PopScope itself.
+/// This app uses one root Navigator. Any future nested Navigator must also
+/// install a lock observer before it can hold sensitive routes.
 class LockNavigationObserver extends NavigatorObserver {
   LockNavigationObserver(this.controller) {
     controller.addListener(_changed);
