@@ -74,9 +74,10 @@ Path('web/index.html').write_text(f'''<!DOCTYPE html>
 p=Path('android/app/src/main/AndroidManifest.xml');s=p.read_text().replace('android:label="otpanda_client"','android:label="OTPanda" android:description="@string/app_description"');p.write_text(s)
 write('android/app/src/main/res/values/otpanda.xml',b'<resources><string name="app_description">OTPanda development preview. Real sign-in and sources are not connected yet.</string><color name="launcher_background">#10B981</color></resources>')
 for density,size in [('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
- icon(f'android/app/src/main/res/mipmap-{density}/ic_launcher.png',size)
+ write(f'android/app/src/main/res/mipmap-{density}/ic_launcher.png', Path(f'assets/android-launcher-centered/mipmap-{density}-ic_launcher.png').read_bytes())
+ write(f'android/app/src/main/res/mipmap-{density}/ic_launcher_round.png', Path(f'assets/android-launcher-centered/mipmap-{density}-ic_launcher_round.png').read_bytes())
 # All art lies inside the adaptive safe zone (background and art are inset again).
-icon('android/app/src/main/res/drawable/launcher_foreground.png',432)
+write('android/app/src/main/res/drawable/launcher_foreground.png', Path('assets/android-launcher-centered/ic_launcher_foreground-432.png').read_bytes())
 write('android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml',b'<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android"><background android:drawable="@color/launcher_background"/><foreground android:drawable="@drawable/launcher_foreground"/></adaptive-icon>')
 p=Path('linux/runner/my_application.cc');s=p.read_text().replace('"otpanda_client"','"OTPanda"');p.write_text(s)
 p=Path('windows/runner/main.cpp');s=p.read_text().replace('L"otpanda_client"','L"OTPanda"');p.write_text(s)
