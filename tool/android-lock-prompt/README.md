@@ -12,3 +12,11 @@ Scenarios (adb drives the user actions and writes `ev=mark` lines into the same 
 - mimic_back / mimic_home: user action marks BACK or HOME. An `onStop` after the HOME mark is a user-caused stop.
 Verifier reports per scenario: prompt_ui (focus window not the app), self_stop_before_any_user_action, user_stop_after_mark, outcome, exception class, event sequence. It fails closed if an event is missing, no prompt UI/screenshot, outcome delivered twice, wrong API, or a crash. By default a self-stop is reported, not failed.
 Limits: emulator only. With no credential provider the prompt may not appear; that is reported as inconclusive (fail), never a pass. Fake begin transport only; no finish; no real key, token or account. The fixture's Passkeys copy is guarded to use the same call as the host (check.py).
+
+Review hardening (N4 review):
+- A prompt only counts when the idle focus window is a credential provider (com.android.credentialmanager, or gms with a credential/identity/fido/passkey activity). App, keyguard, launcher, SystemUI and ANR dialogs do not count.
+- Any prompt_error/prompt_result/outcome before the idle check fails the run. All 5 scenarios wait 10 s and capture focus plus a screenshot before any user action.
+- Asserted outcomes: mimic_idle stays pending; mimic_back USER_CANCELLED once; mimic_home ABORTED once after the HOME mark; observe_idle USER_CANCELLED once after BACK. A HOME scenario without its HOME mark fails.
+- CI must set REQUIRE_NO_SELF_STOP=1. Locally it is a reported fact.
+- SCOPE: the allowCredentials id is synthetic, so the provider shows at most a no-passkey/error sheet. This is NOT evidence about a real credential selection or the biometric step. A virtual credential seed was not added (no authenticator we can seed without real key material or provider-specific tooling), so a pass is scoped to that sheet.
+- SCOPE: a plain Activity hosts the prompt. The real MainActivity/FlutterActivity host is NOT covered: Dart does not start an attempt yet and the engine needs the full app, which is not bounded here. A pass is NOT activation proof.

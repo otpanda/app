@@ -1,6 +1,9 @@
 name: Manual native local-lock qualification (synthetic)
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/native-device-unlock]
+    paths: [tool/android-lock-prompt/**, tool/android-lock-prompt-qualification.sh, .github/workflows/native-lock-qualification.yml]
 permissions:
   contents: read
 jobs:
