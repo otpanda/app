@@ -31,7 +31,7 @@ for size in (192,512):
  icon(f'web/icons/Icon-v4-{size}.png',size)
  icon(f'web/icons/Icon-maskable-v4-{size}.png',f'm{size}')
 write('web/social-preview-v4.png',base64.b64decode(SOCIAL))
-manifest=dict(id='/app/',name='OTPanda',short_name='OTPanda',description=description,start_url='/app/',scope='/app/',display='standalone',background_color='#f5f8f7',theme_color='#0a7955',lang='en',prefer_related_applications=False,icons=[dict(src=f'icons/Icon-{"maskable-" if mask else ""}v3-{size}.png',sizes=f'{size}x{size}',type='image/png',purpose='maskable' if mask else 'any') for mask in (False,True) for size in (192,512)])
+manifest=dict(id='/app/',name='OTPanda',short_name='OTPanda',description=description,start_url='/app/',scope='/app/',display='standalone',background_color='#f5f8f7',theme_color='#0a7955',lang='en',prefer_related_applications=False,icons=[dict(src=f'icons/Icon-{"maskable-" if mask else ""}v4-{size}.png',sizes=f'{size}x{size}',type='image/png',purpose='maskable' if mask else 'any') for mask in (False,True) for size in (192,512)])
 Path('web/manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 Path('web/session-bootstrap.js').write_text(Path('tool/session-bootstrap.js').read_text())
 Path('web/realtime-client.js').write_text(Path('tool/realtime-client.js').read_text())
