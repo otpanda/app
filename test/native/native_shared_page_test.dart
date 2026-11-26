@@ -61,6 +61,10 @@ void main() {
       final c = NativeSessionController(
         NativeAuth(
           post: (p, b) async {
+            if (p == '/auth/native/logout') {
+              calls.add('POST /auth/native/logout');
+              return (status: 204, body: null);
+            }
             if (p == '/auth/native/challenge') {
               return (
                 status: 200,
@@ -134,7 +138,7 @@ void main() {
             _ => {'records': []},
           }),
         );
-      });
+      }, onLogout: () => c.signOut());
       t.view.physicalSize = const Size(390, 844);
       t.view.devicePixelRatio = 1;
       addTearDown(t.view.reset);
@@ -142,9 +146,11 @@ void main() {
         NativeApp(
           controller: c,
           googleAvailable: false,
+          authBridge: bridge,
           signedInBuilder: (context) => BrowserAccountPage(
             bridge: bridge,
             accountOnly: true,
+            signOutEnabled: true,
             workspaceEnabled: true,
           ),
         ),
@@ -165,6 +171,16 @@ void main() {
           matchesGoldenFile('goldens/native_codes_390.png'),
         );
       }
+      await t.tap(find.byTooltip('Account & security').first);
+      await t.pumpAndSettle();
+      final signOut = find.byKey(const Key('browser-sign-out'));
+      await t.ensureVisible(signOut);
+      expect(signOut, findsOneWidget);
+      await t.tap(signOut);
+      await t.pumpAndSettle();
+      expect(calls, contains('POST /auth/native/logout'));
+      expect(c.phase, NativeSessionPhase.signedOut);
+      expect(find.text('Welcome to OTPanda.'), findsOneWidget);
       await t.pumpWidget(const SizedBox.shrink());
     },
   );
