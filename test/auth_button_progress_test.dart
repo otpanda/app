@@ -14,6 +14,8 @@ class Bridge implements BrowserSessionBridge {
   final wait = Completer<void>();
   int calls = 0;
   @override
+  Future<void> passkey() => start('passkey');
+  @override
   Future<void> start(String mode) {
     calls++;
     return wait.future;
@@ -80,6 +82,13 @@ void main() {
         );
         await t.pump();
         await t.pump(const Duration(milliseconds: 500));
+        // Repeat tap cannot launch another authentication operation.
+        await t.tap(
+          mode == 'google'
+              ? find.byType(GoogleSignInButton)
+              : find.text('Sign in with a passkey'),
+        );
+        await t.pump();
         expect(b.calls, 1);
         expect(find.byType(LinearProgressIndicator), findsNothing);
         expect(find.byType(CircularProgressIndicator), findsOneWidget);
@@ -110,5 +119,52 @@ void main() {
         await t.pumpWidget(const SizedBox.shrink());
       },
     );
+  }
+  for (final outcome in ['cancel', 'error']) {
+    testWidgets('signup-ready inline loading clears on $outcome', (t) async {
+      final b = Bridge();
+      await t.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: Scaffold(
+            body: AuthEntry(
+              bridge: b,
+              status: 'signup-ready',
+              message: '',
+              busy: false,
+              run: (f) async {
+                try {
+                  await f();
+                } catch (_) {}
+              },
+            ),
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      await t.tap(find.text('Create my passkey'));
+      await t.pump();
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      await t.tap(find.text('Create my passkey'));
+      await t.pump();
+      expect(b.calls, 1);
+      if (outcome == 'error') {
+        b.wait.completeError(StateError('fixture'));
+      } else {
+        b.wait.complete();
+      }
+      await t.pumpAndSettle();
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(
+        t
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Create my passkey'),
+            )
+            .onPressed,
+        isNotNull,
+      );
+      await t.pumpWidget(const SizedBox.shrink());
+    });
   }
 }

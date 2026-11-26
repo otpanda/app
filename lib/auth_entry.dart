@@ -206,12 +206,18 @@ class _AuthEntryState extends State<AuthEntry> {
               FilledButton(
                 onPressed: widget.busy || pendingAction != null
                     ? null
-                    : () => runAction('passkey', widget.bridge.passkey),
+                    : () => runAction(
+                        signup ? 'signup' : 'passkey',
+                        widget.bridge.passkey,
+                      ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (pendingAction == 'passkey') ...[
-                      pendingIcon('passkey', Icons.key_outlined),
+                    if (pendingAction == (signup ? 'signup' : 'passkey')) ...[
+                      pendingIcon(
+                        signup ? 'signup' : 'passkey',
+                        Icons.key_outlined,
+                      ),
                       const SizedBox(width: 10),
                     ],
                     Text(
