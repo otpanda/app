@@ -405,6 +405,111 @@ void main() {
     },
   );
   test(
+    'purge cannot interleave between guard consumption and custody provision',
+    () async {
+      final store = DelayedCustody();
+      final sync = NativeCustodySync(
+        custody: store,
+        ownerId: 'o',
+        deviceId: 'd',
+        epoch: 0,
+      );
+      await sync.reconcile(snapshot);
+      final ticket = await sync.issue(
+        ownerId: 'o',
+        deviceId: 'd',
+        entryId: 'e',
+        seedVersion: 1,
+      );
+      final seed = Uint8List.fromList(List.filled(20, 1));
+      final accepting = sync.accept(
+        ticket,
+        ownerId: 'o',
+        deviceId: 'd',
+        epoch: 0,
+        entryId: 'e',
+        seedVersion: 1,
+        algorithm: OtpAlgorithm.sha1,
+        digits: 6,
+        period: 30,
+        seed: seed,
+      );
+      await store.entered.future;
+      var cleared = false;
+      final clearing = sync.purge().then((_) {
+        cleared = true;
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(cleared, false);
+      store.proceed.complete();
+      await accepting;
+      await clearing;
+      expect(seed, everyElement(0));
+      expect(store.fake.entries('o'), isEmpty);
+      await expectLater(
+        store.fake.generate(
+          ownerId: 'o',
+          entryId: 'e',
+          seedVersion: 1,
+          unixSeconds: 59,
+        ),
+        throwsA(isA<CustodyException>()),
+      );
+    },
+  );
+  test('owner switch cannot interleave between guard consumption and custody provision', () async {
+    final store = DelayedCustody();
+    final sync = NativeCustodySync(
+      custody: store,
+      ownerId: 'o',
+      deviceId: 'd',
+      epoch: 0,
+    );
+    await sync.reconcile(snapshot);
+    final ticket = await sync.issue(
+      ownerId: 'o',
+      deviceId: 'd',
+      entryId: 'e',
+      seedVersion: 1,
+    );
+    final seed = Uint8List.fromList(List.filled(20, 1));
+    final accepting = sync.accept(
+      ticket,
+      ownerId: 'o',
+      deviceId: 'd',
+      epoch: 0,
+      entryId: 'e',
+      seedVersion: 1,
+      algorithm: OtpAlgorithm.sha1,
+      digits: 6,
+      period: 30,
+      seed: seed,
+    );
+    await store.entered.future;
+    var cleared = false;
+    final clearing = sync.switchOwner(ownerId: 'other', deviceId: 'd2').then((
+      _,
+    ) {
+      cleared = true;
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(cleared, false);
+    store.proceed.complete();
+    await accepting;
+    await clearing;
+    expect(seed, everyElement(0));
+    expect(store.fake.entries('o'), isEmpty);
+    await expectLater(
+      store.fake.generate(
+        ownerId: 'o',
+        entryId: 'e',
+        seedVersion: 1,
+        unixSeconds: 59,
+      ),
+      throwsA(isA<CustodyException>()),
+    );
+  });
+  test(
     'disable before response rejects stale seed and queue remains usable',
     () async {
       final fake = FakeSeedCustody();
