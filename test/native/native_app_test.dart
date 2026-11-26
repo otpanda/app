@@ -250,8 +250,6 @@ void main() {
           googleAvailability: () => source.available,
         );
         expect(bridge.googleAvailable, isFalse);
-        await source.probe();
-        expect(bridge.googleAvailable, isTrue);
         await t.pumpWidget(
           NativeApp(
             controller: c,
@@ -260,6 +258,9 @@ void main() {
           ),
         );
         await t.pumpAndSettle();
+        // No widget rebuild after the probe: dispatch reads capability at tap.
+        await source.probe();
+        expect(bridge.googleAvailable, isTrue);
         await t.tap(find.textContaining('Google').first);
         await t.pumpAndSettle();
         expect(methods, ['available', 'idToken']);
