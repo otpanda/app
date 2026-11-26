@@ -33,6 +33,10 @@ case "$cur" in null|"") new="$comp";; *"$comp"*) new="$cur";; *) new="$cur:$comp
 back=$("${A[@]}" shell settings get secure credential_service | tr -d '\r\n')
 { echo "before=$cur"; echo "after=$back"; echo "primary=$("${A[@]}" shell settings get secure credential_service_primary | tr -d '\r\n')"; } > "$OUT/credential_service.txt"
 case "$back" in *"$comp"*) ;; *) echo 'HARNESS FAIL: provider enablement readback does not contain the synthetic provider'; cat "$OUT/credential_service.txt"; exit 7;; esac
+# Fresh emulator launcher can ANR while Play services finishes first startup.
+# Clear the disposable launcher's startup task before any evidence scenario.
+"${A[@]}" shell am force-stop com.google.android.apps.nexuslauncher
+"${A[@]}" shell input keyevent KEYCODE_HOME; sleep 5
 "${A[@]}" logcat -b crash -c; : > "$OUT/fixture.log"; echo "API=$api" >> "$OUT/fixture.log"; echo 'ENABLE=OK' >> "$OUT/fixture.log"
 hostact="$PKG/app.otpanda.fixture.LockPromptHostActivity"
 mark(){ "${A[@]}" shell log -t LOCKFX "ev=mark scenario=$1 name=$2 $3"; }
@@ -41,7 +45,7 @@ dump_ui(){ # scenario label -> OUT/ui-s-l.xml
 }
 idle(){
   local s="$1"; local f="$OUT/window-$s-idle.txt"
-  "${A[@]}" shell dumpsys window 2>&1 | tr -d '\r' > "$f"
+  "${A[@]}" shell dumpsys window displays 2>&1 | tr -d '\r' > "$f"
   local v; v=$(grep -m1 'mCurrentFocus' "$f" | sed 's/.*{[^ ]* [^ ]* //; s/}.*//' | tr -c 'A-Za-z0-9._/\n' '_')
   [ -n "$v" ] && mark "$s" FOCUS_IDLE "value=$v" || mark "$s" FOCUS_ERROR ""
   dump_ui "$s" idle
@@ -62,9 +66,12 @@ select_entry(){
 }
 run(){ # scenario action steps...
   local s="$1" act="$2"; shift 2
+  # A selector is a separate system task, not killed by force-stopping our app.
+  # End it between scenarios so each run must log a fresh real host creation.
+  "${A[@]}" shell am force-stop com.android.credentialmanager
   "${A[@]}" shell am force-stop "$PKG"; "${A[@]}" shell run-as "$PKG" rm -f no_backup/local-app-lock-v1; "${A[@]}" logcat -b all -c; sleep 1
   mark "$s" BEGIN ""
-  "${A[@]}" shell am start -W -n "$hostact" --es scenario "$s" --es action "$act" > "$OUT/start-$s.txt" 2>&1
+  "${A[@]}" shell am start -W --activity-new-task --activity-clear-task -n "$hostact" --es scenario "$s" --es action "$act" > "$OUT/start-$s.txt" 2>&1
   for step in "$@"; do
     case "$step" in
       wait*) sleep "${step#wait}";;
@@ -77,7 +84,12 @@ run(){ # scenario action steps...
   echo "== scenario $s" >> "$OUT/fixture.log"
   "${A[@]}" logcat -d -b all -v threadtime | tr -d '\r' > "$OUT/logcat-$s.txt"
   grep 'LOCKFX' "$OUT/logcat-$s.txt" | grep 'ev=' >> "$OUT/fixture.log"
-  grep -q 'does not have the required capabilities' "$OUT/logcat-$s.txt" && echo "PROVIDER_REJECTED=yes scenario=$s" >> "$OUT/fixture.log"
+  # A capability warning can concern a different installed provider. Attribute
+  # rejection only if our provider was never invoked. Functional gates still
+  # require its visible entry, selection and matching finish independently.
+  if grep -q 'does not have the required capabilities' "$OUT/logcat-$s.txt" && ! grep -q 'ev=provider_begin_get' "$OUT/logcat-$s.txt"; then
+    echo "PROVIDER_REJECTED=yes scenario=$s" >> "$OUT/fixture.log"
+  fi
 }
 run unlock_idle unlock wait12 idle wait3
 run unlock_back unlock wait12 idle back wait3
