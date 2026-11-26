@@ -1403,6 +1403,118 @@ void main() {
     },
   );
 
+  testWidgets(
+    'brief stale fallback is grey updating, inert, and clears after two seconds',
+    (tester) async {
+      if (Platform.isLinux && !_fontsLoaded) {
+        for (final family in ['Figtree', 'BricolageGrotesque']) {
+          final loader = FontLoader(family);
+          for (final weight
+              in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+            final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                ),
+              ),
+            );
+          }
+          await loader.load();
+        }
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File(
+                  '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
+              ),
+            ),
+          );
+        await icons.load();
+        _fontsLoaded = true;
+      }
+      var t = 0;
+      final bridge = BriefStaleBridge({
+        '/v1/manage/session': SessionResponse(
+          200,
+          jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+        ),
+        '/v1/manage/entries': SessionResponse(
+          200,
+          jsonEncode({
+            'entries': [
+              {
+                'entry_id': 'a',
+                'label': 'Test',
+                'service_id': 'custom-totp',
+                'capabilities': {'manage': true},
+                'account_name': 'me',
+                'totp': true,
+              },
+            ],
+          }),
+        ),
+        '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+        '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+        '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+      });
+      final controller = ReadWorkspaceController(
+        bridge: bridge,
+        clock: () => 45000,
+      );
+      await controller.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: controller,
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+            clock: () => 45000,
+            onSignedOut: () {},
+            batchClock: () => t,
+            batchPolicy: const BatchPolicy(
+              maxEntries: 1,
+              maxTotalCodes: 32,
+              minPeriodSeconds: 20,
+              maxPeriodSeconds: 86400,
+              maxWindowSeconds: 600,
+              minRemainingMs: 1000,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('0000001'), findsOneWidget);
+      t = 15500;
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Updating'), findsOneWidget);
+      expect(find.text('0000001'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsNothing);
+      await tester.tap(find.text('Test'));
+      await tester.pump();
+      expect(find.text('Copied'), findsNothing);
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      await tester.pump();
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/batch-stale-updating-mobile.png'),
+        );
+      }
+      t = 18000;
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.text('0000001'), findsNothing);
+      expect(find.text('Updating'), findsNothing);
+      await tester.binding.setSurfaceSize(null);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+
   test('long period entering its last 15 s on a current-only server: time-gated, at most 3 s spacing, and does not touch the normal entry budget', () async {
     var time = 0;
     // 'long' period ends at server 3600000: 40 s left at t=0.
@@ -1448,5 +1560,36 @@ class DelayedBatchBridge extends BatchBridge {
     final response = await super.totpBatch(ids, windowSeconds: windowSeconds);
     arrive();
     return response;
+  }
+}
+
+class BriefStaleBridge extends BatchBridge {
+  BriefStaleBridge(super.routes);
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    if (batches > 0) return const SessionResponse(503, '{}');
+    batches++;
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 45000,
+        'coverageUntil': 60000,
+        'totalCodes': ids.length,
+        'entries': [
+          for (final id in ids)
+            {
+              'entryId': id,
+              'period': 30,
+              'digits': 7,
+              'validFrom': 30,
+              'codes': ['0000001'],
+            },
+        ],
+        'omitted': [],
+      }),
+    );
   }
 }

@@ -393,7 +393,7 @@ class _ProductShellState extends State<ProductShell>
                               child: Align(
                                 alignment: Alignment.bottomCenter,
                                 child: Text(
-                                  'Expired',
+                                  'Updating',
                                   style: TextStyle(fontSize: 9, color: muted),
                                 ),
                               ),
