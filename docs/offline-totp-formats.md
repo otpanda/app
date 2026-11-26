@@ -36,3 +36,10 @@ This slice is only the format layer. It is not imported by the app, has no stora
 
 ## Evidence
 `test/offline_totp/offline_totp_test.dart` (26 tests) passes with `flutter test test/offline_totp`, and the earlier archive whole-repo suite passed, on Flutter 3.50.1 (the version pinned in `.github/workflows`). `flutter analyze` is clean. The archive tests also passed compiled to JS on Node; current qualification is reported separately. Migration fixtures come from an independent Python protobuf encoder, not this code. Mutants removing the base32 pad check, the HOTP check, batch index uniqueness, the export representability check and the issuer-conflict check each fail a test. Synthetic secrets only (RFC 6238 key and arbitrary bytes).
+
+## Import policy (units 1 and 2, inactive)
+- Defaults are visible, not silent: `OtpAccount.assumed` lists parameters the source lacked (period for every Google migration account, an unspecified Google algorithm or digit count, anything absent from a Key URI or Aegis entry). `withParameters` edits them and clears the matching assumption. `OtpAssumption.encodeAll/decodeAll` give a strict storage form; the wiring must persist it with the saved account.
+- `parseMigrationUri(skipUnsupported: true)`, `parseOtpauthList` and `parseAegisPlainVault` import what they can and return `SkippedEntry` items (position, reason, and a display-safe issuer and account name for local preview only; toString never prints them). Container-level damage is never skipped past. HOTP, MD5, unknown algorithms, Steam, mOTP, Yandex, 7 digits and encrypted files are explicit gaps, never converted.
+- `isMigrationRepresentable` is the one rule for the Google format (30 s, 6 or 8 digits). `planMigrationExport` routes the rest to Key URIs or the Aegis vault.
+- Aegis plain vault: import and export, checked against Aegis docs/vault.md and the structure of its published plain test vault. Encrypted Aegis, 2FAS, Bitwarden and other formats are not done.
+- Open: 7-digit TOTP is real (Aegis test data has it) but `OtpAccount` refuses it, matching the API's current URI parser. Supporting it needs an agreed change in both.
