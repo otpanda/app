@@ -1,7 +1,5 @@
 name: Offline TOTP custody emulator fixture (synthetic, manual)
 on:
-  push:
-    branches: [test/offline-custody-api34]
   workflow_dispatch:
 permissions:
   contents: read
