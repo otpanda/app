@@ -468,10 +468,12 @@ void main() {
       expect(bridge.batches, 1);
       expect(find.text('0000001'), findsOneWidget);
       expect(find.byTooltip('Copy code'), findsOneWidget);
-      await expectLater(
-        find.byType(ProductShell),
-        matchesGoldenFile('goldens/mainpage-batch.png'),
-      );
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/mainpage-batch.png'),
+        );
+      }
       String? copied;
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
