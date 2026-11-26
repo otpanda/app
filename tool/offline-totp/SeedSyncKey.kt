@@ -61,7 +61,14 @@ data class RetryResult(val keyDeletesPending: Int, val purgesOwed: Int, val unre
     val clean: Boolean get() = keyDeletesPending == 0 && purgesOwed == 0 && unreadableOwners == 0
 }
 
-data class Enrollment(val keyId: String, val publicKey: ByteArray)
+/** [generation] and [installId] are the values recorded durably at enrollment; every later proof takes them from the record, never from a caller. */
+data class Enrollment(val keyId: String, val publicKey: ByteArray, val generation: Long, val installId: String)
+
+/** What a signing step may rely on, all read under the core lock from native state: the active key's id, its enrollment generation and install id, and the
+ * owner's REAL native epoch (read lazily from custody; a failed read refuses the proof that needs it). */
+class SignContext internal constructor(val keyId: String, val generation: Long, val installId: String, private val epochRead: () -> Long) {
+    val epoch: Long get() = epochRead()
+}
 
 enum class RemoteCodeAction { PURGE, SUSPEND, IGNORE }
 
@@ -84,6 +91,7 @@ private const val SYNC_HEADER = "otpanda-seedsync-state-v1"
 private const val SYNC_ALIAS_PREFIX = "otpanda.seedsync.v1."
 private val SYNC_ALIAS = Regex("otpanda\\.seedsync\\.v1\\.[0-9a-f]{32}")
 private val SYNC_KEY_ID = Regex("[0-9a-f]{32}")
+private val SYNC_INSTALL = Regex("[A-Za-z0-9_-]{22,64}")
 
 
 private const val MAX_DENY = 16
@@ -93,13 +101,15 @@ internal data class SyncKeyRef(val keyId: String, val alias: String)
 
 internal class SyncState(val owner: String) {
     var active: SyncKeyRef? = null
+    var activeGeneration = 0L
+    var activeInstall = ""
     var owed = Owed.NONE
     var owedEpoch: Long? = null
     val deny = ArrayList<SyncKeyRef>()
 
     fun encode(): String = buildString {
         append(SYNC_HEADER).append('\n').append("owner ").append(Base64.getUrlEncoder().withoutPadding().encodeToString(owner.toByteArray(Charsets.UTF_8))).append('\n')
-        append(active?.let { "active ${it.keyId} ${it.alias}" } ?: "active none").append('\n')
+        append(active?.let { "active ${it.keyId} ${it.alias} $activeGeneration $activeInstall" } ?: "active none").append('\n')
         append("owed ").append(owed.name.lowercase()).append('\n')
         append("epoch ").append(owedEpoch?.toString() ?: "none").append('\n')
         for (d in deny.sortedWith(compareBy({ it.alias }, { it.keyId }))) append("deny ${d.keyId} ${d.alias}\n")
@@ -116,8 +126,9 @@ internal class SyncState(val owner: String) {
             require(owner == expectedOwner && validCustodyId(owner))
             val s = SyncState(owner)
             if (lines[2] != "active none") {
-                val p = lines[2].split(' '); require(p.size == 3 && p[0] == "active" && p[1].matches(SYNC_KEY_ID) && p[2].matches(SYNC_ALIAS))
-                s.active = SyncKeyRef(p[1], p[2])
+                val p = lines[2].split(' ')
+                require(p.size == 5 && p[0] == "active" && p[1].matches(SYNC_KEY_ID) && p[2].matches(SYNC_ALIAS) && p[3].matches(Regex("0|[1-9][0-9]{0,15}")) && p[4].matches(SYNC_INSTALL))
+                s.active = SyncKeyRef(p[1], p[2]); s.activeGeneration = p[3].toLong(); s.activeInstall = p[4]
             }
             require(lines[3].startsWith("owed ")); s.owed = Owed.values().firstOrNull { it.name.lowercase() == lines[3].removePrefix("owed ") } ?: throw IllegalArgumentException()
             require(lines[4].startsWith("epoch "))
@@ -166,8 +177,9 @@ class SeedSyncKeyCore(
     /** Creates a fresh enrollment key. Refused (ERASE_INCOMPLETE) while an erase is unresolved: an owed purge, an uncommitted erase intent, or 15 deny records.
      * An existing enrollment is moved to a deny record in the same write that records the new key, then deleted and confirmed absent. A crash between key
      * creation and the write leaves only an orphan alias for [sweepOrphans]. */
-    fun enroll(owner: String): Enrollment = synchronized(lock) {
+    fun enroll(owner: String, installId: String, generation: Long): Enrollment = synchronized(lock) {
         checkOwner(owner)
+        if (!SYNC_INSTALL.matches(installId) || generation < 0 || generation > 9_007_199_254_740_991L) fail(SyncKeyError.INVALID_INPUT)
         val state = load(owner)
         if (owner in intents || state.owed != Owed.NONE || state.deny.size >= MAX_DENY - 1) fail(SyncKeyError.ERASE_INCOMPLETE)
         val ref = SyncKeyRef(randomHex(), SYNC_ALIAS_PREFIX + randomHex())
@@ -175,15 +187,20 @@ class SeedSyncKeyCore(
         val pub = try { vault.generate(ref.alias) } catch (_: Exception) { fail(SyncKeyError.UNAVAILABLE) }
         val old = state.active
         if (old != null) state.deny.add(old)
-        state.active = ref
+        state.active = ref; state.activeGeneration = generation; state.activeInstall = installId
         try { save(state) } catch (e: SyncKeyFailure) { try { vault.delete(ref.alias) } catch (_: Exception) {}; throw e }
         if (old != null) confirmDeleted(state, old)
-        Enrollment(ref.keyId, pub)
+        Enrollment(ref.keyId, pub, generation, installId)
     }
 
-    /** Signs with the active enrollment key. The durable document is read on every call: a denied, missing or unreadable state, or an unresolved erase
-     * intent, refuses the use. */
-    fun sign(owner: String, message: ByteArray): ByteArray = synchronized(lock) {
+    /** TEST ONLY: signs raw bytes. No production code may call it (release guard); production signing is [signBuilt] through SeedSyncWire, where native builds
+     * every message. */
+    internal fun signRawForTests(owner: String, message: ByteArray): ByteArray = signBuilt(owner) { message }
+
+    /** Signs a message that [build] constructs from the [SignContext] of the very key that signs (key id, enrollment generation, install id, real native epoch),
+     * read under the same lock. The durable document is read on every call: a denied, missing or unreadable state, or an unresolved erase intent or owed purge,
+     * refuses the use. INTERNAL: only SeedSyncWire may call it. [build] must not call back into this core. */
+    internal fun signBuilt(owner: String, build: (SignContext) -> ByteArray): ByteArray = synchronized(lock) {
         checkOwner(owner)
         if (owner in intents) fail(SyncKeyError.ERASE_INCOMPLETE)
         val state = load(owner)
@@ -191,6 +208,9 @@ class SeedSyncKeyCore(
         val active = state.active ?: fail(SyncKeyError.NOT_ENROLLED)
         val present = try { vault.containsAlias(active.alias) } catch (_: Exception) { fail(SyncKeyError.UNAVAILABLE) }
         if (!present) fail(SyncKeyError.MISSING_KEY)
+        val message = build(SignContext(active.keyId, state.activeGeneration, state.activeInstall) {
+            try { custody.readOwnerState(owner).epoch } catch (_: Exception) { fail(SyncKeyError.METADATA_UNAVAILABLE) }
+        })
         try { vault.sign(active.alias, message) } catch (e: VaultException) {
             fail(if (e.kind == VaultException.Kind.INVALIDATED) SyncKeyError.MISSING_KEY else SyncKeyError.UNAVAILABLE)
         } catch (_: Exception) { fail(SyncKeyError.UNAVAILABLE) }
