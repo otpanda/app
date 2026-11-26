@@ -17,7 +17,7 @@ const _safeInteger = 9007199254740991;
 bool _integer(Object? n) => n is int && n >= 0 && n <= _safeInteger;
 final _idChars = RegExp(r'[\x00-\x20\x7f]');
 bool _entry(Object? id) =>
-    id is String && id.isNotEmpty && id.length <= 256 && !_idChars.hasMatch(id);
+    id is String && id.isNotEmpty && id.length <= 64 && !_idChars.hasMatch(id);
 
 /// Limits supplied by the caller. No defaults on purpose.
 final class BatchPolicy {

@@ -14,14 +14,40 @@ class MainPageBatchController extends ChangeNotifier {
     required this.bridge,
     required this.policy,
     required this.active,
+    int Function()? wallMilliseconds,
+    int Function()? monotonicMilliseconds,
   }) {
-    store = BatchCodeStore(
-      monotonicMilliseconds: () => _clock.elapsedMilliseconds,
-    );
+    _wall = wallMilliseconds ?? () => DateTime.now().millisecondsSinceEpoch;
+    _mono = monotonicMilliseconds ?? () => _clock.elapsedMilliseconds;
+    if (policy.maxEntries < 1 ||
+        policy.maxEntries > 49 ||
+        policy.maxTotalCodes < policy.maxEntries) {
+      throw ArgumentError('Invalid batch policy');
+    }
+    _wallStart = _wall();
+    store = BatchCodeStore(monotonicMilliseconds: () => _mono());
   }
   final TotpBatchBridge bridge;
   final BatchPolicy policy;
   final bool Function() active;
+  late int Function() _wall, _mono;
+  late int _wallStart;
+  bool _foreground = true;
+  bool get _safe {
+    final difference = (_wall() - _wallStart - _mono()).abs();
+    if (difference > 2000) {
+      invalidate(notify: false);
+      _wallStart = _wall() - _mono();
+      return false;
+    }
+    return _foreground && active();
+  }
+
+  void foreground(bool value) {
+    _foreground = value;
+    if (!value) invalidate();
+  }
+
   final Stopwatch _clock = Stopwatch()..start();
   late final BatchCodeStore store;
   List<String> _ids = [];
@@ -35,11 +61,7 @@ class MainPageBatchController extends ChangeNotifier {
   void select(List<String> ids) {
     final next = ids.take(policy.maxEntries).toList();
     if (listEquals(next, _ids)) return;
-    _generation++;
     _ids = next;
-    store.clear();
-    busy = false;
-    _retryAt = 0;
     if (next.isNotEmpty) {
       refresh();
     } else {
@@ -47,20 +69,20 @@ class MainPageBatchController extends ChangeNotifier {
     }
   }
 
-  void invalidate() {
+  void invalidate({bool notify = true}) {
     _generation++;
     _ids = [];
     store.clear();
     busy = false;
     error = null;
-    _notify();
+    if (notify) _notify();
   }
 
   void tick() {
-    if (active() &&
+    if (_safe &&
         _ids.isNotEmpty &&
         !busy &&
-        _clock.elapsedMilliseconds >= _retryAt &&
+        _mono() >= _retryAt &&
         store.needsRefresh(leadMs: 15000)) {
       refresh();
     }
@@ -68,11 +90,14 @@ class MainPageBatchController extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
-    if (!active() || busy || _ids.isEmpty || _disposed) return;
-    final generation = _generation, request = store.begin(_ids.toSet());
+    if (!_safe || busy || _ids.isEmpty || _disposed || _mono() < _retryAt) {
+      return;
+    }
+    final generation = _generation;
     busy = true;
     _notify();
     try {
+      final request = store.begin(_ids.toSet());
       final response = await bridge.totpBatch(
         List.of(_ids),
         windowSeconds: policy.maxWindowSeconds,
@@ -84,11 +109,11 @@ class MainPageBatchController extends ChangeNotifier {
       }
       store.accept(request, jsonDecode(response.body), policy: policy);
       error = null;
-      _retryAt = _clock.elapsedMilliseconds + 15000;
+      _retryAt = _mono() + 15000;
     } catch (_) {
       if (generation == _generation) {
         error = 'Generated codes are waiting for your connection.';
-        _retryAt = _clock.elapsedMilliseconds + 15000;
+        _retryAt = _mono() + 15000;
       }
     } finally {
       if (generation == _generation) {
@@ -98,10 +123,10 @@ class MainPageBatchController extends ChangeNotifier {
     }
   }
 
-  BatchCode? current(String id) => store.current(id);
+  BatchCode? current(String id) => _safe ? store.current(id) : null;
   Future<void> copy(String id) async {
-    final code = store.current(id);
-    if (!active() || code == null) return;
+    final code = current(id);
+    if (code == null) return;
     await Clipboard.setData(ClipboardData(text: code.value));
   }
 

@@ -74,7 +74,14 @@ class ProductShell extends StatefulWidget {
 
 enum _Phase { loading, loaded, cleared, failed, rateLimited, signedOut }
 
-class _ProductShellState extends State<ProductShell> {
+class _ProductShellState extends State<ProductShell>
+    with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    batch?.foreground(state == AppLifecycleState.resumed);
+    queueBatchSelection();
+  }
+
   bool get _canAddTotp =>
       widget.controller.bridge is TotpManagementBridge &&
       (widget.controller.bridge is! TotpCreationCapability ||
@@ -120,6 +127,18 @@ class _ProductShellState extends State<ProductShell> {
   Timer? freshTimer;
   bool hadFresh = false;
   MainPageBatchController? batch;
+  final _batchKeys = <String, GlobalKey>{};
+  final _batchScroll = ScrollController();
+  bool _batchSelectionQueued = false;
+  void queueBatchSelection() {
+    if (_batchSelectionQueued) return;
+    _batchSelectionQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _batchSelectionQueued = false;
+      if (mounted) syncBatch();
+    });
+  }
+
   int _batchRevision = -1;
   void syncBatch() {
     final b = batch;
@@ -135,17 +154,36 @@ class _ProductShellState extends State<ProductShell> {
       b.invalidate();
     }
     final q = query.trim().toLowerCase();
-    b.select([
+    final ids = [
       for (final e in widget.controller.store.entries)
-        if (e.totp && ("${e.service} ${e.account}".toLowerCase().contains(q)))
+        if (e.totp && ('${e.service} ${e.account}'.toLowerCase().contains(q)))
           e.id,
-    ]);
+    ];
+    final height = MediaQuery.sizeOf(context).height;
+    double distance(String id) {
+      final r = _batchKeys[id]?.currentContext?.findRenderObject();
+      if (r is! RenderBox || !r.hasSize) return double.infinity;
+      final y = r.localToGlobal(Offset.zero).dy;
+      return y < 0
+          ? -y
+          : y > height
+          ? y - height
+          : 0;
+    }
+
+    ids.sort((a, b) => distance(a).compareTo(distance(b)));
+    final near = ids.where((id) => distance(id) < height).toList();
+    final candidates = near.isEmpty ? ids : near;
+    final missing = candidates.where((id) => b.current(id) == null).toList();
+    if (!b.busy && missing.isNotEmpty) b.select(missing);
   }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(changed);
+    _batchScroll.addListener(queueBatchSelection);
     final policy = widget.batchPolicy, bridge = widget.controller.bridge;
     if (policy != null && bridge is TotpBatchBridge) {
       batch = MainPageBatchController(
@@ -156,11 +194,11 @@ class _ProductShellState extends State<ProductShell> {
             !widget.controller.suspended &&
             !widget.controller.store.sessionExpired(widget.clock()),
       )..addListener(changed);
-      syncBatch();
+      queueBatchSelection();
     }
     // Lets the highlight fade on its own without any refresh.
     freshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      syncBatch();
+      queueBatchSelection();
       batch?.tick();
       if (mounted && (hadFresh || batch != null)) setState(() {});
     });
@@ -176,16 +214,19 @@ class _ProductShellState extends State<ProductShell> {
   }
 
   void changed() {
+    queueBatchSelection();
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     freshTimer?.cancel();
+    _batchScroll.dispose();
     batch?.removeListener(changed);
     batch?.dispose();
     widget.controller.removeListener(changed);
     searchController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -455,6 +496,9 @@ class _ProductShellState extends State<ProductShell> {
               ),
             for (final e in rest)
               Padding(
+                key: e.totp
+                    ? _batchKeys.putIfAbsent(e.id, () => GlobalKey())
+                    : null,
                 padding: const EdgeInsets.only(bottom: 10),
                 child: InkWell(
                   onTap:
@@ -756,7 +800,9 @@ class _ProductShellState extends State<ProductShell> {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, size) {
       final desktop = size.maxWidth > 700;
+      queueBatchSelection();
       final list = ListView(
+        controller: _batchScroll,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.fromLTRB(
           desktop ? 0 : 12,

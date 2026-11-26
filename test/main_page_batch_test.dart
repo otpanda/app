@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:otpanda_client/main_page_batch.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/browser_session_contract.dart';
@@ -45,6 +46,37 @@ class BatchBridge extends FakeTransport implements TotpBatchBridge {
 }
 
 void main() {
+  test(
+    'sleep divergence clears held codes and stale copy, background clears',
+    () async {
+      var wall = 0, mono = 0;
+      final bridge = BatchBridge({});
+      final c = MainPageBatchController(
+        bridge: bridge,
+        policy: const BatchPolicy(
+          maxEntries: 1,
+          maxTotalCodes: 32,
+          minPeriodSeconds: 20,
+          maxPeriodSeconds: 86400,
+          maxWindowSeconds: 600,
+          minRemainingMs: 1000,
+        ),
+        active: () => true,
+        wallMilliseconds: () => wall,
+        monotonicMilliseconds: () => mono,
+      );
+      c.select(['a']);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.current('a')?.value, '0000001');
+      wall = 600000;
+      expect(c.current('a'), null);
+      expect(c.store.available(), isEmpty);
+      c.foreground(false);
+      expect(c.current('a'), null);
+      c.dispose();
+    },
+  );
+
   testWidgets(
     'main page automatically requests a batch and shows padded generated code with copy control',
     (tester) async {
@@ -128,10 +160,15 @@ void main() {
       expect(bridge.batches, 1);
       expect(find.text('0000001'), findsOneWidget);
       expect(find.byTooltip('Copy code'), findsOneWidget);
-      await expectLater(
-        find.byType(ProductShell),
-        matchesGoldenFile('goldens/mainpage-batch.png'),
-      );
+      await expectLater(find.byType(ProductShell),matchesGoldenFile('goldens/mainpage-batch.png'));
+      String? copied;tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform,(call)async{if(call.method=='Clipboard.setData')copied=(call.arguments as Map)['text'] as String;return null;});
+      await tester.tap(find.byTooltip('Copy code'));await tester.pump();expect(copied,'0000001');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);await tester.pump();expect(find.text('0000001'),findsNothing);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);await tester.pump();
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     },
