@@ -9,7 +9,7 @@ assert m['scope']==m['id']==m['start_url']=='/app/'
 assert 'not connected' in m['description'] and 'portrait-primary' not in m
 for icon in m['icons']:
  b=Path('web',icon['src']).read_bytes();w,h=struct.unpack('>II',b[16:24]);assert icon['sizes']==f'{w}x{h}'
-assert struct.unpack('>II',Path('web/social-preview-v3.png').read_bytes()[16:24])==(1200,630)
+assert struct.unpack('>II',Path('web/social-preview-v4.png').read_bytes()[16:24])==(1200,630)
 root=ET.parse('android/app/src/main/AndroidManifest.xml').getroot();app=root.find('application');ns='{http://schemas.android.com/apk/res/android}'
 assert app.attrib[ns+'label']=='OTPanda'
 assert app.attrib[ns+'description']=='@string/app_description'
