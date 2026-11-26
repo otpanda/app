@@ -153,8 +153,10 @@ class SeedSyncKeyCore(
     private val randomHex: () -> String = { ByteArray(16).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) } },
 ) {
     private val lock = Any()
-    private var callbackActive = false
-    private fun noCallback() { if (callbackActive) fail(SyncKeyError.INVALID_INPUT) }
+    /** True only while [runIfActive] runs its block (set and read under [lock], so only the owning thread can see it). Every entry point refuses while it is set: a
+     * provision callback that tries to sign, enroll, erase or retry would otherwise pass the reentrant monitor and break the check-then-provision guarantee. */
+    private var inBlock = false
+    private fun noReentry() { if (inBlock) fail(SyncKeyError.ERASE_INCOMPLETE) }
     /** Process-lifetime erase intents whose durable commit has not succeeded (owner to trigger). While present, sign and enroll refuse. */
     private val intents = HashMap<String, EraseTrigger>()
     private fun fail(e: SyncKeyError): Nothing = throw SyncKeyFailure(e)
@@ -180,7 +182,7 @@ class SeedSyncKeyCore(
      * An existing enrollment is moved to a deny record in the same write that records the new key, then deleted and confirmed absent. A crash between key
      * creation and the write leaves only an orphan alias for [sweepOrphans]. */
     fun enroll(owner: String, installId: String, generation: Long): Enrollment = synchronized(lock) {
-        noCallback()
+        noReentry()
         checkOwner(owner)
         if (!SYNC_INSTALL.matches(installId) || generation < 0 || generation > 9_007_199_254_740_991L) fail(SyncKeyError.INVALID_INPUT)
         val state = load(owner)
@@ -204,7 +206,7 @@ class SeedSyncKeyCore(
      * read under the same lock. The durable document is read on every call: a denied, missing or unreadable state, or an unresolved erase intent or owed purge,
      * refuses the use. INTERNAL: only SeedSyncWire may call it. [build] must not call back into this core. */
     internal fun signBuilt(owner: String, build: (SignContext) -> ByteArray): ByteArray = synchronized(lock) {
-        noCallback()
+        noReentry()
         checkOwner(owner)
         if (owner in intents) fail(SyncKeyError.ERASE_INCOMPLETE)
         val state = load(owner)
@@ -248,22 +250,37 @@ class SeedSyncKeyCore(
      * between the check and [block]; an erase that arrives meanwhile waits until [block] returns and then purges whatever it provisioned. Lock order is always
      * core lock, then custody lock; [block] may call custody but must not call back into this core. INTERNAL: only SeedSyncBatchHandle may call it. */
     internal fun runIfActive(owner: String, keyId: String, epoch: Long, block: () -> Unit): String? = synchronized(lock) {
-        noCallback()
+        noReentry()
         checkOwner(owner)
         if (owner in intents) return "inactive"
         val st = try { load(owner) } catch (_: SyncKeyFailure) { return "inactive" }
         if (st.owed != Owed.NONE || st.active?.keyId != keyId) return "inactive"
         if (nativeEpochOrNull(owner) != epoch) return "epoch"
-        callbackActive = true
-        try { block() } finally { callbackActive = false }
+        inBlock = true
+        try { block() } finally { inBlock = false }
         null
+    }
+
+    /** Erase for a purge decided by a STATUS answer about key [expectKeyId]: under the core lock, does nothing unless that exact key is STILL the active key with no
+     * erase pending or owed (a re-enrolled key, an already erased key, or a pending erase make it a no-op that returns false and must not be retried as a purge).
+     * Otherwise runs the same erase sequence with the REAL native epoch read here (never a caller value); an unreadable epoch throws METADATA_UNAVAILABLE with
+     * nothing changed, so the caller retries later. INTERNAL: SeedSyncWire.applyStatus is the only caller. */
+    internal fun eraseIfActive(owner: String, expectKeyId: String, trigger: EraseTrigger): Boolean = synchronized(lock) {
+        noReentry()
+        checkOwner(owner)
+        if (owner in intents) return false
+        val st = try { load(owner) } catch (_: SyncKeyFailure) { return false }
+        if (st.owed != Owed.NONE || st.active?.keyId != expectKeyId) return false
+        val real = nativeEpochOrNull(owner) ?: fail(SyncKeyError.METADATA_UNAVAILABLE)
+        eraseLocked(owner, real, trigger)
+        true
     }
 
     /** The one erase sequence captures the real native epoch to erase all owner records even with a stale caller bound.
      * DISABLE is the persistent opt-out (clearOwner); every other trigger is a purge that leaves the preference alone. Always attempts every step.
      * A custody failure is rethrown after the key steps, and an uncommitted erase throws ERASE_INCOMPLETE, so a caller never mistakes either for success. */
     fun erase(owner: String, epoch: Long, trigger: EraseTrigger): EraseOutcome = synchronized(lock) {
-        noCallback()
+        noReentry()
         checkOwner(owner)
         eraseLocked(owner, epoch, trigger)
     }
@@ -328,6 +345,7 @@ class SeedSyncKeyCore(
     /** Repeat unresolved work for every owner: uncommitted erase intents, owed seed purges (replaying their durably captured epoch), and key deletions. Call at app
      * start, foreground and unlock. Owners are independent; unreadable documents are counted and left untouched. An unlistable store throws METADATA_UNAVAILABLE. */
     fun retryPending(): RetryResult = synchronized(lock) {
+        noReentry()
         val keys = try { store.keys() } catch (_: Exception) { fail(SyncKeyError.METADATA_UNAVAILABLE) }
         val owners = LinkedHashSet<String>(intents.keys)
         var unreadable = 0

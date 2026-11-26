@@ -93,8 +93,8 @@ private fun verifies(pub: ByteArray, msg: ByteArray, sig: ByteArray): Boolean {
     return Signature.getInstance("SHA256withECDSA").run { initVerify(k); update(msg); verify(sig) }
 }
 
-// ---- wire interop against the API author's synthetic vector (seed-sync-vector-7e2e6f9c.json; SYNTHETIC keys, values copied verbatim) ----
-private val VJ = "Og1mLdUNFJMN8kfj2LcxyVf8_r0n7YT9z-NNtV5RUUo"; private val VY = "_0JaZpKEEe0DnvGvW_VwoMtxMQz9ihVPcecxoDr9rzs"
+// ---- wire interop against the API author's synthetic vector (seed-sync-vector-v4-a0ccb879.json; SYNTHETIC keys, values copied verbatim) ----
+private val VJ = "FUlvuIPmxIIPm6ZCSigFq94xCIAfMkV94roEHVzcRls"; private val VY = "J_DfwdhwPCNlAd4JrGOnt2NLarvBvWU-i0O555KW9SE"
 private fun b64d(s: String) = java.util.Base64.getUrlDecoder().decode(s)
 private fun stdB64(s: String) = java.util.Base64.getDecoder().decode(s)
 private fun vecPub(): java.security.PublicKey {
@@ -108,14 +108,16 @@ private fun wireErr(w: () -> Any?): String? = try { w(); null } catch (e: WireEx
 private fun wireChecks() {
     val ch = "A".repeat(43)
     val purposes = listOf(
-        Triple(SyncPurpose.ENROLL, mapOf("ownerId" to "owner", "keyId" to "key", "installId" to "I".repeat(22), "generation" to 1L, "challenge" to ch, "actionDigest" to "b".repeat(64), "expiresAt" to 1800000120000L),
-            Pair("WyJvdHBhbmRhLXNlZWQtc3luYy12MSIsInNlZWQtc3luYy1lbnJvbGwiLCJvd25lciIsImtleSIsIklJSUlJSUlJSUlJSUlJSUlJSUlJSUkiLDEsIkFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwxODAwMDAwMTIwMDAwXQ==", "qJoksY0hYMtZgSCE3cekerJu86tNWVhtyfhqNMwUr11G_P4H9-1sesq77tByw5BD4mfbo7lCei5oysLWrLMe5w")),
-        Triple(SyncPurpose.SNAPSHOT, mapOf("ownerId" to "owner", "keyId" to "key", "deviceId" to "device", "generation" to 1L, "epoch" to 7L, "challenge" to ch, "expiresAt" to 1800000120000L),
-            Pair("WyJvdHBhbmRhLXNlZWQtc3luYy12MSIsInNlZWQtc3luYy1zbmFwc2hvdCIsIm93bmVyIiwia2V5IiwiZGV2aWNlIiwxLDcsIkFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLDE4MDAwMDAxMjAwMDBd", "2hPWoSecD_pmTZrM6wO2PJ8Ifh5M13KfYQpb3C7yYwCRgNVSM673ag3d8QXYg2EaasagyksCmiCy0xbYOigF9w")),
-        Triple(SyncPurpose.REVOKE, mapOf("ownerId" to "owner", "keyId" to "key", "deviceId" to "device", "generation" to 1L, "challenge" to ch, "expiresAt" to 1800000120000L),
-            Pair("WyJvdHBhbmRhLXNlZWQtc3luYy12MSIsInNlZWQtc3luYy1yZXZva2UiLCJvd25lciIsImtleSIsImRldmljZSIsMSwiQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsMTgwMDAwMDEyMDAwMF0=", "FOsA5g0tdvZ290ot7dOAFxl1vx154pKqjag-LO6_aOAMtQN6fOyRBY5ED1uA7BRD4FerIVXf775MnT6Cwub6Yg")),
-        Triple(SyncPurpose.BATCH, mapOf("ownerId" to "owner", "keyId" to "key", "deviceId" to "device", "generation" to 1L, "epoch" to 7L, "challenge" to ch, "ephemeralDigest" to "c".repeat(64), "entriesDigest" to "d".repeat(64), "expiresAt" to 1800000120000L),
-            Pair("WyJvdHBhbmRhLXNlZWQtc3luYy12MSIsInNlZWQtc3luYy1iYXRjaCIsIm93bmVyIiwia2V5IiwiZGV2aWNlIiwxLDcsIkFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjIiwiZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZCIsMTgwMDAwMDEyMDAwMF0=", "pZ-sCrQNGBYkwuJp2AUNhhs9enELdEUDWmQPRI7rDf86B_uzuPD7H3MMciAnhwtmvnOa0OVNTVKWDz0KRSl8gA")))
+        Triple(SyncPurpose.ENROLL, mapOf("ownerId" to "owner", "keyId" to "key", "installId" to "IIIIIIIIIIIIIIIIIIIIII", "generation" to 1L, "challenge" to "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "actionDigest" to "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "expiresAt" to 1800000120000L),
+            Pair("WyJvdHBhbmRhLXNlZWQtc3luYy12MSIsInNlZWQtc3luYy1lbnJvbGwiLCJvd25lciIsImtleSIsIklJSUlJSUlJSUlJSUlJSUlJSUlJSUkiLDEsIkFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwxODAwMDAwMTIwMDAwXQ==", "-yfj7_2eZZeKmh8AC_jyRz5hgf-He4k_-Q3Q3I3Wb6QJDtG12_CoKNO_yIvf4m5kacqToP-ZJtWk5gRFkxjT2w")),
+        Triple(SyncPurpose.SNAPSHOT, mapOf("ownerId" to "owner", "keyId" to "key", "deviceId" to "device", "generation" to 1L, "epoch" to 7L, "challenge" to "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expiresAt" to 1800000120000L),
+            Pair("WyJvdHBhbmRhLXNlZWQtc3luYy12MSIsInNlZWQtc3luYy1zbmFwc2hvdCIsIm93bmVyIiwia2V5IiwiZGV2aWNlIiwxLDcsIkFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLDE4MDAwMDAxMjAwMDBd", "v1QuZmeBAjbE8uPrXVikUpjA-zQG-vN1VfcqbEouZ-F7syclcZ4GvgwyOun5ciGt92OYUdQJerbjWRfpnCupsQ")),
+        Triple(SyncPurpose.REVOKE, mapOf("ownerId" to "owner", "keyId" to "key", "deviceId" to "device", "generation" to 1L, "challenge" to "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expiresAt" to 1800000120000L),
+            Pair("WyJvdHBhbmRhLXNlZWQtc3luYy12MSIsInNlZWQtc3luYy1yZXZva2UiLCJvd25lciIsImtleSIsImRldmljZSIsMSwiQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsMTgwMDAwMDEyMDAwMF0=", "Py5tmWlvvNROZAvf3PlYkX-itGvy7D1OE0D8W56MKIKpI1GU52Au1nK03UNRP-0dCO6Kfw833ZnM5Xk0eMvOwQ")),
+        Triple(SyncPurpose.BATCH, mapOf("ownerId" to "owner", "keyId" to "key", "deviceId" to "device", "generation" to 1L, "epoch" to 7L, "challenge" to "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "ephemeralDigest" to "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "entriesDigest" to "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "expiresAt" to 1800000120000L),
+            Pair("WyJvdHBhbmRhLXNlZWQtc3luYy12MSIsInNlZWQtc3luYy1iYXRjaCIsIm93bmVyIiwia2V5IiwiZGV2aWNlIiwxLDcsIkFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjIiwiZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZCIsMTgwMDAwMDEyMDAwMF0=", "CYZ0RbcxM2l0ifLaCVOPG3Cc489o0yRsaUYjhyiBo1YjyYwrfiVLri00vXuKfyWhP0_noRdLnea2WWa1uAr7Tg")),
+        Triple(SyncPurpose.STATUS, mapOf("keyId" to "key", "challenge" to "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expiresAt" to 1800000120000L),
+            Pair("WyJvdHBhbmRhLXNlZWQtc3luYy12MSIsInNlZWQtc3luYy1zdGF0dXMiLCJrZXkiLCJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwxODAwMDAwMTIwMDAwXQ==", "K8X7atitxYSfskOLILf4Bqeh-jU18Sa-2b5Q22kNPM5HpCfAzXwxGVpdNVRm58ZRlMS3WkCunUzAMlv4j1LPlQ")))
     run {
         val r = Rig(); r.c.enroll("o", INST, 1)
         val key = ownerKey("o"); val doc = r.ss.docs.getValue(key)
@@ -125,10 +127,10 @@ private fun wireChecks() {
     run {
         val r = Rig(); val key = r.c.enroll("o", INST, 1).keyId
         check(r.c.runIfActive("o", key, 0) {
-            want(SyncKeyError.INVALID_INPUT) { r.c.erase("o", 0, EraseTrigger.SIGN_OUT) }
-            want(SyncKeyError.INVALID_INPUT) { r.c.enroll("o", INST, 1) }
-            want(SyncKeyError.INVALID_INPUT) { r.c.signRawForTests("o", byteArrayOf(1)) }
-            want(SyncKeyError.INVALID_INPUT) { r.c.runIfActive("o", key, 0) {} }
+            want(SyncKeyError.ERASE_INCOMPLETE) { r.c.erase("o", 0, EraseTrigger.SIGN_OUT) }
+            want(SyncKeyError.ERASE_INCOMPLETE) { r.c.enroll("o", INST, 1) }
+            want(SyncKeyError.ERASE_INCOMPLETE) { r.c.signRawForTests("o", byteArrayOf(1)) }
+            want(SyncKeyError.ERASE_INCOMPLETE) { r.c.runIfActive("o", key, 0) {} }
         } == null)
         check(r.c.enrolled("o"))
     }
@@ -321,7 +323,7 @@ private fun wireChecks() {
         check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en2, ch, SeedSyncWire.enrollActionDigest("o", inst, en2.publicKey, 4), now + 200_000, now) } == "expiresAt")
     }
 
-    // W10. revoke purpose (online own-key sign-out/disable): no epoch field, signed by the dedicated key, cross-purpose use fails (covered in W1 over four purposes).
+    // W10. revoke purpose (online own-key sign-out/disable): no epoch field, signed by the dedicated key, cross-purpose use fails (covered in W1 over five purposes).
     run {
         val r = Rig(); val en = r.c.enroll("o", INST, 2); val now = 1_800_000_000_000L; val ch2 = "C".repeat(43)
         val f = mapOf("deviceId" to "device", "generation" to 2L, "challenge" to ch2, "expiresAt" to now + 60_000)
@@ -330,7 +332,83 @@ private fun wireChecks() {
         check(verifyServerSig(SeedSyncWire.proofMessage(SyncPurpose.REVOKE, f + mapOf("ownerId" to "o", "keyId" to en.keyId)), sig, pub))
         check(!verifyServerSig(SeedSyncWire.proofMessage(SyncPurpose.SNAPSHOT, f + mapOf("ownerId" to "o", "keyId" to en.keyId, "epoch" to 0L)), sig, pub))
         check(wireErr { SeedSyncWire.signProof(r.c, "o", SyncPurpose.REVOKE, f + ("epoch" to 0L), now) } == "fields")
-        check(SyncPurpose.values().map { it.wire }.toSet().size == 4)
+        check(SyncPurpose.values().map { it.wire }.toSet().size == 5)
+    }
+
+    // W12. status purpose (no bearer): fields are ONLY keyId, challenge, expiresAt. Native supplies keyId from its active enrollment; a caller cannot add owner, device,
+    // generation or epoch; the signature verifies against the enrolled key; a challenge begun for an older key is never signed by a newer one; only the two
+    // definitive states purge and unknown states are refused.
+    run {
+        val r = Rig(); val en = r.c.enroll("o", INST, 1); val now = 1_800_000_000_000L; val chs = "S".repeat(43)
+        check(SeedSyncWire.statusKeyId(r.c, "o") == en.keyId)
+        val sig = SeedSyncWire.signStatusProof(r.c, "o", chs, now + 60_000, now, en.keyId)
+        val pub = KeyFactory.getInstance("EC").generatePublic(ECPublicKeySpec(ECPoint(BigInteger(1, en.publicKey.copyOfRange(1, 33)), BigInteger(1, en.publicKey.copyOfRange(33, 65))), SeedSyncWire.jcaParams()))
+        val msg = SeedSyncWire.proofMessage(SyncPurpose.STATUS, mapOf("keyId" to en.keyId, "challenge" to chs, "expiresAt" to now + 60_000))
+        check(String(msg) == "[\"otpanda-seed-sync-v1\",\"seed-sync-status\",\"${en.keyId}\",\"$chs\",${now + 60_000}]" && verifyServerSig(msg, sig, pub))
+        for (extra in listOf("ownerId", "deviceId", "generation", "epoch", "keyId")) check(wireErr { SeedSyncWire.signProof(r.c, "o", SyncPurpose.STATUS, mapOf("challenge" to chs, "expiresAt" to now + 60_000, extra to (if (extra == "generation" || extra == "epoch") 1L else "x")), now, en.keyId) } == "fields") { extra }
+        check(wireErr { SeedSyncWire.signStatusProof(r.c, "o", chs, now, now, en.keyId) } == "expiresAt")
+        check(wireErr { SeedSyncWire.signStatusProof(r.c, "o", chs, now + 120_001, now, en.keyId) } == "expiresAt")
+        check(wireErr { SeedSyncWire.signStatusProof(r.c, "o", "short", now + 1000, now, en.keyId) } != null)
+        check(!verifyServerSig(SeedSyncWire.proofMessage(SyncPurpose.SNAPSHOT, mapOf("ownerId" to "o", "keyId" to en.keyId, "deviceId" to "d", "generation" to 1L, "epoch" to 0L, "challenge" to chs, "expiresAt" to now + 60_000)), sig, pub))
+        val en2 = r.c.enroll("o", INST, 1) // re-enrollment: the old begin's key id no longer signs
+        check(wireErr { SeedSyncWire.signStatusProof(r.c, "o", chs, now + 60_000, now, en.keyId) } == "key")
+        check(SeedSyncWire.signStatusProof(r.c, "o", chs, now + 60_000, now, en2.keyId).length == 86)
+        r.c.erase("o", 0, EraseTrigger.SIGN_OUT) // erase pending or done: nothing to ask, nothing signs
+        check(SeedSyncWire.statusKeyId(r.c, "o") == null)
+        want(SyncKeyError.NOT_ENROLLED) { SeedSyncWire.signStatusProof(r.c, "o", chs, now + 60_000, now, en2.keyId) }
+        check(SeedSyncWire.statusAction("active") == SeedSyncWire.StatusAction.KEEP)
+        check(SeedSyncWire.statusAction("key-revoked") == SeedSyncWire.StatusAction.PURGE && SeedSyncWire.statusAction("generation-changed") == SeedSyncWire.StatusAction.PURGE)
+        for (u in listOf(null, "", "Active", "revoked", "device-revoked", "session-expired", "KEY-REVOKED", " active", "active ", "unknown")) {
+            check(wireErr { SeedSyncWire.statusAction(u) } == "status" && wireErr { SeedSyncWire.applyStatus(r.c, "o", en2.keyId, u) } == "status") { "mapped $u" }
+        }
+    }
+
+    // W13. a status answer purges only the key that was asked about (v7 review). Re-enrolled key Y and its seeds are untouched; same key X erases deny-first; an already
+    // erased key or a pending erase is a no-op; an unknown state leaves everything byte-identical; and a callback cannot re-enter the core.
+    run {
+        for (state in listOf("key-revoked", "generation-changed")) {
+            val r = Rig(); val x = r.c.enroll("o", INST, 1); r.seed("o"); r.seed("o", "e2")
+            val y = r.c.enroll("o", INST, 1) // re-enrollment after begin(X)
+            val docBefore = r.ss.docs.getValue(ownerKey("o")); val seedsBefore = r.cv.keys.size; val epBefore = r.custody.readOwnerState("o").epoch
+            check(SeedSyncWire.applyStatus(r.c, "o", x.keyId, state) == SeedSyncWire.StatusOutcome.NOOP)
+            check(r.ss.docs.getValue(ownerKey("o")) == docBefore && r.cv.keys.size == seedsBefore && r.custody.readOwnerState("o").epoch == epBefore && r.c.enrolled("o") && SeedSyncWire.statusKeyId(r.c, "o") == y.keyId) { "Y disturbed $state" }
+            // the same key still erases: deny first, seeds purged, nothing active, nothing owed
+            check(SeedSyncWire.applyStatus(r.c, "o", y.keyId, state) == SeedSyncWire.StatusOutcome.PURGED)
+            check(!r.c.enrolled("o") && r.cv.keys.isEmpty() && !r.c.purgeOwed("o") && r.c.pendingKeyDeletes("o") == 0) { "X not erased $state" }
+            // already gone: no-op
+            check(SeedSyncWire.applyStatus(r.c, "o", y.keyId, state) == SeedSyncWire.StatusOutcome.NOOP)
+        }
+        // erase pending (key deny-listed, delete not yet confirmed): a status answer is a no-op and does not start a new purge
+        run {
+            val r = Rig(); val x = r.c.enroll("o", INST, 1); r.seed("o")
+            r.sv.deleteDown = true
+            runCatching { r.c.erase("o", r.custody.readOwnerState("o").epoch, EraseTrigger.SIGN_OUT) }
+            val docBefore = r.ss.docs.getValue(ownerKey("o"))
+            check(SeedSyncWire.applyStatus(r.c, "o", x.keyId, "key-revoked") == SeedSyncWire.StatusOutcome.NOOP && r.ss.docs.getValue(ownerKey("o")) == docBefore)
+        }
+        // unknown state: byte-identical state, other owner's seeds untouched
+        run {
+            val r = Rig(); val x = r.c.enroll("o", INST, 1); r.seed("o"); r.custody.provision("p", "e", 1, TotpCalculator.Algorithm.SHA1, 8, 30, "12345678901234567890".toByteArray(), 0)
+            val docBefore = r.ss.docs.getValue(ownerKey("o")); val keysBefore = r.cv.keys.keys.toSet()
+            for (u in listOf("revoked", "", null, "ACTIVE")) check(wireErr { SeedSyncWire.applyStatus(r.c, "o", x.keyId, u) } == "status")
+            check(SeedSyncWire.applyStatus(r.c, "o", x.keyId, "active") == SeedSyncWire.StatusOutcome.KEPT)
+            check(r.ss.docs.getValue(ownerKey("o")) == docBefore && r.cv.keys.keys.toSet() == keysBefore && r.c.enrolled("o"))
+        }
+        // callback non-reentrancy: inside the provision callback nothing may sign, enroll, erase or retry; the guard state is intact afterwards
+        run {
+            val r = Rig(); r.c.enroll("o", INST, 1); r.seed("o"); val ep = r.custody.readOwnerState("o").epoch; val now = 1_800_000_000_000L
+            val kid = SeedSyncWire.statusKeyId(r.c, "o")!!
+            var seen = 0
+            val ran = r.c.runIfActive("o", kid, ep) {
+                want(SyncKeyError.ERASE_INCOMPLETE) { r.c.erase("o", ep, EraseTrigger.SIGN_OUT) }; seen++
+                want(SyncKeyError.ERASE_INCOMPLETE) { r.c.enroll("o", INST, 1) }; seen++
+                want(SyncKeyError.ERASE_INCOMPLETE) { SeedSyncWire.signStatusProof(r.c, "o", "S".repeat(43), now + 1000, now, kid) }; seen++
+                want(SyncKeyError.ERASE_INCOMPLETE) { r.c.retryPending() }; seen++
+                want(SyncKeyError.ERASE_INCOMPLETE) { SeedSyncWire.applyStatus(r.c, "o", kid, "key-revoked") }; seen++
+                want(SyncKeyError.ERASE_INCOMPLETE) { r.c.runIfActive("o", kid, ep) { seen += 100 } }; seen++
+            }
+            check(ran == null && seen == 6 && r.c.enrolled("o") && r.cv.keys.size == 1) { "seen $seen" }
+        }
     }
 
 }
@@ -793,5 +871,5 @@ fun main() {
     }
     wireChecks()
     handleChecks()
-    println("PASS seed-sync enrollment key, deny-first erase state machine and wire interop vs vector 7e2e6f9c (JVM fakes, synthetic keys, simulated process death)")
+    println("PASS seed-sync enrollment key, deny-first erase state machine and wire interop vs vector a0ccb879 (JVM fakes, synthetic keys, simulated process death)")
 }

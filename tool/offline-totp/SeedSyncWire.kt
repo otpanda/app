@@ -32,6 +32,8 @@ enum class SyncPurpose(val wire: String, val fields: List<String>) {
     SNAPSHOT("seed-sync-snapshot", listOf("ownerId", "keyId", "deviceId", "generation", "epoch", "challenge", "expiresAt")),
     REVOKE("seed-sync-revoke", listOf("ownerId", "keyId", "deviceId", "generation", "challenge", "expiresAt")),
     BATCH("seed-sync-batch", listOf("ownerId", "keyId", "deviceId", "generation", "epoch", "challenge", "ephemeralDigest", "entriesDigest", "expiresAt")),
+    /** Key status without a bearer (revocation learned on reconnect). Deliberately carries NO owner, device, generation or epoch: only the key, the challenge and its expiry. */
+    STATUS("seed-sync-status", listOf("keyId", "challenge", "expiresAt")),
 }
 
 /** Closed algorithm set, exactly the server's: wire names SHA-1, SHA-256, SHA-512 only. Anything else is refused, never mapped. */
@@ -134,11 +136,44 @@ object SeedSyncWire {
         if (exp !is Long || nowMs < 0 || exp <= nowMs || exp > nowMs + PROOF_TTL_MS || exp > MAX_SAFE) bad("expiresAt")
         val der = core.signBuilt(owner) { ctx ->
             if (expectKeyId != null && ctx.keyId != expectKeyId) bad("key")
-            if (fields["generation"] != ctx.generation) bad("generation")
+            if ("generation" in purpose.fields && fields["generation"] != ctx.generation) bad("generation")
             if ("epoch" in purpose.fields && fields["epoch"] != ctx.epoch) bad("epoch")
-            proofMessage(purpose, fields + mapOf("ownerId" to owner, "keyId" to ctx.keyId))
+            proofMessage(purpose, fields + mapOf("keyId" to ctx.keyId) + (if ("ownerId" in purpose.fields) mapOf("ownerId" to owner) else emptyMap()))
         }
         return b64(derToP1363(der)).also { if (it.length != 86) bad("sig") }
+    }
+
+    /** The key id a status-begin request asks about: the owner's ACTIVE enrollment key, from native state (null when not enrolled, an erase is pending or owed, or the
+     * state is unreadable: then there is nothing to ask, an erase is already running). Never taken from a caller. */
+    fun statusKeyId(core: SeedSyncKeyCore, owner: String): String? = core.activeKeyIdFor(owner)
+
+    /** Status proof for [challenge]. The key id is signed from native state and, when [expectKeyId] (the id the begin request used) is given, must still be the
+     * active key, so a challenge issued for an older key is never signed by a newer one. */
+    fun signStatusProof(core: SeedSyncKeyCore, owner: String, challenge: String, expiresAt: Long, nowMs: Long, expectKeyId: String): String =
+        signProof(core, owner, SyncPurpose.STATUS, mapOf("challenge" to challenge, "expiresAt" to expiresAt), nowMs, expectKeyId)
+
+    enum class StatusAction { KEEP, PURGE }
+    /** Decision for the 200 body of status-finish. Only "key-revoked" and "generation-changed" purge; "active" keeps. Any other value is refused (never mapped).
+     * A non-200 answer (the opaque 409, network error, rate limit) is not a state at all: the caller changes nothing and does not call this. */
+    fun statusAction(state: String?): StatusAction = when (state) {
+        "active" -> StatusAction.KEEP
+        "key-revoked", "generation-changed" -> StatusAction.PURGE
+        else -> bad("status")
+    }
+    private fun statusEraseTrigger(state: String?): EraseTrigger = when (state) {
+        "key-revoked" -> EraseTrigger.REMOTE_KEY_REVOKED
+        "generation-changed" -> EraseTrigger.GENERATION_CHANGED
+        else -> bad("status")
+    }
+
+    enum class StatusOutcome { KEPT, PURGED, NOOP }
+    /** The only way to act on a status answer. [askedKeyId] is the key id the status-begin request used. An unknown [state] throws WireException("status") before
+     * anything is read or changed (caller: change nothing, retry later). "active" keeps everything. A purge state erases ONLY if [askedKeyId] is still the active
+     * key (core.eraseIfActive): a re-enrolled key, an already erased key or a pending erase give NOOP. A custody failure inside the erase is rethrown after the
+     * deny-first steps as for any erase, and retryPending continues it. */
+    fun applyStatus(core: SeedSyncKeyCore, owner: String, askedKeyId: String, state: String?): StatusOutcome {
+        val trigger = when (statusAction(state)) { StatusAction.KEEP -> return StatusOutcome.KEPT; StatusAction.PURGE -> statusEraseTrigger(state) }
+        return if (core.eraseIfActive(owner, askedKeyId, trigger)) StatusOutcome.PURGED else StatusOutcome.NOOP
     }
 
     /** Batch proof with ephemeralDigest and entriesDigest computed here from the native handle and the exact requested entry set. */
