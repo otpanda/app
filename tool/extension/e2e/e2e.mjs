@@ -22,7 +22,7 @@ if (process.env.E2E_REAL_BUILD) {
   // Real compiled Flutter app (flutter build web --csp ...) instead of the stub page.
   await rm(root + '/build/web', { recursive: true, force: true }); await cp(process.env.E2E_REAL_BUILD, root + '/build/web', { recursive: true });
 } else {
-  for (const i of ['otty-favicon-v3-16.png', 'otty-favicon-v3-32.png']) await writeFile(root + '/build/web/' + i, 'x');
+  for (const i of ['otty-favicon-v7-16.png', 'otty-favicon-v7-32.png']) await writeFile(root + '/build/web/' + i, 'x');
   await writeFile(root + '/build/web/index.html', '<html><head></head><body><script src="session-bootstrap.js"></script><script src="flutter_bootstrap.js"></script></body></html>');
   await writeFile(root + '/build/web/session-bootstrap.js', 'x'); await writeFile(root + '/build/web/realtime-client.js', 'x');
   await writeFile(root + '/build/web/flutter_bootstrap.js', 'window._flutter={loader:{load(){}}};\n_flutter.loader.load({});');
