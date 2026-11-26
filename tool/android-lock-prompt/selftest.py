@@ -77,7 +77,7 @@ def dscen(s, host='api=fake loopback=0 realMessenger=1 realHost=1 flag=true', lo
     if s in ('dart_unlock_select', 'dart_disable_select') and resume_before_settle: L.append(de('lifecycle', s, state='resumed'))
     if settled and s in ('dart_home', 'dart_unlock_select', 'dart_disable_select'):
         en, lk = {'dart_home': ('true', 'true'), 'dart_unlock_select': ('true', 'false'), 'dart_disable_select': ('false', 'false')}[s]
-        sv = dict(resumed='true' if settled_resumed else 'false', enabled=en, locked=lk, busy='false', error='none'); sv.update(settled_vals or {})
+        sv = dict(stable='true', elapsedMs='600', resumed='true' if settled_resumed else 'false', enabled=en, locked=lk, busy='false', error='none'); sv.update(settled_vals or {})
         L.append(de('settled', s, **sv))
     if s == 'dart_cancel':
         L = [l for l in L if 'name=FOCUS_AFTER_CANCEL' not in l] + [mk(s, 'FOCUS_AFTER_CANCEL', value=CM)]
