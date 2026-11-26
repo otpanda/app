@@ -24,12 +24,17 @@ import java.nio.ByteBuffer
  * LocalLockRecoveryHost is registered again (register is idempotent) with a FAKE LockApi on an in-process loopback messenger, so this fixture can drive the real
  * channel handler "app.otpanda/lock-recovery" without Dart and without network. Real Passkeys (Credential Manager), real Effects (flag file + AppLockHost) and real Env.
  * Synthetic state only: a fake device id and the real flag file location. No real account, key, seed or server.
- * Extras: scenario (label), action = unlock | disable.
+ * Extras: scenario (label), action = unlock | disable, mode = loopback (default) | dart, cancel_ms (dart mode: the Dart controller calls sessionChanged() that long after launch).
+ * mode=dart: no loopback. The REAL LocalLockRecoveryHost (with the FAKE api) is registered on the REAL engine messenger, the real AppLockHost stays as MainActivity registered it,
+ * and the debug-only channel "lockfx/driver" (config, log, flagPresent) lets the fixture Dart entry (tool/android-lock-prompt/lock_fixture_main.dart) drive the REAL Dart
+ * LocalLockController over the real engine channels and report what it saw.
  */
 class LockPromptHostActivity : MainActivity() {
     private var t0 = 0L
     private var scenario = "none"
     private var action = "unlock"
+    private var mode = "loopback"
+    private var cancelMs = 0
     private var loop: Loopback? = null
     private var appLockLoop: Loopback? = null
     private var started = false
@@ -58,6 +63,8 @@ class LockPromptHostActivity : MainActivity() {
         t0 = SystemClock.elapsedRealtime()
         scenario = intent.getStringExtra("scenario") ?: "none"
         action = intent.getStringExtra("action") ?: "unlock"
+        mode = intent.getStringExtra("mode") ?: "loopback"
+        cancelMs = intent.getIntExtra("cancel_ms", 0)
         super.onCreate(savedInstanceState)
         log("onCreate")
     }
@@ -65,6 +72,7 @@ class LockPromptHostActivity : MainActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine) // real registrations (production default LockApi)
         val deviceId = "fixture-device-not-real"
+        if (mode == "dart") { configureDart(flutterEngine, deviceId); return }
         val lockLoop = Loopback(); appLockLoop = lockLoop
         AppLockHost.register(this, lockLoop) // the REAL AppLockHost handler ("enabled" is read through it), before the flag exists
         getSharedPreferences("otpanda_native", Context.MODE_PRIVATE).edit().putString("device_id", deviceId).commit()
@@ -75,9 +83,31 @@ class LockPromptHostActivity : MainActivity() {
         appLockLoop?.invoke("app.otpanda/app-lock", "enabled", null) { v, _ -> log("app_lock_enabled", "phase=ready value=$v") }
     }
 
+    /** Dart mode: real Dart controller -> real engine channels -> real host (fake api). Seeds synthetic state BEFORE the Dart entrypoint runs (configureFlutterEngine precedes it). */
+    private fun configureDart(e: FlutterEngine, deviceId: String) {
+        val messenger = e.dartExecutor.binaryMessenger
+        getSharedPreferences("otpanda_native", Context.MODE_PRIVATE).edit().putString("device_id", deviceId).commit()
+        File(noBackupFilesDir, "local-app-lock-v1").let { if (!it.exists()) it.createNewFile() }
+        LocalLockRecoveryHost.register(this, messenger, FakeLockApi(deviceId) { ev, x -> log(ev, x) })
+        io.flutter.plugin.common.MethodChannel(messenger, "lockfx/driver").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "config" -> result.success(mapOf("mode" to mode, "action" to action, "cancelMs" to cancelMs, "scenario" to scenario))
+                "log" -> {
+                    val name = call.argument<String>("name") ?: "unnamed"
+                    val kv = call.argument<Map<String, String>>("kv") ?: emptyMap()
+                    log("dart_" + name.filter { it.isLetterOrDigit() || it == '_' }, kv.entries.joinToString(" ") { (k, v) -> k.filter { c -> c.isLetterOrDigit() || c == '_' } + "=" + v.replace(Regex("\\s"), "_") })
+                    result.success(null)
+                }
+                "flagPresent" -> { val p = File(noBackupFilesDir, "local-app-lock-v1").exists(); log("flag_after", "present=$p source=native_file"); result.success(p) }
+                else -> result.notImplemented()
+            }
+        }
+        log("host_ready", "api=fake loopback=0 realMessenger=1 realHost=1 flag=${File(noBackupFilesDir, "local-app-lock-v1").exists()}")
+    }
+
     override fun onResume() {
         super.onResume(); log("onResume")
-        if (!started) { started = true; handler.postDelayed({ startAttempt() }, 1500) }
+        if (mode == "loopback" && !started) { started = true; handler.postDelayed({ startAttempt() }, 1500) }
     }
 
     private fun startAttempt() {

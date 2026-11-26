@@ -6,7 +6,7 @@ Scans every zip entry (dex, binary manifest as UTF-16 too, resources) and direct
 import sys, zipfile
 from pathlib import Path
 CLASSES = ['LockPromptHostActivity', 'SyntheticProviderService', 'SyntheticAssertionActivity', 'FakeLockApi']
-OTHER = ['app/otpanda/fixture', 'app.otpanda.fixture', 'lockfx_provider', 'fixture-bearer-not-a-real-token', 'fixture-device-not-real', 'synthetic-fixture-credential']
+OTHER = ['app/otpanda/fixture', 'app.otpanda.fixture', 'lockfx_provider', 'fixture-bearer-not-a-real-token', 'fixture-device-not-real', 'lockfx/driver', 'synthetic-fixture-credential']
 def blobs(p):
     p = Path(p)
     if p.is_dir():

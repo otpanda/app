@@ -47,14 +47,14 @@ jobs:
           grep -q '# skipped 0' "$RUNNER_TEMP/contract.log"
       - name: Verify exact published release has no debug fixture
         run: |
-          curl -fLsS --retry 3 https://github.com/otpanda/app/releases/download/v0.1.0-alpha.9/otpanda-android-google-v0.1.0-alpha.9.apk -o "$RUNNER_TEMP/published-release.apk"
-          echo "6cef25074052b4fbd7e5ef7b3d653b97c2be75b53f32d054e421aa57cc27efab  $RUNNER_TEMP/published-release.apk" | sha256sum -c -
+          curl -fLsS --retry 3 https://github.com/otpanda/app/releases/download/v0.1.0-alpha.10/otpanda-android-google-v0.1.0-alpha.10.apk -o "$RUNNER_TEMP/published-release.apk"
+          echo "8b733804ce367ba47809073e8b24ce658620cee90e7f88a5c165b49ead7c4ea2  $RUNNER_TEMP/published-release.apk" | sha256sum -c -
           python3 tool/android-lock-prompt/check-release-artifact.py "$RUNNER_TEMP/published-release.apk"
           python3 tool/android-lock-prompt/check.py
           python3 tool/android-lock-prompt/selftest.py
       - run: bash tool/bootstrap.sh
       - run: flutter analyze lib test integration_test
-      - run: flutter test test/native/native_app_lock_test.dart test/native/native_local_lock_recovery_test.dart test/native/native_local_lock_session_test.dart
+      - run: flutter test test/native/native_app_lock_test.dart test/native/native_local_lock_recovery_test.dart test/native/native_local_lock_session_test.dart tool/android-lock-prompt/fixture_main_test.dart
       - name: Enable KVM on disposable emulator only
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

@@ -23,11 +23,16 @@ assert re.search(r'^open class MainActivity : FlutterActivity\(\)', main, re.M)
 assert "'android/app/src/debug'" in inst and 'src/main' not in inst and 'src/release' not in inst
 for p in list((r / 'tool/android-native').rglob('*.kt')) + list((r / 'tool/android-recovery').glob('*.kt')) + list((r / 'lib').rglob('*.dart')):
     t = p.read_text()
-    for bad in ('FakeLockApi', 'LockPromptHostActivity', 'SyntheticProvider', 'SyntheticAssertion', 'app.otpanda.fixture', 'fixture-bearer'):
+    for bad in ('FakeLockApi', 'LockPromptHostActivity', 'SyntheticProvider', 'SyntheticAssertion', 'app.otpanda.fixture', 'fixture-bearer', 'lockfx/driver'):
         assert bad not in t, (p, bad)
 # 4. The fixture uses the real host, real MainActivity, no network, no real storage of keys.
 assert 'class LockPromptHostActivity : MainActivity()' in fx and 'LocalLockRecoveryHost.register(this, l, FakeLockApi(' in fx
 for bad in ('HttpsLockApi', 'HttpURLConnection', 'URL(', 'KeyStore', 'AndroidKeyStore'):
     assert bad not in fx, bad
 assert 'KeyPairGenerator.getInstance("EC")' in fx and 'initSign' in fx  # throwaway in-memory key per call
+# 5. Dart mode: the real host is registered on the real engine messenger in the debug Activity only; the driver channel is debug-only and the fixture Dart entry stays under tool/.
+assert 'LocalLockRecoveryHost.register(this, messenger, FakeLockApi(' in fx and '"lockfx/driver"' in fx
+fd = (r / 'tool/android-lock-prompt/lock_fixture_main.dart').read_text()
+assert "'lockfx/driver'" in fd and 'LocalLockController(ChannelLocalLock())' in fd
+assert not (r / 'lib/main.dart').read_text().count('lock_fixture_main')
 print('PASS lock-prompt fixture source guard (not OS evidence)')
