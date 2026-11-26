@@ -453,6 +453,39 @@ void main() {
     },
   );
   test(
+    'warm refresh requests future batch and retains current until next period',
+    () async {
+      var t = 0;
+      final bridge = FutureWarmBridge(() => t);
+      final c = MainPageBatchController(
+        bridge: bridge,
+        policy: const BatchPolicy(
+          maxEntries: 1,
+          maxTotalCodes: 32,
+          minPeriodSeconds: 20,
+          maxPeriodSeconds: 86400,
+          maxWindowSeconds: 600,
+          minRemainingMs: 1,
+        ),
+        active: () => true,
+        wallMilliseconds: () => 1000000 + t,
+        monotonicMilliseconds: () => t,
+      );
+      c.retainAuthorized({'a'});
+      c.select(['a']);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.tileCurrent('a')?.value, '1111111');
+      t = 3000;
+      c.tick();
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.offsets, [12]);
+      expect(c.tileCurrent('a')?.value, '1111111');
+      t = 13000;
+      expect(c.tileCurrent('a')?.value, '2222222');
+      c.dispose();
+    },
+  );
+  test(
     'sleep divergence clears held codes and stale copy, background clears',
     () async {
       var wall = 0, mono = 0;
@@ -2121,4 +2154,58 @@ class PendingRetentionBridge extends BatchBridge {
     List<String> ids, {
     required int windowSeconds,
   }) => pending.future;
+}
+
+class FutureWarmBridge extends BatchBridge implements FutureTotpBatchBridge {
+  FutureWarmBridge(this.time) : super({});
+  final int Function() time;
+  final offsets = <int>[];
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async => SessionResponse(
+    200,
+    jsonEncode({
+      'serverNow': 45000 + time(),
+      'coverageUntil': 60000,
+      'totalCodes': 1,
+      'entries': [
+        {
+          'entryId': 'a',
+          'period': 30,
+          'digits': 7,
+          'validFrom': 30,
+          'codes': ['1111111'],
+        },
+      ],
+      'omitted': [],
+    }),
+  );
+  @override
+  Future<SessionResponse> totpBatchFrom(
+    List<String> ids, {
+    required int windowSeconds,
+    required int fromSeconds,
+  }) async {
+    offsets.add(fromSeconds);
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 45000 + time(),
+        'coverageUntil': 90000,
+        'totalCodes': 1,
+        'entries': [
+          {
+            'entryId': 'a',
+            'period': 30,
+            'digits': 7,
+            'validFrom': 60,
+            'codes': ['2222222'],
+          },
+        ],
+        'omitted': [],
+      }),
+    );
+  }
 }
