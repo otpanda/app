@@ -338,4 +338,45 @@ void main() {
       expect(store.visibleCodes(150), isEmpty);
     },
   );
+
+  test('clear during an in-flight load leaves the store empty', () async {
+    final gate = Completer<SessionResponse>();
+    late CodeStore store;
+    store = CodeStore(
+      FakeTransport((path) async {
+        if (path.endsWith('/session')) {
+          return ok({'ownerId': 'owner', 'expiresAt': 999});
+        }
+        if (path.endsWith('/entries')) return gate.future;
+        return ok({'records': []});
+      }),
+    );
+    final load = store.load(() => 100);
+    await Future<void>.delayed(Duration.zero);
+    store.clear();
+    gate.complete(
+      ok({
+        'entries': [entry('late')],
+      }),
+    );
+    await load;
+    expect(store.entries, isEmpty);
+    expect(store.visibleCodes(150), isEmpty);
+  });
+
+  test('a 401 mid-load clears and does not repopulate', () async {
+    final store = CodeStore(
+      FakeTransport((path) async {
+        if (path.endsWith('/session')) {
+          return ok({'ownerId': 'owner', 'expiresAt': 999});
+        }
+        if (path.endsWith('/entries')) {
+          return const SessionResponse(401, '{}');
+        }
+        return ok({'records': []});
+      }),
+    );
+    await expectLater(store.load(() => 100), throwsA(isA<ClientFailure>()));
+    expect(store.entries, isEmpty);
+  });
 }

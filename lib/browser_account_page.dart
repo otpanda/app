@@ -116,9 +116,16 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
     if (!isSettingsRoute(id)) return;
     passkeysOpen = id == settingsPasskeysRoute;
+    final wasOrganization = settingsCategory == SettingsCategory.organization;
     settingsCategory = passkeysOpen
         ? SettingsCategory.account
         : settingsCategoryForRoute(id);
+    if (!direct &&
+        accountOpen &&
+        !wasOrganization &&
+        settingsCategory == SettingsCategory.organization) {
+      scheduleMicrotask(() => unawaited(loadOrganizationSection()));
+    }
     if (!accountOpen && widget.workspaceEnabled) {
       accountOpen = true;
       if (!direct) {
@@ -182,6 +189,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   CachedProfile? cachedProfile;
   String? sessionOwner, sessionKey;
   bool overviewLoading = false, overviewAttempted = false;
+  // The held overview could not be refreshed: say so instead of implying it
+  // was just verified.
+  bool overviewStale = false;
+  // When the held overview was read. The Account page appearing right after
+  // that read (the open itself) does not read it a second time.
+  DateTime? overviewFetchedAt;
   int overviewInFlightRevision = -1;
   int accountPagesShown = 0;
   String? settingChange;
@@ -269,7 +282,11 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       if (mounted && status == 'restored' && !busy && ++automaticTicks >= 30) {
         automaticTicks = 0;
         if (!widget.workspaceEnabled ||
-            (accountOpen && !organizationReady && !organizationBusy)) {
+            (accountOpen &&
+                !organizationReady &&
+                !organizationBusy &&
+                (widget.navigation == null ||
+                    settingsCategory == SettingsCategory.organization))) {
           unawaited(refresh());
         }
       }
@@ -454,7 +471,19 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       if (overviewInFlightRevision == attempt) overviewInFlightRevision = -1;
     }
     if (!mounted || attempt != revision || status != 'restored') return;
-    if (info.status != 200) return;
+    if (info.status == 401) {
+      workspace.clear();
+      bridge.clear();
+      clearOrganization();
+      store.clear();
+      status = 'sign-in-required';
+      message = 'Browser access expired. Sign in again.';
+      return;
+    }
+    if (info.status != 200) {
+      if (overview != null) overviewStale = true;
+      return;
+    }
     final v = jsonDecode(info.body);
     if (v is Map<String, dynamic> &&
         v['email'] is String &&
@@ -462,6 +491,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         v['google'] is bool &&
         v['recoveryDevices'] is int) {
       overview = v;
+      overviewStale = false;
+      overviewFetchedAt = DateTime.now();
       final owner = sessionOwner, key = sessionKey;
       if (bridge is ProfileCacheBridge &&
           owner != null &&
@@ -474,12 +505,34 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
           v['picture'] is String ? v['picture'] as String : null,
         );
       }
+    } else if (overview != null) {
+      // A 200 with the wrong shape is a failed refresh, not a new status.
+      overviewStale = true;
     }
   }
 
   /// The account page just appeared without an overview (its header came from
   /// the cache): fetch it once.
   Future<void> ensureOverview() async {
+    if (overview != null && status == 'restored' && mounted) {
+      // Already held but possibly old: the Account page shows security
+      // status, so read it again without the loading bar.
+      final at = overviewFetchedAt;
+      overviewFetchedAt = null;
+      if (at != null &&
+          DateTime.now().difference(at) < const Duration(seconds: 5)) {
+        return;
+      }
+      final attempt = revision;
+      try {
+        await fetchOverview(attempt);
+      } catch (_) {
+        if (mounted && attempt == revision) overviewStale = true;
+      }
+      overviewFetchedAt = null;
+      if (mounted) setState(() {});
+      return;
+    }
     if (overview != null ||
         overviewLoading ||
         overviewInFlightRevision == revision ||
@@ -578,11 +631,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
     // The overview is only needed where the account page shows, or to refresh
     // a copy older than a day. A fresh cached header needs no request.
+    // Security status (passkeys, Google, recovery) is read live whenever the
+    // Account page shows, so a copy already held needs no read on open.
     final skip =
         !forceOverview &&
-        overview == null &&
         accountPagesShown == 0 &&
-        cachedProfile?.isFresh(DateTime.now().millisecondsSinceEpoch) == true;
+        (overview != null ||
+            cachedProfile?.isFresh(DateTime.now().millisecondsSinceEpoch) ==
+                true);
     if (!skip) {
       if (widget.workspaceEnabled && !accountOpen) {
         try {
@@ -596,15 +652,41 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
     forceOverview = false;
     if (!mounted || attempt != revision || status != 'restored') return;
-    if (widget.navigation != null && accountOpen) {
+    // Entries and organization are only shown by the Organization category,
+    // so the settings hub loads them there, not on every open.
+    // Without the workspace the hub is the whole page, so accountOpen is
+    // never set there.
+    if (widget.navigation != null &&
+        (accountOpen || !widget.workspaceEnabled) &&
+        settingsCategory == SettingsCategory.organization &&
+        // A ready copy may hold unsaved edits. Opening the category reloads
+        // it explicitly; a periodic refresh must not replace it.
+        !organizationReady) {
+      await loadOrganizationSection(attempt);
+    }
+  }
+
+  /// Entries and organization for the Organization category. Always read
+  /// live: a saved organization is written back whole, so a remembered copy
+  /// could overwrite a change made elsewhere.
+  Future<void> loadOrganizationSection([int? attempt]) async {
+    final mine = attempt ?? revision;
+    if (!mounted || status != 'restored' || organizationBusy) return;
+    // No editable copy while the live one loads: edits made on a copy that
+    // is about to be replaced would be lost.
+    setState(() {
+      organizationBusy = true;
+      organizationReady = false;
+    });
+    try {
       await store.load(now, includePrivateInbox: true);
-      if (mounted && attempt == revision && bridge.status == 'restored') {
-        try {
-          await loadOrganization();
-        } catch (_) {
-          organizationReady = false;
-        }
+      if (mounted && mine == revision && bridge.status == 'restored') {
+        await loadOrganization();
       }
+    } catch (_) {
+      organizationReady = false;
+    } finally {
+      if (mounted) setState(() => organizationBusy = false);
     }
   }
 
@@ -714,6 +796,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     sessionOwner = null;
     sessionKey = null;
     overviewAttempted = false;
+    overviewStale = false;
+    overviewFetchedAt = null;
   }
 
   void clearOrganization() {
@@ -1344,6 +1428,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (overviewStale && overview != null)
+          const Padding(
+            key: Key('overview-stale'),
+            padding: EdgeInsets.only(bottom: 8),
+            child: Text('Could not refresh. What is shown may be out of date.'),
+          ),
         signInMethods(),
         if (r != null)
           RecoveryPanel(
@@ -1503,6 +1593,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       passkeysOpen = false;
                     });
                     navigated(c.route);
+                    if (c == SettingsCategory.organization) {
+                      unawaited(loadOrganizationSection());
+                    }
                   },
                   pages: {
                     SettingsCategory.account: _WhenShown(
@@ -1518,6 +1611,13 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     SettingsCategory.devices: devicesPage(),
                     SettingsCategory.organization: organizationReady
                         ? organizationPage()
+                        : organizationBusy
+                        ? settingsCard('Organization', const [
+                            Text(
+                              'Loading organization...',
+                              key: Key('organization-loading'),
+                            ),
+                          ])
                         : settingsCard('Organization', [
                             const Text(
                               'Organization could not load. Your saved choices have not changed.',

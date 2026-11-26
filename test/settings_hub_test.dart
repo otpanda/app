@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -23,6 +24,45 @@ class AccountBridge extends Bridge {
       );
     }
     return super.read(path);
+  }
+}
+
+class CountingBridge extends AccountBridge {
+  final paths = <String>[];
+  @override
+  Future<SessionResponse> read(String path) {
+    paths.add(path);
+    return super.read(path);
+  }
+}
+
+/// Account overview reads can be made to fail after the first one.
+class FlakyOverviewBridge extends CountingBridge {
+  int? failWith;
+  bool malformed = false;
+  @override
+  Future<SessionResponse> read(String path) {
+    if (path == '/v1/manage/account' && malformed) {
+      paths.add(path);
+      return Future.value(const SessionResponse(200, '{"email":1}'));
+    }
+    if (path == '/v1/manage/account' && failWith != null) {
+      paths.add(path);
+      return Future.value(SessionResponse(failWith!, '{}'));
+    }
+    return super.read(path);
+  }
+}
+
+class SlowOrganizationBridge extends CountingBridge {
+  Completer<SessionResponse>? gate;
+  @override
+  Future<SessionResponse> organize(String method, String body) {
+    if (gate != null && method == 'GET') {
+      organizationReads++;
+      return gate!.future;
+    }
+    return super.organize(method, body);
   }
 }
 
@@ -279,5 +319,182 @@ void main() {
     );
     await t.pumpAndSettle();
     expect(find.text('Account & security'), findsOneWidget);
+  });
+
+  testWidgets('opening settings does not read entries or organization', (
+    t,
+  ) async {
+    final b = CountingBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings');
+    expect(b.organizationReads, 0);
+    for (final p in [
+      '/v1/manage/entries',
+      '/v1/manage/active-codes',
+      '/v1/manage/sources',
+      '/v1/manage/unassigned',
+    ]) {
+      expect(b.paths, isNot(contains(p)), reason: p);
+    }
+  });
+
+  testWidgets('Organization category reads entries and organization live', (
+    t,
+  ) async {
+    final b = CountingBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings');
+    await t.tap(find.text('Organization'));
+    await t.pumpAndSettle();
+    expect(b.organizationReads, 1);
+    expect(b.paths, contains('/v1/manage/entries'));
+    // Leaving and returning reads again: a saved organization is written
+    // back whole, so it is never served from memory.
+    await t.tap(find.byTooltip('Back to settings'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Organization'));
+    await t.pumpAndSettle();
+    expect(b.organizationReads, 2);
+  });
+
+  testWidgets('Account page reads the overview each time it shows', (t) async {
+    final b = CountingBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings');
+    int overviews() => b.paths.where((p) => p == '/v1/manage/account').length;
+    await t.tap(find.text('Account & security'));
+    await t.pumpAndSettle();
+    final first = overviews();
+    expect(first, greaterThanOrEqualTo(1));
+    await t.tap(find.byTooltip('Back to settings'));
+    await t.pumpAndSettle();
+    // The hub itself needs no overview read.
+    expect(overviews(), first);
+    await t.tap(find.text('Account & security'));
+    await t.pumpAndSettle();
+    expect(overviews(), first + 1);
+  });
+
+  testWidgets('failed overview refresh is flagged, not shown as verified', (
+    t,
+  ) async {
+    final b = FlakyOverviewBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings');
+    await t.tap(find.text('Account & security'));
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('overview-stale')), findsNothing);
+    await t.tap(find.byTooltip('Back to settings'));
+    await t.pumpAndSettle();
+    b.failWith = 500;
+    await t.tap(find.text('Account & security'));
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('overview-stale')), findsOneWidget);
+    // A later good read clears the notice.
+    b.failWith = null;
+    await t.tap(find.byTooltip('Back to settings'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Account & security'));
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('overview-stale')), findsNothing);
+  });
+
+  testWidgets('overview 401 ends the session instead of keeping old status', (
+    t,
+  ) async {
+    final b = FlakyOverviewBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings');
+    await t.tap(find.text('Account & security'));
+    await t.pumpAndSettle();
+    await t.tap(find.byTooltip('Back to settings'));
+    await t.pumpAndSettle();
+    b.failWith = 401;
+    await t.tap(find.text('Account & security'));
+    await t.pumpAndSettle();
+    expect(find.text('Sign-in methods'), findsNothing);
+    expect(find.byKey(const Key('overview-stale')), findsNothing);
+  });
+
+  testWidgets('Organization shows a loading state and no editor meanwhile', (
+    t,
+  ) async {
+    final b = SlowOrganizationBridge()
+      ..status = 'restored'
+      ..clockNow = 100000
+      ..gate = Completer();
+    await pump(t, b, navigation: 'settings');
+    await t.tap(find.text('Organization'));
+    await t.pump();
+    await t.pump();
+    expect(find.byKey(const Key('organization-loading')), findsOneWidget);
+    expect(
+      find.text(
+        'Organization could not load. Your saved choices have not changed.',
+      ),
+      findsNothing,
+    );
+    b.gate!.complete(SessionResponse(200, jsonEncode(b.cloud)));
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('organization-loading')), findsNothing);
+  });
+
+  testWidgets('direct route to Organization loads it once', (t) async {
+    final b = CountingBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings/organization');
+    expect(b.organizationReads, 1);
+    expect(b.paths, contains('/v1/manage/entries'));
+  });
+
+  testWidgets('leaving settings while Organization loads is safe', (t) async {
+    final b = SlowOrganizationBridge()
+      ..status = 'restored'
+      ..clockNow = 100000
+      ..gate = Completer();
+    await pump(t, b, navigation: 'settings');
+    await t.tap(find.text('Organization'));
+    await t.pump();
+    await t.pumpWidget(const SizedBox.shrink());
+    b.gate!.complete(SessionResponse(200, jsonEncode(b.cloud)));
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('malformed overview 200 is flagged as a failed refresh', (
+    t,
+  ) async {
+    final b = FlakyOverviewBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings');
+    await t.tap(find.text('Account & security'));
+    await t.pumpAndSettle();
+    await t.tap(find.byTooltip('Back to settings'));
+    await t.pumpAndSettle();
+    b.malformed = true;
+    await t.tap(find.text('Account & security'));
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('overview-stale')), findsOneWidget);
+  });
+
+  testWidgets('periodic refresh does not replace a ready organization', (
+    t,
+  ) async {
+    final b = CountingBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings/organization');
+    expect(b.organizationReads, 1);
+    // The page ticks every second and refreshes every 30 ticks.
+    await t.pump(const Duration(seconds: 65));
+    await t.pumpAndSettle();
+    expect(b.organizationReads, 1);
   });
 }
