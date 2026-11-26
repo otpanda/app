@@ -5,6 +5,10 @@
  * access token are never stored or passed to Flutter. */
 (() => {
   'use strict';
+  // Challenge lifetime is 120 s. A device clock up to 300 s behind the server sees the
+  // expiry that much further ahead; a clock ahead only sees less time left. Beyond
+  // that, fail closed. The WebAuthn prompt timeout stays capped at 120 s.
+  const CHALLENGE_MAX_AHEAD = 120000 + 300000;
   const TOKEN = /^otpda_[A-Za-z0-9_-]{55}$/, CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
   const BINDING_KEY = 'otpanda.recovery.binding.v1.', BINDING_TTL = 30 * 60 * 1000; // matches the server's mailbox code lifetime (30 min);
   const KINDS = ['email-escape-on', 'email-escape-off', 'passkey-revoke', 'session-revoke', 'google-unlink'];
@@ -78,7 +82,7 @@
     const signed = () => { const token = access(); if (!token) throw Error('Sign in again'); return token; };
     const assertion = async c => {
       const o = c?.options;
-      if (!TOKEN.test(c?.token) || o?.rpId !== 'otpanda.github.io' || o.userVerification !== 'required' || !CHALLENGE.test(o.challenge) || !Array.isArray(o.allowCredentials) || o.allowCredentials.length > 50 || !Number.isSafeInteger(c.expiresAt) || c.expiresAt <= Date.now() || c.expiresAt > Date.now() + 120000) throw Error('Invalid passkey verification');
+      if (!TOKEN.test(c?.token) || o?.rpId !== 'otpanda.github.io' || o.userVerification !== 'required' || !CHALLENGE.test(o.challenge) || !Array.isArray(o.allowCredentials) || o.allowCredentials.length > 50 || !Number.isSafeInteger(c.expiresAt) || c.expiresAt <= Date.now() || c.expiresAt > Date.now() + CHALLENGE_MAX_AHEAD) throw Error('Invalid passkey verification');
       const cred = await credentials.get({ publicKey: { rpId: 'otpanda.github.io', challenge: decode(o.challenge), userVerification: 'required', timeout: Math.min(120000, c.expiresAt - Date.now()), allowCredentials: o.allowCredentials.map(v => ({ type: 'public-key', id: decode(v.id) })) } });
       if (!cred) throw Error('Passkey verification cancelled');
       return { id: cred.id, rawId: encode(new Uint8Array(cred.rawId)), type: cred.type, clientExtensionResults: cred.getClientExtensionResults(), response: { clientDataJSON: encode(new Uint8Array(cred.response.clientDataJSON)), authenticatorData: encode(new Uint8Array(cred.response.authenticatorData)), signature: encode(new Uint8Array(cred.response.signature)), userHandle: cred.response.userHandle ? encode(new Uint8Array(cred.response.userHandle)) : null } };
@@ -86,7 +90,7 @@
     // Registers a NEW passkey for the ceremony returned by complete-begin.
     const registration = async c => {
       const o = c?.options;
-      if (!TOKEN.test(c?.token) || o?.rp?.id !== 'otpanda.github.io' || o.rp.name !== 'OTPanda' || !CHALLENGE.test(o.challenge) || !Number.isSafeInteger(c.expiresAt) || c.expiresAt <= Date.now() || c.expiresAt > Date.now() + 120000 || o.authenticatorSelection?.userVerification !== 'required' || !Array.isArray(o.excludeCredentials) || o.excludeCredentials.length > 10 || o.excludeCredentials.some(v => v.type !== 'public-key' || typeof v.id !== 'string' || !/^[A-Za-z0-9_-]{1,1400}$/.test(v.id))) throw Error('Invalid passkey setup');
+      if (!TOKEN.test(c?.token) || o?.rp?.id !== 'otpanda.github.io' || o.rp.name !== 'OTPanda' || !CHALLENGE.test(o.challenge) || !Number.isSafeInteger(c.expiresAt) || c.expiresAt <= Date.now() || c.expiresAt > Date.now() + CHALLENGE_MAX_AHEAD || o.authenticatorSelection?.userVerification !== 'required' || !Array.isArray(o.excludeCredentials) || o.excludeCredentials.length > 10 || o.excludeCredentials.some(v => v.type !== 'public-key' || typeof v.id !== 'string' || !/^[A-Za-z0-9_-]{1,1400}$/.test(v.id))) throw Error('Invalid passkey setup');
       const cred = await credentials.create({ publicKey: { rp: o.rp, user: { ...o.user, id: decode(o.user.id) }, challenge: decode(o.challenge), pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], timeout: Math.min(120000, c.expiresAt - Date.now()), attestation: 'none', authenticatorSelection: { residentKey: 'required', userVerification: 'required' }, excludeCredentials: o.excludeCredentials.map(v => ({ type: 'public-key', id: decode(v.id) })) } });
       if (!cred || cred.type !== 'public-key') throw Error('Passkey setup cancelled');
       return { id: cred.id, rawId: encode(new Uint8Array(cred.rawId)), type: cred.type, clientExtensionResults: cred.getClientExtensionResults(), response: { clientDataJSON: encode(new Uint8Array(cred.response.clientDataJSON)), attestationObject: encode(new Uint8Array(cred.response.attestationObject)), transports: cred.response.getTransports?.() ?? [] } };
