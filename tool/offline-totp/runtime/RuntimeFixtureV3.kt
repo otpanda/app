@@ -145,6 +145,20 @@ class FixtureV3(private val ctx: Context, private val out: (String) -> Unit) {
             val a = "A".repeat(43); val b = "B".repeat(43)
             val s = InstallIdFile(dir, AndroidDirSync())
             need(s.read() == null, "no install id before create")
+            // Narrow synthetic diagnostics only. No production paths or data printed.
+            fun probe(label: String, work: () -> Unit) {
+                try { work(); say("RESULT v3-install-probe $label=ok") }
+                catch (e: Exception) { say("RESULT v3-install-probe $label=" + e.javaClass.simpleName + ":" + e.message?.replace('\n', ' ')) }
+            }
+            probe("mkdir") { need(dir.mkdir() || dir.isDirectory, "scratch directory created") }
+            probe("base-fsync") { AndroidDirSync().sync(ctx.noBackupFilesDir) }
+            probe("dir-fsync") { AndroidDirSync().sync(dir) }
+            val pt = File(dir, "probe-temp"); val pl = File(dir, "probe-link")
+            probe("file-fsync") { java.io.FileOutputStream(pt).use { it.write(65); it.fd.sync() } }
+            probe("java-link") { java.nio.file.Files.createLink(pl.toPath(), pt.toPath()) }
+            pl.delete()
+            probe("os-link") { android.system.Os.link(pt.path, pl.path) }
+            pl.delete(); pt.delete()
             need(s.createIfAbsent(a) == (a to true), "create-only publish with the platform directory fsync works on this filesystem")
             need(InstallIdFile(dir, AndroidDirSync()).createIfAbsent(b) == (a to false), "a second creator gets the winner")
             need(InstallIdFile(dir, AndroidDirSync()).read() == a && dir.list()!!.toList() == listOf("install-id"), "one id file and no temp file remains")
