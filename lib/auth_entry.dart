@@ -514,7 +514,11 @@ class _AuthEntryState extends State<AuthEntry> {
 /// Listens for content-free nudges while a sign-in waits for approval. It only
 /// asks the parent to re-read status; the manual button stays as the fallback.
 class _ProtectionWatcher extends StatefulWidget {
-  const _ProtectionWatcher({super.key, required this.bridge, required this.onNudge});
+  const _ProtectionWatcher({
+    super.key,
+    required this.bridge,
+    required this.onNudge,
+  });
   final ProtectionWatchBridge bridge;
   final void Function(String reason) onNudge;
   @override

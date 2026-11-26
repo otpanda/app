@@ -60,14 +60,40 @@ final errors = <String>[];
 
 void main() {
   setUp(errors.clear);
-  testWidgets('busy indicator insertion keeps one pending watcher and socket', (t) async {
+  testWidgets('busy indicator insertion keeps one pending watcher', (
+    t,
+  ) async {
     final b = WaitBridge(), busy = ValueNotifier<bool>(false);
-    await t.pumpWidget(ValueListenableBuilder<bool>(valueListenable: busy, builder: (_, value, __) => MaterialApp(home: Scaffold(body: AuthEntry(bridge:b,status:'extra-verification',message:'',busy:value,run:(f) async {await f();})))));
+    await t.pumpWidget(
+      ValueListenableBuilder<bool>(
+        valueListenable: busy,
+        builder: (_, value, _) => MaterialApp(
+          home: Scaffold(
+            body: AuthEntry(
+              bridge: b,
+              status: 'extra-verification',
+              message: '',
+              busy: value,
+              run: (f) async {
+                await f();
+              },
+            ),
+          ),
+        ),
+      ),
+    );
     await t.pump();
-    final first=b.listener;
-    for(var i=0;i<8;i++) {busy.value=true;await t.pump();busy.value=false;await t.pump();}
-    expect(b.stops,0);expect(identical(b.listener,first),isTrue);
-    await t.pumpWidget(const SizedBox());expect(b.stops,1);
+    final first = b.listener;
+    for (var i = 0; i < 8; i++) {
+      busy.value = true;
+      await t.pump();
+      busy.value = false;
+      await t.pump();
+    }
+    expect(b.stops, 0);
+    expect(identical(b.listener, first), isTrue);
+    await t.pumpWidget(const SizedBox());
+    expect(b.stops, 1);
   });
   testWidgets(
     'nudges re-read status; a definitive refusal is shown; leaving stops the watcher',
