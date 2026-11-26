@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.otpanda.totp.fixture">
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="34" />
+    <application android:label="otpanda-fixture" android:debuggable="true" android:allowBackup="false" />
+    <instrumentation android:name="org.otpanda.totp.fixture.FixtureRunner" android:targetPackage="org.otpanda.totp.fixture" android:label="otpanda-fixture" />
+</manifest>
