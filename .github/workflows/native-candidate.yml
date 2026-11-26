@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="0.1.0-alpha.5"
+          version="0.1.0-alpha.6"
           # Android versionName can carry the prerelease suffix, so alphas are identifiable.
           mkdir -p dist
           keytool -exportcert -keystore "$RUNNER_TEMP/release.jks" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" > "$RUNNER_TEMP/expected-cert.der"
@@ -63,7 +63,7 @@ jobs:
           export EXPECTED_CERT_SHA256
           test "$EXPECTED_CERT_SHA256" = 05c62f2d61fbdc150fddda58e7fbc836650a65743ab53f1393ae08d55ca85999
           for flavor in google fdroid; do
-            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "2026112604" --dart-define=APP_VERSION="$version" --dart-define=NATIVE_SIGNIN=true --dart-define=NATIVE_ENTRY_EDIT_ENABLED=true --dart-define=NATIVE_SETTINGS_ENABLED=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
+            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "2026112605" --dart-define=APP_VERSION="$version" --dart-define=NATIVE_SIGNIN=true --dart-define=NATIVE_ENTRY_EDIT_ENABLED=true --dart-define=NATIVE_SETTINGS_ENABLED=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
             apk="build/app/outputs/flutter-apk/app-$flavor-release.apk"
             bash .github/scripts/verify-apk-signature.sh "$apk"
             cp "$apk" "dist/otpanda-android-$flavor-native-candidate.apk"
