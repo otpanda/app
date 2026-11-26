@@ -52,11 +52,14 @@ class MainPageBatchController extends ChangeNotifier {
   late final BatchCodeStore store;
   List<String> _ids = [];
   bool busy = false, _disposed = false;
-  int _generation = 0, _retryAt = 0, _successAt = 0;
+  int _generation = 0, _retryAt = 0, _successAt = 0, _lastRequest = -3000;
   String? error;
   void _notify() {
     if (!_disposed) notifyListeners();
   }
+
+  bool needsEntry(String id) =>
+      !store.omitted.containsKey(id) && !store.hasCoverage(id);
 
   void select(List<String> ids) {
     final next = ids.take(policy.maxEntries).toList();
@@ -72,7 +75,7 @@ class MainPageBatchController extends ChangeNotifier {
 
   void invalidate({bool notify = true}) {
     _generation++;
-    _retryAt = _successAt = 0;
+    _successAt = 0;
     _ids = [];
     store.clear();
     busy = false;
@@ -86,8 +89,9 @@ class MainPageBatchController extends ChangeNotifier {
         !busy &&
         _mono() >= _retryAt &&
         _mono() >= _successAt &&
-        (store.needsRefresh(leadMs: 15000) ||
-            _ids.any((id) => store.current(id) == null))) {
+        ((_ids.any((id) => !store.omitted.containsKey(id)) &&
+                store.needsRefresh(leadMs: 15000)) ||
+            _ids.any(needsEntry))) {
       refresh();
     }
     _notify();
@@ -99,13 +103,15 @@ class MainPageBatchController extends ChangeNotifier {
         _ids.isEmpty ||
         _disposed ||
         _mono() < _retryAt ||
-        _mono() < _successAt) {
+        _mono() < _successAt ||
+        _mono() - _lastRequest < 3000) {
       return;
     }
     final generation = _generation;
     busy = true;
     _notify();
     try {
+      _lastRequest = _mono();
       final request = store.begin(_ids.toSet());
       final response = await bridge.totpBatch(
         List.of(_ids),
@@ -120,11 +126,15 @@ class MainPageBatchController extends ChangeNotifier {
       error = null;
       _retryAt = 0;
       _successAt =
-          _mono() + (store.coverageRemainingMs() - 1000).clamp(1000, 15000);
-    } catch (_) {
+          _mono() + (store.coverageRemainingMs() - 1000).clamp(3000, 15000);
+    } catch (e) {
       if (generation == _generation) {
         error = 'Generated codes are waiting for your connection.';
-        _retryAt = _mono() + 15000;
+        _retryAt =
+            _mono() +
+            (e is FormatException && e.message == 'Expired on arrival'
+                ? 3000
+                : 15000);
       }
     } finally {
       if (generation == _generation) {

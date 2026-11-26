@@ -45,6 +45,43 @@ class BatchBridge extends FakeTransport implements TotpBatchBridge {
   }
 }
 
+class FailingBatchBridge extends FakeTransport implements TotpBatchBridge {
+  FailingBatchBridge(super.routes);
+  int batches = 0;
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    batches++;
+    return const SessionResponse(429, '{}');
+  }
+}
+
+class OmittedBridge extends FakeTransport implements TotpBatchBridge {
+  OmittedBridge(super.routes);
+  int batches = 0;
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    batches++;
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 59600,
+        'coverageUntil': null,
+        'totalCodes': 0,
+        'entries': [],
+        'omitted': [
+          for (final id in ids) {'entryId': id, 'reason': 'period_too_short'},
+        ],
+      }),
+    );
+  }
+}
+
 class CurrentOnlyBridge extends FakeTransport implements TotpBatchBridge {
   CurrentOnlyBridge(super.routes);
   int batches = 0;
@@ -132,19 +169,89 @@ void main() {
     for (var i = 0; i < 10; i++) c.tick();
     await Future<void>.delayed(Duration.zero);
     expect(bridge.batches, 1);
+    time = 3000;
     c.select(['b']);
     await Future<void>.delayed(Duration.zero);
     expect(bridge.batches, 2);
     expect(c.current('b')?.value, '0000001');
+    time = 6000;
     c.foreground(false);
     c.foreground(true);
     c.select(['a']);
     await Future<void>.delayed(Duration.zero);
     expect(bridge.batches, 3);
-    time = 1000;
+    time = 9000;
     c.tick();
     await Future<void>.delayed(Duration.zero);
     expect(bridge.batches, 4);
+    c.dispose();
+  });
+
+  test(
+    'all omitted selection does not retry every tick as time advances',
+    () async {
+      var time = 0;
+      final bridge = OmittedBridge({});
+      final c = MainPageBatchController(
+        bridge: bridge,
+        policy: const BatchPolicy(
+          maxEntries: 1,
+          maxTotalCodes: 32,
+          minPeriodSeconds: 20,
+          maxPeriodSeconds: 86400,
+          maxWindowSeconds: 600,
+          minRemainingMs: 1,
+        ),
+        active: () => true,
+        wallMilliseconds: () => time,
+        monotonicMilliseconds: () => time,
+      );
+      c.select(['short']);
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.batches, 1);
+      for (time = 1000; time < 180000; time += 1000) {
+        c.tick();
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(bridge.batches, 1);
+      expect(c.needsEntry('short'), false);
+      c.dispose();
+    },
+  );
+
+  test('rate failure backoff survives revision invalidate and background resume with advancing clocks', () async {
+    var time = 0;
+    final bridge = FailingBatchBridge({});
+    final c = MainPageBatchController(
+      bridge: bridge,
+      policy: const BatchPolicy(
+        maxEntries: 1,
+        maxTotalCodes: 32,
+        minPeriodSeconds: 20,
+        maxPeriodSeconds: 86400,
+        maxWindowSeconds: 600,
+        minRemainingMs: 1,
+      ),
+      active: () => true,
+      wallMilliseconds: () => time,
+      monotonicMilliseconds: () => time,
+    );
+    c.select(['a']);
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.batches, 1);
+    for (time = 1000; time < 15000; time += 1000) {
+      c.invalidate();
+      c.foreground(false);
+      c.foreground(true);
+      c.select(['a']);
+      c.tick();
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(bridge.batches, 1);
+    time = 15000;
+    c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.batches, 2);
     c.dispose();
   });
 

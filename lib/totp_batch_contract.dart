@@ -264,6 +264,17 @@ final class BatchCodeStore {
   int _generation = 0, _sequence = 0, _accepted = 0;
   int? _lastTick;
   final _held = <String, _Held>{};
+  final omitted = <String, String>{};
+  bool hasCoverage(String id) {
+    final h = _held[id];
+    if (h == null) return false;
+    try {
+      return h.coverageUntil > _tick() + h.hiOffset;
+    } catch (_) {
+      clear();
+      return false;
+    }
+  }
 
   // The tick high-water survives clear on purpose: a restarted or broken clock
   // needs a new store with a continuing provider.
@@ -326,9 +337,15 @@ final class BatchCodeStore {
       }
       for (final id in request.ids) {
         _held.remove(id);
+        omitted.remove(id);
       }
       for (final e in batch.entries) {
         _held[e.entryId] = _Held(e, lo, hi, batch.coverageUntil!);
+      }
+      for (final o in batch.omitted) {
+        omitted[o.entryId] = o.periodTooShort
+            ? 'period_too_short'
+            : 'unavailable';
       }
       _accepted = request._sequence;
       return true;
@@ -405,5 +422,6 @@ final class BatchCodeStore {
   void clear() {
     _generation++;
     _held.clear();
+    omitted.clear();
   }
 }

@@ -176,7 +176,7 @@ class _ProductShellState extends State<ProductShell>
     ids.sort((a, b) => distance(a).compareTo(distance(b)));
     final near = ids.where((id) => distance(id) < height).toList();
     final candidates = near.isEmpty ? ids : near;
-    final missing = candidates.where((id) => b.current(id) == null).toList();
+    final missing = candidates.where((id) => b.needsEntry(id)).toList();
     if (!b.busy && missing.isNotEmpty) b.select(missing);
   }
 
