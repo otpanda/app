@@ -20,7 +20,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: release-android
-          run-id: 45820603562
+          run-id: 45826831530
           github-token: ${{ github.token }}
           path: candidate
       - name: Enable KVM
@@ -38,17 +38,12 @@ jobs:
           script: |
             export PATH="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1):$PATH"
             bash tool/android-applink-lifecycle.sh candidate/otpanda-android-fdroid-native-candidate.apk applink-out
-            "$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)" dump badging candidate/otpanda-android-google-native-candidate.apk > applink-out/google-package.txt
-            adb install -r candidate/otpanda-android-google-native-candidate.apk > applink-out/google-install.txt
-            adb shell am force-stop app.otpanda
-            adb shell am start -W -n app.otpanda/.MainActivity > applink-out/google-launch.txt
-            sleep 5
-            adb exec-out screencap -p > applink-out/shots/google-current-launch.png
-            adb shell uiautomator dump /sdcard/google-current-ui.xml
-            adb pull /sdcard/google-current-ui.xml applink-out/google-current-ui.xml
+            bash tool/android-google-provider-check.sh candidate/otpanda-android-google-native-candidate.apk google-provider-out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: native-applink-qualification
-          path: applink-out
+          path: |
+            applink-out
+            google-provider-out
           retention-days: 7
