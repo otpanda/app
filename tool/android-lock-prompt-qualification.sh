@@ -71,7 +71,10 @@ run(){ # scenario action steps...
   "${A[@]}" shell am force-stop com.android.credentialmanager
   "${A[@]}" shell am force-stop "$PKG"; "${A[@]}" shell run-as "$PKG" rm -f no_backup/local-app-lock-v1; "${A[@]}" logcat -b all -c; sleep 1
   mark "$s" BEGIN ""
-  "${A[@]}" shell am start -W --activity-new-task --activity-clear-task -n "$hostact" --es scenario "$s" --es action "$act" > "$OUT/start-$s.txt" 2>&1
+  "${A[@]}" shell am start -W -f 0x10008000 -n "$hostact" --es scenario "$s" --es action "$act" > "$OUT/start-$s.txt" 2>&1
+  if ! grep -q 'Status: ok' "$OUT/start-$s.txt" || grep -qi 'Exception\|Error:' "$OUT/start-$s.txt"; then
+    cat "$OUT/start-$s.txt"; echo 'HARNESS FAIL: scenario launch did not succeed'; exit 8
+  fi
   for step in "$@"; do
     case "$step" in
       wait*) sleep "${step#wait}";;
