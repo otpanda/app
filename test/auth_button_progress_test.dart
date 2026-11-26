@@ -121,6 +121,7 @@ void main() {
         await t.pumpAndSettle();
         expect(find.byType(CircularProgressIndicator), findsNothing);
         await t.pumpWidget(const SizedBox.shrink());
+        await t.pumpAndSettle();
       },
     );
   }
@@ -169,6 +170,7 @@ void main() {
         isNotNull,
       );
       await t.pumpWidget(const SizedBox.shrink());
+        await t.pumpAndSettle();
     });
   }
 }
