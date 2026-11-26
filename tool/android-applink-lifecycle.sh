@@ -81,6 +81,17 @@ for render_try in $(seq 1 12); do
  adb shell uiautomator dump /sdcard/applink-render.xml >/dev/null 2>&1 || true
  adb pull /sdcard/applink-render.xml "$OUT/browser-render-$render_try.xml" >/dev/null 2>&1 || true
  if grep -qiE 'accounts.google.com|Sign in with Google|Choose an account|Welcome to OTPanda|Continue with Google|Could not|unavailable|ERR_' "$OUT/browser-render-$render_try.xml"; then break; fi
+ # Chrome may defer its first-run UI until this Custom Tab. Dismiss only
+ # account-free setup choices, never add an account or accept credentials.
+ python3 - "$OUT/browser-render-$render_try.xml" <<'PYCHROME'
+import sys,re,subprocess,xml.etree.ElementTree as ET
+try:nodes=ET.parse(sys.argv[1]).iter('node')
+except Exception:sys.exit(0)
+for n in nodes:
+ if n.get('text','') in ['Use without an account','No thanks','Got it']:
+  b=list(map(int,re.findall(r'\d+',n.get('bounds',''))))
+  if len(b)==4:subprocess.run(['adb','shell','input','tap',str((b[0]+b[2])//2),str((b[1]+b[3])//2)])
+PYCHROME
  # Flutter web may expose only an accessibility activation control until enabled.
  python3 - "$OUT/browser-render-$render_try.xml" <<'PYA11Y'
 import sys,re,subprocess,xml.etree.ElementTree as ET

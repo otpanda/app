@@ -27,56 +27,13 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-      - run: flutter --disable-analytics
-      - run: bash tool/bootstrap.sh
-      - name: Configure persistent release signing
-        shell: bash
+      - name: Download exact previously qualified signed current-main APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          for v in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            if [ -z "${!v:-}" ]; then echo "::error::Release signing secret $v is not set."; exit 1; fi
-          done
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          RELEASE_STORE_FILE="$RUNNER_TEMP/release.jks" \
-          RELEASE_STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD" \
-          RELEASE_KEY_ALIAS="$ANDROID_KEY_ALIAS" \
-          RELEASE_KEY_PASSWORD="$ANDROID_KEY_PASSWORD" \
-          python3 .github/scripts/android-release-signing.py
-      - name: Compare actual persistent certificate with live DAL
-        shell: bash
-        run: |
-          set -euo pipefail
-          keytool -exportcert -keystore "$RUNNER_TEMP/release.jks" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" > "$RUNNER_TEMP/release-cert.der"
-          EXPECTED_CERT_SHA256=$(sha256sum "$RUNNER_TEMP/release-cert.der" | cut -d ' ' -f1)
-          echo "EXPECTED_CERT_SHA256=$EXPECTED_CERT_SHA256" >> "$GITHUB_ENV"
-          curl -fsS https://otpanda-api.abrahammurciano.workers.dev/.well-known/assetlinks.json -o "$RUNNER_TEMP/live-assetlinks.json"
-          python3 - <<'PYDAL'
-          import json,os,pathlib
-          actual=pathlib.Path(os.environ['RUNNER_TEMP']+'/release-cert.der').read_bytes()
-          import hashlib
-          digest=hashlib.sha256(actual).hexdigest()
-          rows=json.load(open(os.environ['RUNNER_TEMP']+'/live-assetlinks.json'))
-          assert any(r.get('target',{}).get('package_name')=='app.otpanda' and any(x.replace(':','').lower()==digest for x in r['target'].get('sha256_cert_fingerprints',[])) and 'delegate_permission/common.handle_all_urls' in r.get('relation',[]) for r in rows)
-          print('Actual persistent certificate matches live app.otpanda DAL')
-          PYDAL
-      - name: Build, verify signature and name APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="0.0.3"
-          # Android versionName can carry the prerelease suffix, so alphas are identifiable.
-          mkdir -p dist
-          for flavor in google fdroid; do
-            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$version" --dart-define=NATIVE_SIGNIN=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
-            apk="build/app/outputs/flutter-apk/app-$flavor-release.apk"
-            bash .github/scripts/verify-apk-signature.sh "$apk"
-            cp "$apk" "dist/otpanda-android-$flavor-native-candidate.apk"
-          done
+          mkdir -p prior dist
+          gh run download 45740653970 --name current-main-signed-applink-evidence --dir prior
+          cp prior/dist/*.apk dist/
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -97,6 +54,7 @@ jobs:
           grep -q 'CHECK B1_BUTTON_BROWSER_DISPATCH PASS' applink-out/summary.txt
           grep -q 'CHECK B2_CANCEL_RETURN PASS' applink-out/summary.txt
           grep -q 'CHECK I1_RETURN_OPENS_APP PASS' applink-out/summary.txt
+          grep -qi 'accounts.google.com' applink-out/browser-render-*.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
