@@ -194,7 +194,6 @@ class _ProductShellState extends State<ProductShell>
 
   int _batchRevision = -1;
   String? _batchOwner;
-  Map<String, int?> _batchDigits = {};
   void syncBatch() {
     final b = batch;
     if (b == null) return;
@@ -214,17 +213,14 @@ class _ProductShellState extends State<ProductShell>
       if (owner == null || owner != _batchOwner) {
         b.invalidate();
       }
-      final digits = {
-        for (final e in widget.controller.store.entries.where((e) => e.totp))
-          e.id: e.expectedDigits,
-      };
       final changed = {
-        for (final id in validIds)
-          if (_batchDigits.containsKey(id) && _batchDigits[id] != digits[id])
-            id,
+        for (final e in widget.controller.store.entries.where((e) => e.totp))
+          if (e.expectedDigits != null &&
+              b.expectedDigits(e.id) != null &&
+              e.expectedDigits != b.expectedDigits(e.id))
+            e.id,
       };
       b.retainAuthorized(validIds, changed: changed);
-      _batchDigits = digits;
       _batchOwner = owner;
     }
     _batchKeys.removeWhere((id, _) => !validIds.contains(id));

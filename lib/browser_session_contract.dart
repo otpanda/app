@@ -129,3 +129,12 @@ abstract interface class TotpBatchBridge {
     required int windowSeconds,
   });
 }
+
+/// Optional bounded future-start extension. Old bridges remain current-only.
+abstract interface class FutureTotpBatchBridge implements TotpBatchBridge {
+  Future<SessionResponse> totpBatchFrom(
+    List<String> entryIds, {
+    required int windowSeconds,
+    required int fromSeconds,
+  });
+}

@@ -117,8 +117,9 @@ class MainPageBatchController extends ChangeNotifier {
   /// generated codes. The caller separately invalidates on owner/session loss.
   Set<String> _authorized = {};
   void retainAuthorized(Set<String> ids, {Set<String> changed = const {}}) {
-    if (setEquals(_authorized, ids) && changed.isEmpty) return;
+    final removed = _authorized.difference(ids);
     _authorized = Set.of(ids);
+    if (removed.isEmpty && changed.isEmpty) return;
     _generation++;
     busy = false;
     store.retainAuthorized(ids.difference(changed));
@@ -184,11 +185,20 @@ class MainPageBatchController extends ChangeNotifier {
     _notify();
     try {
       _lastRequest = _mono();
-      final request = store.begin(selected.toSet());
-      final response = await bridge.totpBatch(
-        selected,
-        windowSeconds: policy.maxWindowSeconds,
-      );
+      final from = bridge is FutureTotpBatchBridge
+          ? store.futureStartSeconds(selected.toSet())
+          : 0;
+      final request = store.begin(selected.toSet(), fromSeconds: from);
+      final response = from > 0
+          ? await (bridge as FutureTotpBatchBridge).totpBatchFrom(
+              selected,
+              windowSeconds: policy.maxWindowSeconds,
+              fromSeconds: from,
+            )
+          : await bridge.totpBatch(
+              selected,
+              windowSeconds: policy.maxWindowSeconds,
+            );
       if (_disposed || generation != _generation) return;
       if (response.status != 200) throw StateError('Codes unavailable');
       if (utf8.encode(response.body).length > 131072) {

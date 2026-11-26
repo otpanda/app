@@ -1993,11 +1993,23 @@ void main() {
       await tester.pump();
       expect(find.text('0000001'), findsOneWidget);
       expect(bridge.batches, before);
+      bridge.routes['/v1/manage/entries'] = const SessionResponse(
+        200,
+        '{"entries":[{"entry_id":"a","label":"Test","service_id":"custom-totp","capabilities":{"manage":true},"account_name":"me","digits":7}]}',
+      );
+      wall = 75000;
+      await c.refresh();
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.text('0000001'),
+        findsOneWidget,
+      ); // null metadata becomes known, same held shape
       bridge.routes['/v1/manage/session'] = const SessionResponse(
         200,
         '{"ownerId":"owner2","expiresAt":9999999}',
       );
-      wall = 75000;
+      wall = 90000;
       await c.refresh();
       await tester.pump();
       await tester.pump();
@@ -2010,7 +2022,7 @@ void main() {
         200,
         '{"entries":[]}',
       );
-      wall = 90000;
+      wall = 105000;
       await c.refresh();
       await tester.pump();
       await tester.pump();

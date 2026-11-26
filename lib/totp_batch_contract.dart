@@ -81,9 +81,12 @@ final class CommonHorizonBatch {
     Object? json, {
     required Set<String> requestedIds,
     required BatchPolicy policy,
+    int fromSeconds = 0,
   }) {
     Never bad() => throw const FormatException('Invalid batch');
-    if (requestedIds.isEmpty ||
+    if (fromSeconds < 0 ||
+        fromSeconds > 60 ||
+        requestedIds.isEmpty ||
         requestedIds.length > policy.maxEntries ||
         !requestedIds.every(_entry) ||
         policy.minPeriodSeconds < 1 ||
@@ -117,6 +120,7 @@ final class CommonHorizonBatch {
       bad();
     }
     final now = serverNow as int;
+    final reference = now + fromSeconds * 1000;
     final seen = <String>{};
     void see(Object? id) {
       if (!_entry(id) ||
@@ -183,11 +187,11 @@ final class CommonHorizonBatch {
       // Each entry's last code ends at or after coverageUntil, and the first
       // code is the one valid at serverNow (the server drops expired heads).
       if (tailSeconds > _safeInteger ~/ 1000 ||
-          start * 1000 > now ||
-          (start + period) * 1000 <= now ||
+          start * 1000 > reference ||
+          (start + period) * 1000 <= reference ||
           coverage == null ||
           tailSeconds * 1000 < (coverage as int) ||
-          tailSeconds * 1000 - now >
+          tailSeconds * 1000 - reference >
               (policy.maxWindowSeconds + period) * 1000) {
         bad();
       }
@@ -206,8 +210,8 @@ final class CommonHorizonBatch {
       if (coverage != null || total != 0) bad();
     } else {
       final c = coverage as int;
-      if (c - now < policy.minRemainingMs ||
-          c - now > policy.maxWindowSeconds * 1000) {
+      if (c - reference < policy.minRemainingMs ||
+          c - reference > policy.maxWindowSeconds * 1000) {
         bad();
       }
     }
@@ -248,9 +252,16 @@ final class BatchCode {
 
 /// Token for one in-flight request. Created before the request is sent.
 final class BatchRequest {
-  const BatchRequest._(this._sequence, this._generation, this._began, this.ids);
+  const BatchRequest._(
+    this._sequence,
+    this._generation,
+    this._began,
+    this.ids,
+    this.fromSeconds,
+  );
   final int _sequence, _generation, _began;
   final Set<String> ids;
+  final int fromSeconds;
 }
 
 class _Held {
@@ -321,11 +332,26 @@ final class BatchCodeStore {
     return tick;
   }
 
+  /// A common offset never starts beyond any selected entry's held coverage.
+  int futureStartSeconds(Set<String> ids) {
+    if (ids.isEmpty) return 0;
+    var seconds = 60;
+    for (final id in ids) {
+      if (!hasCoverage(id) || current(id) == null) return 0;
+      final n = entryCoverageRemainingMs(id) ~/ 1000;
+      if (n < seconds) seconds = n;
+    }
+    return seconds.clamp(0, 60);
+  }
+
   /// Starts a request for [ids]. Invalid input or a broken clock clears the
   /// store and throws.
-  BatchRequest begin(Set<String> ids) {
+  BatchRequest begin(Set<String> ids, {int fromSeconds = 0}) {
     try {
-      if (ids.isEmpty || !ids.every(_entry)) {
+      if (ids.isEmpty ||
+          !ids.every(_entry) ||
+          fromSeconds < 0 ||
+          fromSeconds > 60) {
         throw const FormatException('Invalid ids');
       }
       return BatchRequest._(
@@ -333,6 +359,7 @@ final class BatchCodeStore {
         _generation,
         _tick(),
         Set.unmodifiable(ids),
+        fromSeconds,
       );
     } catch (_) {
       clear();
@@ -361,6 +388,7 @@ final class BatchCodeStore {
         json,
         requestedIds: request.ids,
         policy: policy,
+        fromSeconds: request.fromSeconds,
       );
       final lo = batch.serverNow - now;
       final hi = batch.serverNow - request._began;
@@ -369,14 +397,69 @@ final class BatchCodeStore {
       if (c != null && c - (now + hi) < 1) {
         throw const FormatException('Expired on arrival');
       }
+      final incoming = <String, _Held>{};
+      for (final e in batch.entries) {
+        var h = _Held(e, lo, hi, batch.coverageUntil!);
+        final old = _held[e.entryId];
+        if (request.fromSeconds > 0 && old != null) {
+          final original = old.entry;
+          final elapsed =
+              ((now + old.loOffset - original.validFrom * 1000) ~/
+                      (original.period * 1000))
+                  .clamp(0, original.codes.length - 1);
+          final a = BatchEntry._(
+            original.entryId,
+            original.period,
+            original.digits,
+            original.validFrom + elapsed * original.period,
+            original.codes.sublist(elapsed),
+          );
+          final oldEnd = a.validFrom + a.codes.length * a.period;
+          if (a.period != e.period ||
+              a.digits != e.digits ||
+              e.validFrom > oldEnd ||
+              e.validFrom * 1000 > old.coverageUntil ||
+              e.validFrom < a.validFrom ||
+              lo > old.hiOffset ||
+              old.loOffset > hi) {
+            throw const FormatException(
+              'Future batch cannot join held coverage',
+            );
+          }
+          final index = (e.validFrom - a.validFrom) ~/ a.period;
+          final codes = List<String>.of(a.codes.take(index + e.codes.length));
+          for (var i = 0; i < e.codes.length; i++) {
+            if (index + i < codes.length) {
+              if (codes[index + i] != e.codes[i]) {
+                throw const FormatException('Conflicting held code');
+              }
+            } else {
+              codes.add(e.codes[i]);
+            }
+          }
+          h = _Held(
+            BatchEntry._(
+              e.entryId,
+              e.period,
+              e.digits,
+              a.validFrom,
+              List.unmodifiable(codes),
+            ),
+            lo > old.loOffset ? lo : old.loOffset,
+            hi < old.hiOffset ? hi : old.hiOffset,
+            batch.coverageUntil!,
+          );
+        } else if (request.fromSeconds > 0 && old == null) {
+          throw const FormatException('Future batch requires held coverage');
+        }
+        incoming[e.entryId] = h;
+      }
       for (final id in request.ids) {
         _held.remove(id);
         omitted.remove(id);
         _omittedAt.remove(id);
       }
-      for (final e in batch.entries) {
-        _held[e.entryId] = _Held(e, lo, hi, batch.coverageUntil!);
-      }
+      _held.addAll(incoming);
       for (final o in batch.omitted) {
         omitted[o.entryId] = o.periodTooShort
             ? 'period_too_short'
@@ -386,7 +469,10 @@ final class BatchCodeStore {
       _accepted = request._sequence;
       return true;
     } catch (e) {
-      if (e is! FormatException || e.message != 'Expired on arrival') clear();
+      if (request.fromSeconds == 0 &&
+          (e is! FormatException || e.message != 'Expired on arrival')) {
+        clear();
+      }
       rethrow;
     }
   }

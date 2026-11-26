@@ -447,6 +447,66 @@ void main() {
       expect(store.current('a'), isNull);
     });
 
+    test('common future offset respects shortest mixed held coverage', () {
+      store.accept(
+        begin({'a', 'b', 'c'}),
+        body({'a': (20, 6), 'b': (30, 6), 'c': (60, 6)}, window: 20),
+        policy: policy,
+      );
+      final chosen = store.futureStartSeconds({'a', 'b', 'c'});
+      for (final id in ['a', 'b', 'c']) {
+        expect(
+          chosen,
+          lessThanOrEqualTo(store.entryCoverageRemainingMs(id) ~/ 1000),
+        );
+      }
+      expect(chosen, inInclusiveRange(0, 60));
+    });
+    test(
+      'future offset joins and deduplicates without replacing current digits',
+      () {
+        var r = begin({'a'});
+        store.accept(r, body({'a': (30, 6)}, window: 30), policy: policy);
+        final old = store.current('a')!;
+        final offset = store.futureStartSeconds({'a'});
+        expect(offset, inInclusiveRange(1, 30));
+        r = store.begin({'a'}, fromSeconds: offset);
+        final next = body({'a': (30, 6)}, now: serverNow + offset * 1000);
+        next['serverNow'] = serverNow;
+        // Fixture code builder uses relative indices. Overlapping periods must
+        // carry their real deterministic code, not a second fixture counter.
+        final e = (next['entries'] as List).single as Map<String, dynamic>;
+        final ahead =
+            ((e['validFrom'] as int) - old.periodStartMs ~/ 1000) ~/ 30;
+        e['codes'] = [
+          for (var i = 0; i < (e['codes'] as List).length; i++)
+            code('a', ahead + i, 6),
+        ];
+        expect(store.accept(r, next, policy: policy), true);
+        expect(store.current('a')!.value, old.value);
+        expect(store.current('a')!.remainingMs, old.remainingMs);
+        tick += old.remainingMs + 1;
+        expect(store.current('a')!.value, code('a', 1, 6));
+      },
+    );
+    test('future response with a coverage gap is rejected without blanking held code', () {
+      store.accept(
+        begin({'a'}),
+        body({'a': (30, 6)}, window: 10),
+        policy: policy,
+      );
+      final prior = store.current('a')!.value;
+      final r = store.begin({'a'}, fromSeconds: 60);
+      final next = body({'a': (30, 6)}, now: serverNow + 60000);
+      next['serverNow'] = serverNow;
+      expect(
+        () => store.accept(r, next, policy: policy),
+        throwsFormatException,
+      );
+      expect(store.current('a')!.value, prior);
+      expect(store.futureStartSeconds({'a', 'unknown'}), 0);
+    });
+
     test(
       'zero latency: shows the exact code and switches at the period boundary',
       () {
