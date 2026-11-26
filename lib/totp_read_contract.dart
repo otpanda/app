@@ -41,7 +41,7 @@ final class GeneratedTotp {
         !body.keys.every(fields.contains) ||
         !_entry(id) ||
         value is! String ||
-        !RegExp(r'^\d{6}(?:\d{2})?$').hasMatch(value) ||
+        !RegExp(r'^\d{6,8}$').hasMatch(value) ||
         !_integer(p) ||
         p == 0 ||
         p > 86400 ||
