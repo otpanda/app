@@ -1,6 +1,7 @@
 import 'about_page.dart';
 import 'auth_entry.dart';
 import 'product_shell.dart';
+import 'totp_batch_contract.dart';
 import 'read_workspace_controller.dart';
 import 'main.dart' show ClientHome, ink, muted;
 
@@ -1875,6 +1876,18 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         entryEditEnabled: widget.entryEditEnabled,
         entryDomainsEnabled: widget.entryDomainsEnabled,
         controller: workspace,
+        batchPolicy: const bool.fromEnvironment('OTPANDA_BATCH_ENABLED')
+            ? const BatchPolicy(
+                maxEntries: int.fromEnvironment('OTPANDA_BATCH_ENTRY_CAP'),
+                maxTotalCodes: int.fromEnvironment('OTPANDA_BATCH_CODE_BUDGET'),
+                minPeriodSeconds: int.fromEnvironment(
+                  'OTPANDA_BATCH_MIN_PERIOD',
+                ),
+                maxPeriodSeconds: 86400,
+                maxWindowSeconds: 600,
+                minRemainingMs: 1,
+              )
+            : null,
         initialTab: productTab,
         onTabChanged: (tab) {
           productTab = tab;

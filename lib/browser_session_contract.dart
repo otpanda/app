@@ -121,3 +121,11 @@ abstract interface class EntryDomainsBridge {
     List<String> domains,
   );
 }
+
+/// Memory-only generated-code batches. Never returns seeds.
+abstract interface class TotpBatchBridge {
+  Future<SessionResponse> totpBatch(
+    List<String> entryIds, {
+    required int windowSeconds,
+  });
+}
