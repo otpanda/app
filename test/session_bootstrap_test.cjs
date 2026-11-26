@@ -188,6 +188,28 @@ test('429 preserves successful current reads during cooldown',async()=>{
 test('visible but unfocused window renews, hidden tab does not',async()=>{
  const e=await renewingEnv();e.context.document={visibilityState:'visible',hasFocus:()=>false};e.setClock(NOW+250000);await e.context.OTPandaSession.maintain();assert.equal(e.context.OTPandaSession.access(),e.issued[1]);
 });
+test('renewal accepts exactly the 5 and 15 minute access windows and rejects other deltas',async()=>{
+ for(const [delta,ok] of [[300000,true],[900000,true],[600000,false],[899999,false],[900001,false],[840000,false]]){
+  const e=await renewingEnv();const S=NOW+250000;e.setClock(S);
+  e.context.fetch=async(url)=>url.endsWith('/renew')?{ok:true,text:async()=>JSON.stringify({access:e.issued[1],accessExpiresAt:S+delta,renewal:{lineageId:'lineage_12345',handleId:e.issued[1].slice(6,18),serverTime:S,firstPartyExpiresAt:NOW+30*86400000}})}:{status:200,text:async()=>'{}'};
+  await e.context.OTPandaSession.read('/v1/manage/entries');
+  assert.equal(e.context.OTPandaSession.accessExpiresAt(),ok?S+delta:NOW+300000,'delta '+delta);
+  assert.equal(e.context.OTPandaSession.access(),ok?e.issued[1]:e.issued[0],'delta '+delta);
+ }
+});
+test('exchange request opts in to the 15 minute access window',async()=>{
+ let body;const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),fetchImpl:async(url,o)=>{if(url.endsWith('/auth/exchange'))body=JSON.parse(o.body);return {ok:true,text:async()=>JSON.stringify({access:token,accessExpiresAt:NOW+300000})};}});
+ await e.context.OTPandaSession.ready;
+ assert.equal(body.access_window,900);assert.deepEqual(Object.keys(body).sort().filter(k=>k!=='renewal_key'),['access_window','code','redirect_uri','verifier']);
+});
+test('exchange without renewal accepts up to 15 minutes and rejects beyond',async()=>{
+ for(const [delta,ok] of [[300000,true],[900000,true],[900001,false]]){
+  const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),response:{access:token,accessExpiresAt:NOW+delta}});
+  await e.context.OTPandaSession.ready;
+  assert.equal(e.context.OTPandaSession.status(),ok?'restored':e.context.OTPandaSession.status(),'delta '+delta);
+  assert.equal(e.context.OTPandaSession.access()===token,ok,'delta '+delta);
+ }
+});
 test('successful renewal commits new clock offset only after full validation',async()=>{
  const e=await renewingEnv();e.setClock(NOW+250000);e.context.fetch=async(url)=>url.endsWith('/renew')?{ok:true,text:async()=>JSON.stringify({access:e.issued[1],accessExpiresAt:NOW+950000,renewal:{lineageId:'lineage_12345',handleId:e.issued[1].slice(6,18),serverTime:NOW+650000,firstPartyExpiresAt:NOW+30*86400000}})}:{status:200,text:async()=>'{}'};
  assert.equal((await e.context.OTPandaSession.read('/v1/manage/entries')).status,200);assert.equal(e.context.OTPandaSession.accessExpiresAt(),NOW+550000);
@@ -290,7 +312,18 @@ test('public route exit restores existing cookie hint and public routes are not 
 
 test('hung management read and body abort and permit the next read automatically',async()=>{for(const bodyHung of [false,true]){const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});await e.context.OTPandaSession.ready;let timer,aborted;e.context.setTimeout=f=>(timer=f,1);e.context.clearTimeout=()=>{};e.context.fetch=async(u,o)=>{aborted=o.signal;return bodyHung?{status:200,body:{getReader:()=>({read:()=>new Promise(()=>{}),cancel(){},releaseLock(){}})}}:await new Promise(()=>{});};const pending=e.context.OTPandaSession.read('/v1/manage/entries');await new Promise(r=>setImmediate(r));timer();await assert.rejects(pending);assert.equal(aborted.aborted,true);e.context.fetch=async()=>({status:200,text:async()=>'{}'});assert.equal((await e.context.OTPandaSession.read('/v1/manage/entries')).status,200);}});
 
-test('hung signed renewal is bounded and valid access remains usable',async()=>{const e=await renewingEnv();e.setClock(NOW+250000);let timer,signal;e.context.setTimeout=f=>(timer=f,1);e.context.clearTimeout=()=>{};e.context.fetch=async(u,o)=>{signal=o.signal;return await new Promise(()=>{});};const pending=e.context.OTPandaSession.read('/v1/manage/entries');await new Promise(r=>setTimeout(r,20));timer();await new Promise(r=>setTimeout(r,20));timer();await assert.rejects(pending);assert.equal(signal.aborted,true);assert.equal(e.context.OTPandaSession.status(),'restored');});
+test('hung signed renewal is bounded and valid access remains usable',async()=>{
+ const e=await renewingEnv();e.setClock(NOW+250000);const timers=[];let signal;
+ e.context.setTimeout=f=>(timers.push(f),timers.length);e.context.clearTimeout=()=>{};
+ e.context.fetch=async(u,o)=>{signal=o.signal;return await new Promise(()=>{});};
+ const pending=e.context.OTPandaSession.read('/v1/manage/entries');
+ // Crypto signing is asynchronous. Wait for the deadline to be installed,
+ // rather than assuming the runner can finish the signature in 20ms.
+ const nextDeadline=async()=>{const until=Date.now()+5000;while(!timers.length&&Date.now()<until)await new Promise(r=>setTimeout(r,2));assert.ok(timers.length,'request installed its deadline');return timers.shift();};
+ (await nextDeadline())();
+ (await nextDeadline())();
+ await assert.rejects(pending);assert.equal(signal.aborted,true);assert.equal(e.context.OTPandaSession.status(),'restored');
+});
 
 test('TOTP enrollment requires exact passkey proof, no cookies or persisted key',async()=>{
  const e=await addKeyEnv(),steps=[],key='GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';let prompts=0;
@@ -318,7 +351,7 @@ test('lapsed tab with its key sends a bearer-less signed resume (new domain, hea
  let seen;e.context.fetch=async(url,o)=>{seen={url,o};return{ok:true,text:async()=>JSON.stringify({access:e.issued[1],accessExpiresAt:NOW+3600000+300000,renewal:{lineageId:'lineage_12345',handleId:e.issued[1].slice(6,18),serverTime:NOW+3600000,firstPartyExpiresAt:NOW+30*86400000}})};};
  assert.equal(await e.context.OTPandaSession.maintain(),true);
  assert.ok(seen.url.endsWith('/auth/renew'));assert.equal(seen.o.headers.Authorization,undefined);assert.equal(seen.o.credentials,'omit');
- const b=JSON.parse(seen.o.body);assert.deepEqual(Object.keys(b).sort(),['expires_at','handle_id','lineage_id','signature']);assert.equal(b.handle_id,e.issued[0].slice(6,18));
+ const b=JSON.parse(seen.o.body);assert.deepEqual(Object.keys(b).sort(),['access_window','expires_at','handle_id','lineage_id','signature']);assert.equal(b.access_window,900);assert.equal(b.handle_id,e.issued[0].slice(6,18));
  assert.equal(e.context.location.assigned,undefined);assert.equal(e.context.OTPandaSession.access(),e.issued[1]);
 });
 test('hidden lapsed tab sends nothing until shown; a 429 or an offline error on resume never navigates and keeps the key',async()=>{

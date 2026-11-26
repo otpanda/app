@@ -235,7 +235,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
         candidateKey=pair.privateKey;
       } catch {} // Unsupported crypto uses the existing first-party restore path.
       if(attempt!==generation)return;
-      const response = await fetch(API+'/auth/exchange', {method:'POST', credentials:'omit', cache:'no-store', redirect:'error', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code,verifier:p.verifier,redirect_uri:REDIRECT,...(publicKey?{renewal_key:publicKey}:{})})});
+      const response = await fetch(API+'/auth/exchange', {method:'POST', credentials:'omit', cache:'no-store', redirect:'error', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code,verifier:p.verifier,redirect_uri:REDIRECT,access_window:900,...(publicKey?{renewal_key:publicKey}:{})})});
       if (!response.ok) throw Error();
       const result = JSON.parse(await readBounded(response,4096));
       const nextOffset=validateAccess(result);
@@ -247,12 +247,15 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       continueNative();
     } catch { if(attempt===generation){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='sign-in-required';if(await nativeGoogleAutostart())return;} }
   })();
+  // Requests send access_window:900 to opt in to the 15 minute access life; the API gives 5 minutes to clients that do not. Accept either lifetime.
+  // Access lifetime the API may issue: 5 min (previous) or 15 min. Anything else is rejected; the renewal delta must equal one of them exactly.
+  const ACCESS_WINDOWS_MS=[300000,900000],ACCESS_MAX_MS=900000;
   function validateAccess(result,tabKey=false) {
     const clock=result?.renewal?.serverTime;
     if(clock!==undefined&&(!Number.isSafeInteger(clock)||clock<0))throw Error('Invalid server clock');
     const now=clock??serverNow();
-    if(!result||!['access,accessExpiresAt','access,accessExpiresAt,renewal'].includes(Object.keys(result).sort().join(','))||!/^otpda_[A-Za-z0-9_-]{55}$/.test(result.access)||!Number.isSafeInteger(result.accessExpiresAt)||result.accessExpiresAt<=now||result.accessExpiresAt>now+300000)throw Error('Invalid session response');
-    if(result.renewal!==undefined&&(result.accessExpiresAt-clock!==300000||!validRenewal(result.renewal,result.access,now,tabKey)))throw Error('Invalid renewal response');
+    if(!result||!['access,accessExpiresAt','access,accessExpiresAt,renewal'].includes(Object.keys(result).sort().join(','))||!/^otpda_[A-Za-z0-9_-]{55}$/.test(result.access)||!Number.isSafeInteger(result.accessExpiresAt)||result.accessExpiresAt<=now||result.accessExpiresAt>now+ACCESS_MAX_MS)throw Error('Invalid session response');
+    if(result.renewal!==undefined&&(!ACCESS_WINDOWS_MS.includes(result.accessExpiresAt-clock)||!validRenewal(result.renewal,result.access,now,tabKey)))throw Error('Invalid renewal response');
     return clock===undefined?serverOffset:clock-Date.now();
   }
   function validRenewal(value,token,now=serverNow(),tabKey=false) {
@@ -323,7 +326,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
         const message=new TextEncoder().encode([lapsed?'otpanda-renew-resume-v1':'otpanda-renew-v1','POST /auth/renew',oldRenewal.lineageId,oldRenewal.handleId,String(expiresAt)].join('\n'));
         const signature=encode(new Uint8Array(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},key,message)));
         if(attempt!==generation)return false;
-        const renewalRead=await boundedRead(API+'/auth/renew',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:lapsed?{'Content-Type':'application/json'}:{'Content-Type':'application/json',Authorization:'Bearer '+oldAccess},body:JSON.stringify(lapsed?{lineage_id:oldRenewal.lineageId,handle_id:oldRenewal.handleId,expires_at:expiresAt,signature}:{lineage_id:oldRenewal.lineageId,expires_at:expiresAt,signature})},4096);const response=renewalRead.response;responded=true;
+        const renewalRead=await boundedRead(API+'/auth/renew',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:lapsed?{'Content-Type':'application/json'}:{'Content-Type':'application/json',Authorization:'Bearer '+oldAccess},body:JSON.stringify(lapsed?{lineage_id:oldRenewal.lineageId,handle_id:oldRenewal.handleId,expires_at:expiresAt,signature,access_window:900}:{lineage_id:oldRenewal.lineageId,expires_at:expiresAt,signature,access_window:900})},4096);const response=renewalRead.response;responded=true;
         if(response.status===429){renewalRetryAt=Date.now()+60000;return serverNow()<expires;}
         if(!response.ok)throw Error('Renewal refused');
         const result=JSON.parse(renewalRead.body);const nextOffset=validateAccess(result,true);

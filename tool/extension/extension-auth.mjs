@@ -17,7 +17,7 @@ export const READ_PATHS = Object.freeze(['/v1/manage/entries', '/v1/manage/activ
 // The fourth GET, for the autofill worker only (the popup bridge keeps exactly the three above): one entry's generated code, exactly one
 // `entry` query of the strict id shape. Nothing else may carry a query.
 export const TOTP_READ = /^\/v1\/manage\/totp-code\?entry=[A-Za-z0-9_-]{1,128}$/;
-const ACCESS_TTL_MS = 300000; // API contract: access lives 5 minutes from issue. Judged from OUR receipt time, never from the server's absolute value against our clock.
+const ACCESS_TTL_MS = 900000; // API contract: access lives 15 minutes from issue. Judged from OUR receipt time, never from the server's absolute value against our clock.
 const MARGIN_MS = 30000;
 const BACKOFF_MIN_MS = 10000, BACKOFF_MAX_MS = 60000; // The API allows 8 outstanding 60s nonces per device; at most 6 attempts a minute stays under it.
 const PENDING_MS = 600000;
