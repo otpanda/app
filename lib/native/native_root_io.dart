@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
 
-import '../native_browser_fallback.dart';
 import '../browser_account_page.dart';
 import 'android_adapters.dart';
 import 'native_assignment.dart';
@@ -18,26 +17,12 @@ import 'native_handoff.dart';
 import 'native_passkey.dart';
 import 'native_session.dart';
 
-/// Build-time switches. Native sign-in stays off (the honest browser-launcher
-/// page) until BOTH the Pages native-intent bridge and the App Link
-/// association exist; enable with --dart-define=NATIVE_SIGNIN=true.
-const bool nativeSignInEnabled = bool.fromEnvironment('NATIVE_SIGNIN');
-
-/// Qualified independently of NATIVE_AUTH_ENABLED (enrolled-device flows,
-/// STEP_UP). Each is off until its own acceptance passes on a device:
-/// entry rename/account edit needs the server's native entry routes; settings
-/// (recovery, security, passkey labels, Google connect) needs the settings
-/// contract deployed. Turning one on never turns on step-up.
-const bool nativeEntryEditEnabled = bool.fromEnvironment(
-  'NATIVE_ENTRY_EDIT_ENABLED',
-);
-
+/// Native sign-in, entry editing and settings are supported product behavior.
+/// They do not depend on opt-in build flags. Device enrollment/step-up remains
+/// separately gated until its independent qualification is complete.
 /// Needs the API's /v1/manage/entry/domains routes deployed.
 const bool nativeEntryDomainsEnabled = bool.fromEnvironment(
   'NATIVE_ENTRY_DOMAINS_ENABLED',
-);
-const bool nativeSettingsEnabled = bool.fromEnvironment(
-  'NATIVE_SETTINGS_ENABLED',
 );
 const String apiOrigin = String.fromEnvironment(
   'OTPANDA_API_ORIGIN',
@@ -45,7 +30,6 @@ const String apiOrigin = String.fromEnvironment(
 );
 
 Widget buildNativeRoot() {
-  if (!nativeSignInEnabled) return const NativeBrowserFallbackApp();
   final google = AndroidGoogleSource();
   return _Boot(google: google);
 }
@@ -113,7 +97,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       creation: passkeys,
       headerRequest: androidHeaderRequest(apiOrigin),
       deviceLabel: androidDeviceLabel,
-      settingsEnabled: nativeSettingsEnabled,
+      settingsEnabled: true,
       realtimeConnector: androidRealtimeConnector(apiOrigin),
     );
     bridge.assignment = NativeAssignmentDriver(
@@ -201,7 +185,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
                 // Off with NATIVE_AUTH_ENABLED: needs the enrolled device key.
                 assignmentEnabled: nativeAuthEnabled,
                 // Own switch: needs the server's native entry routes.
-                entryEditEnabled: nativeEntryEditEnabled,
+                entryEditEnabled: true,
                 entryDomainsEnabled: nativeEntryDomainsEnabled,
               );
               // Only with NATIVE_AUTH_ENABLED: the way into phone sign-in.

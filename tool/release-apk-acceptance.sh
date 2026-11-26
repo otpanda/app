@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
+adb root
+adb wait-for-device
 apk="candidate/otpanda-android-google-${GITHUB_REF_NAME}.apk"
 for source in original-alpha6/otpanda-android-google-native-candidate.apk broken-alpha7.apk;do
  name=$(basename "$source" .apk)
  adb uninstall app.otpanda || true
  adb install "$source" 2>&1 | tee "repair-out/$name-initial.txt"
  adb shell dumpsys package app.otpanda > "repair-out/$name-before.txt"
+ adb shell 'mkdir -p /data/user/0/app.otpanda/files; echo otpanda-synthetic-upgrade-sentinel > /data/user/0/app.otpanda/files/upgrade-proof'
  before=$(adb shell dumpsys package app.otpanda | grep 'firstInstallTime=' | head -1)
  adb install -r "$apk" 2>&1 | tee "repair-out/$name-upgrade.txt"
  adb shell dumpsys package app.otpanda > "repair-out/$name-after.txt"
  after=$(adb shell dumpsys package app.otpanda | grep 'firstInstallTime=' | head -1)
  test "$before" = "$after"
+ adb shell cat /data/user/0/app.otpanda/files/upgrade-proof | tee "repair-out/$name-preserved-data.txt"
+ grep -q 'otpanda-synthetic-upgrade-sentinel' "repair-out/$name-preserved-data.txt"
  adb shell am start -n app.otpanda/.MainActivity
  for i in $(seq 1 20);do
   sleep 2
