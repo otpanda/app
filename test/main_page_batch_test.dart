@@ -1762,7 +1762,7 @@ void main() {
     },
   );
 
-  testWidgets('first-use hint has restrained mobile pixels', (tester) async {
+  testWidgets('first-use tutorial has prominent mobile pixels', (tester) async {
     if (Platform.isLinux && !_fontsLoaded) {
       for (final family in ['Figtree', 'BricolageGrotesque']) {
         final loader = FontLoader(family);
@@ -1849,7 +1849,7 @@ void main() {
     expect(find.text('0000001'), findsOneWidget);
     await tester.binding.setSurfaceSize(const Size(390, 844));
     await tester.pump();
-    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+    expect(find.text('Tap a card to copy'), findsOneWidget);
     if (Platform.isLinux) {
       await expectLater(
         find.byType(ProductShell),
@@ -1956,7 +1956,7 @@ void main() {
     expect(find.byTooltip('Copy code'), findsNothing);
     await tester.binding.setSurfaceSize(const Size(390, 844));
     await tester.pump();
-    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+    expect(find.text('Tap a card to copy'), findsNothing);
     if (Platform.isLinux) {
       await expectLater(
         find.byType(ProductShell),
