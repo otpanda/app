@@ -16,15 +16,16 @@ def write(path, data):
  p=Path(path);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
 def icon(path,size): write(path,base64.b64decode(ICONS[size]))
 description='OTPanda development preview. Explore a private code workspace with fictional accounts and codes. Real sign-in and sources are not connected yet.'
+for stale in Path('web').glob('otty-favicon-v2-*.png'): stale.unlink()
 FAVICONS = _payload['favicons']
 for size,data in FAVICONS.items(): write(f'web/otty-favicon-v3-{size}.png',base64.b64decode(data))
 write('web/favicon.png',base64.b64decode(FAVICONS[32]))
-icon('web/icons/apple-touch-icon.png',180)
+icon('web/icons/apple-touch-icon-v3.png',180)
 for size in (192,512):
- icon(f'web/icons/Icon-{size}.png',size)
- icon(f'web/icons/Icon-maskable-{size}.png',f'm{size}')
-write('web/social-preview.png',base64.b64decode(SOCIAL))
-manifest=dict(id='/app/',name='OTPanda',short_name='OTPanda',description=description,start_url='/app/',scope='/app/',display='standalone',background_color='#f5f8f7',theme_color='#0a7955',lang='en',prefer_related_applications=False,icons=[dict(src=f'icons/Icon-{"maskable-" if mask else ""}{size}.png',sizes=f'{size}x{size}',type='image/png',purpose='maskable' if mask else 'any') for mask in (False,True) for size in (192,512)])
+ icon(f'web/icons/Icon-v3-{size}.png',size)
+ icon(f'web/icons/Icon-maskable-v3-{size}.png',f'm{size}')
+write('web/social-preview-v3.png',base64.b64decode(SOCIAL))
+manifest=dict(id='/app/',name='OTPanda',short_name='OTPanda',description=description,start_url='/app/',scope='/app/',display='standalone',background_color='#f5f8f7',theme_color='#0a7955',lang='en',prefer_related_applications=False,icons=[dict(src=f'icons/Icon-{"maskable-" if mask else ""}v3-{size}.png',sizes=f'{size}x{size}',type='image/png',purpose='maskable' if mask else 'any') for mask in (False,True) for size in (192,512)])
 Path('web/manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 Path('web/session-bootstrap.js').write_text(Path('tool/session-bootstrap.js').read_text())
 Path('web/realtime-client.js').write_text(Path('tool/realtime-client.js').read_text())
@@ -46,21 +47,21 @@ Path('web/index.html').write_text(f'''<!DOCTYPE html>
 <link rel="canonical" href="https://otpanda.github.io/app/">
 <link rel="icon" type="image/png" sizes="16x16" href="otty-favicon-v3-16.png">
 <link rel="icon" type="image/png" sizes="32x32" href="otty-favicon-v3-32.png">
-<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-v3.png">
 <link rel="manifest" href="manifest.json">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="OTPanda">
 <meta property="og:title" content="OTPanda">
 <meta property="og:description" content="{description}">
 <meta property="og:url" content="https://otpanda.github.io/app/">
-<meta property="og:image" content="https://otpanda.github.io/app/social-preview.png">
+<meta property="og:image" content="https://otpanda.github.io/app/social-preview-v3.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Otty the panda beside OTPanda, your private code space. Development preview.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="OTPanda">
 <meta name="twitter:description" content="{description}">
-<meta name="twitter:image" content="https://otpanda.github.io/app/social-preview.png">
+<meta name="twitter:image" content="https://otpanda.github.io/app/social-preview-v3.png">
 <meta name="twitter:image:alt" content="Otty the panda beside OTPanda. Development preview.">
 </head><body><script src="recovery-bridge.js"></script><script src="realtime-client.js"></script><script src="native-launch-intent.js"></script><script src="extension-launch-intent.js"></script><script src="assignment-host.js"></script><script src="session-bootstrap.js"></script><script src="flutter_bootstrap.js" async></script></body></html>
 ''')

@@ -4,7 +4,7 @@ test('sign-in package ships the worker autofill modules, the classic bundle, a n
  const temp=await mkdtemp(path.join(os.tmpdir(),'otpanda-pkg-signin-'));try{
   const ext=path.join(temp,'tool/extension');await mkdir(path.dirname(ext),{recursive:true});await cp(new URL('./',import.meta.url).pathname,ext,{recursive:true,filter:s=>!s.includes('/e2e')});
   await mkdir(path.join(temp,'build/web'),{recursive:true});
-  for(const f of ['otty-favicon-v2-16.png','otty-favicon-v2-32.png','session-bootstrap.js','realtime-client.js','flutter_service_worker.js'])await writeFile(path.join(temp,'build/web',f),'synthetic');
+  for(const f of ['otty-favicon-v3-16.png','otty-favicon-v3-32.png','session-bootstrap.js','realtime-client.js','flutter_service_worker.js'])await writeFile(path.join(temp,'build/web',f),'synthetic');
   await writeFile(path.join(temp,'build/web/index.html'),'<html><head><link rel="manifest" href="manifest.json"></head><body><script src="realtime-client.js"></script><script src="session-bootstrap.js"></script><script src="flutter_bootstrap.js" async></script></body></html>');
   await writeFile(path.join(temp,'build/web/flutter_bootstrap.js'),'_flutter.loader.load({serviceWorkerSettings:{}});');
   execFileSync(process.execPath,[path.join(ext,'package.mjs')],{env:{...process.env,OTPANDA_EXTENSION_SIGNIN:'1',OTPANDA_EXTENSION_API:'https://api.example.test',OTPANDA_EXTENSION_WEB:'https://web.example.test/app'}});
