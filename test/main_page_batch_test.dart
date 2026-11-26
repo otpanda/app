@@ -80,6 +80,30 @@ class HorizonBridge extends FakeTransport implements TotpBatchBridge {
   }
 }
 
+class UnavailableBridge extends FakeTransport implements TotpBatchBridge {
+  UnavailableBridge(super.routes);
+  int batches = 0;
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    batches++;
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 45000,
+        'coverageUntil': null,
+        'totalCodes': 0,
+        'entries': [],
+        'omitted': [
+          for (final id in ids) {'entryId': id, 'reason': 'unavailable'},
+        ],
+      }),
+    );
+  }
+}
+
 class FailingBatchBridge extends FakeTransport implements TotpBatchBridge {
   FailingBatchBridge(super.routes);
   int batches = 0;
@@ -324,6 +348,36 @@ void main() {
     for (var i = 0; i < 10; i++) c.tick();
     await Future<void>.delayed(Duration.zero);
     expect(bridge.requests.length, 3);
+    c.dispose();
+  });
+
+  test('unavailable omissions retry every sixty seconds from nonzero clock without hot loop or uncaught clock fault', () async {
+    var time = 100000;
+    final bridge = UnavailableBridge({});
+    final c = MainPageBatchController(
+      bridge: bridge,
+      policy: const BatchPolicy(
+        maxEntries: 1,
+        maxTotalCodes: 32,
+        minPeriodSeconds: 20,
+        maxPeriodSeconds: 86400,
+        maxWindowSeconds: 600,
+        minRemainingMs: 1,
+      ),
+      active: () => true,
+      wallMilliseconds: () => time,
+      monotonicMilliseconds: () => time,
+    );
+    c.select(['a']);
+    await Future<void>.delayed(Duration.zero);
+    for (time = 101000; time <= 280000; time += 1000) {
+      c.tick();
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(bridge.batches, 4);
+    time = 0;
+    expect(() => c.store.omissionRetryDue('a'), returnsNormally);
+    expect(() => c.store.entryCoverageRemainingMs('a'), returnsNormally);
     c.dispose();
   });
 

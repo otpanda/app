@@ -24,7 +24,7 @@ class MainPageBatchController extends ChangeNotifier {
         policy.maxTotalCodes < policy.maxEntries) {
       throw ArgumentError('Invalid batch policy');
     }
-    _wallStart = _wall();
+    _wallStart = _wall() - _mono();
     store = BatchCodeStore(monotonicMilliseconds: () => _mono());
   }
   final TotpBatchBridge bridge;
@@ -110,10 +110,12 @@ class MainPageBatchController extends ChangeNotifier {
       return;
     }
     final targets = _ids.where(needsRenewal).toList();
+    final order = {for (var i = 0; i < _ids.length; i++) _ids[i]: i};
     targets.sort((a, b) {
       final left = store.entryCoverageRemainingMs(a),
           right = store.entryCoverageRemainingMs(b);
-      return left.compareTo(right);
+      final expiry = left.compareTo(right);
+      return expiry != 0 ? expiry : order[a]!.compareTo(order[b]!);
     });
     final selected = targets.take(policy.maxEntries).toList();
     if (selected.isEmpty) return;

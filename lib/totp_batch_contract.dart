@@ -266,11 +266,24 @@ final class BatchCodeStore {
   final _held = <String, _Held>{};
   final omitted = <String, String>{};
   final _omittedAt = <String, int>{};
-  bool omissionRetryDue(String id) =>
-      omitted[id] == 'unavailable' && _tick() - (_omittedAt[id] ?? 0) >= 60000;
+  bool omissionRetryDue(String id) {
+    try {
+      return omitted[id] == 'unavailable' &&
+          _tick() - (_omittedAt[id] ?? _tick()) >= 60000;
+    } catch (_) {
+      clear();
+      return false;
+    }
+  }
+
   int entryCoverageRemainingMs(String id) {
-    final h = _held[id];
-    return h == null ? 0 : h.coverageUntil - (_tick() + h.hiOffset);
+    try {
+      final h = _held[id];
+      return h == null ? 0 : h.coverageUntil - (_tick() + h.hiOffset);
+    } catch (_) {
+      clear();
+      return 0;
+    }
   }
 
   bool hasCoverage(String id) {
@@ -355,6 +368,7 @@ final class BatchCodeStore {
         omitted[o.entryId] = o.periodTooShort
             ? 'period_too_short'
             : 'unavailable';
+        _omittedAt[o.entryId] = now;
       }
       _accepted = request._sequence;
       return true;
