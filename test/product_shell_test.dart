@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'dart:async';
 
@@ -694,8 +695,20 @@ void main() {
   ) async {
     final tr = AssignFake(withPrivateCode());
     await pump(t, tr, initialTab: 2, assignmentEnabled: true);
+    String? copied;
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String;
+        }
+        return null;
+      },
+    );
     await t.tap(find.byKey(const Key('assign-v')));
     await t.pumpAndSettle();
+    expect(copied, isNull);
+    expect(find.text('Copied'), findsNothing);
     expect(find.byKey(const Key('assign-picker')), findsOneWidget);
     await t.tap(find.byKey(const Key('assign-picker-cancel')));
     await t.pumpAndSettle();

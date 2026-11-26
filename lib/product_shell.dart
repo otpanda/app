@@ -132,6 +132,17 @@ class _ProductShellState extends State<ProductShell>
   static const freshForMs = 120000;
   Timer? freshTimer;
   Timer? _copiedTimer;
+  Timer? _boundaryTimer;
+  void scheduleBoundaryRepaint() {
+    _boundaryTimer?.cancel();
+    final delay = batch?.nextBoundaryDelayMs;
+    if (delay != null) {
+      _boundaryTimer = Timer(Duration(milliseconds: delay), () {
+        if (mounted) batch?.tick();
+      });
+    }
+  }
+
   String? _copiedTile;
 
   Future<void> copyTile(String id, Future<bool> Function() copy) async {
@@ -245,6 +256,7 @@ class _ProductShellState extends State<ProductShell>
   }
 
   void changed() {
+    scheduleBoundaryRepaint();
     queueBatchSelection();
     if (mounted) setState(() {});
   }
@@ -253,6 +265,7 @@ class _ProductShellState extends State<ProductShell>
   void dispose() {
     freshTimer?.cancel();
     _copiedTimer?.cancel();
+    _boundaryTimer?.cancel();
     _batchScroll.dispose();
     batch?.removeListener(changed);
     batch?.dispose();
@@ -296,8 +309,9 @@ class _ProductShellState extends State<ProductShell>
     int? periodMs,
     Object? barId,
     bool renewing = false,
+    String? copyId,
   ]) => Card(
-    clipBehavior: remainingMs == null ? Clip.none : Clip.antiAlias,
+    clipBehavior: Clip.antiAlias,
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
     color: fresh ? const Color(0xffe6f5ec) : null,
     shape: fresh
@@ -307,10 +321,12 @@ class _ProductShellState extends State<ProductShell>
           )
         : null,
     child: Tooltip(
-      message: code != null && onCopy != null ? 'Copy code' : '',
+      message: code != null && onCopy != null && copyId != null
+          ? 'Copy code'
+          : '',
       child: InkWell(
-        onTap: code != null && onCopy != null
-            ? () => copyTile('$title/$sub/$code', onCopy)
+        onTap: code != null && onCopy != null && copyId != null
+            ? () => copyTile(copyId, onCopy)
             : null,
         child: Stack(
           children: [
@@ -352,7 +368,7 @@ class _ProductShellState extends State<ProductShell>
                         alignment: Alignment.center,
                         children: [
                           Opacity(
-                            opacity: _copiedTile == '$title/$sub/$code' ? 0 : 1,
+                            opacity: _copiedTile == copyId ? 0 : 1,
                             child: Text(
                               spaced(code),
                               style: const TextStyle(
@@ -363,7 +379,7 @@ class _ProductShellState extends State<ProductShell>
                               ),
                             ),
                           ),
-                          if (_copiedTile == '$title/$sub/$code')
+                          if (_copiedTile == copyId)
                             Semantics(
                               liveRegion: true,
                               child: Row(
@@ -560,6 +576,14 @@ class _ProductShellState extends State<ProductShell>
                   },
                   true,
                   true,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  false,
+                  'private/${c.sourceId}/${c.eventId}',
                 ),
               ),
             for (final e in freshEntries)
@@ -580,6 +604,11 @@ class _ProductShellState extends State<ProductShell>
                   null,
                   e.catalogId,
                   e.issuer,
+                  null,
+                  null,
+                  null,
+                  false,
+                  'entry/${e.id}/${codes[e.id]!.receivedAt}',
                 ),
               ),
             for (final e in withCode)
@@ -600,6 +629,11 @@ class _ProductShellState extends State<ProductShell>
                   null,
                   e.catalogId,
                   e.issuer,
+                  null,
+                  null,
+                  null,
+                  false,
+                  'entry/${e.id}/${codes[e.id]!.receivedAt}',
                 ),
               ),
             for (final e in rest)
@@ -626,6 +660,7 @@ class _ProductShellState extends State<ProductShell>
                       v == null ? null : v.period * 1000,
                       v == null ? null : '${e.id}/${v.periodStartMs}',
                       e.totp && (batch?.awaitingBoundary(e.id) ?? false),
+                      v == null ? null : 'totp/${e.id}/${v.periodStartMs}',
                     );
                   },
                 ),
@@ -706,6 +741,13 @@ class _ProductShellState extends State<ProductShell>
                           icon: const Icon(Icons.drive_file_move_outline),
                         )
                       : null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  false,
+                  'private/${c.sourceId}/${c.eventId}',
                 ),
               ),
           ],

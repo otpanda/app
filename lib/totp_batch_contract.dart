@@ -416,6 +416,28 @@ final class BatchCodeStore {
     );
   }
 
+  /// Next instant the strict displayed value can change, using held clock bounds.
+  /// A caller can repaint then rather than waiting for a one-second UI tick.
+  int? nextBoundaryDelayMs(String id) {
+    try {
+      final h = _held[id];
+      if (h == null) return null;
+      final t = _tick(), e = h.entry;
+      final start = e.validFrom * 1000, period = e.period * 1000;
+      final low = t + h.loOffset, high = t + h.hiOffset;
+      if (low < start || high >= h.coverageUntil) return null;
+      final first = (low - start) ~/ period, last = (high - start) ~/ period;
+      if (last >= e.codes.length) return null;
+      final next = first == last
+          ? start + (last + 1) * period - high
+          : start + (first + 1) * period - low;
+      return next > 0 ? next : 1;
+    } catch (_) {
+      clear();
+      return null;
+    }
+  }
+
   /// True only when authenticated held codes cover both sides of an uncertain
   /// boundary. Neither code is safe to show or copy yet. This is not an empty
   /// account or a failed request, and never grants access to either value.

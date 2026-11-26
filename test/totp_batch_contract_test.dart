@@ -470,6 +470,28 @@ void main() {
       expect(store.current('a')!.value, code('a', 1, 6));
     });
 
+    test('boundary repaint targets strict ambiguity edges exactly', () {
+      tick = 5000;
+      final subject = BatchCodeStore(monotonicMilliseconds: () => tick);
+      final r = subject.begin({'a'});
+      tick += 400;
+      subject.accept(r, body({'a': (30, 6)}), policy: policy);
+      final boundary = ((nowSec ~/ 30) * 30 + 30) * 1000;
+      final at = 5000 + boundary - serverNow;
+      tick = at - 50;
+      expect(subject.nextBoundaryDelayMs('a'), 50);
+      tick = at;
+      expect(subject.current('a'), isNull);
+      expect(subject.nextBoundaryDelayMs('a'), 400);
+      tick = at + 399;
+      expect(subject.nextBoundaryDelayMs('a'), 1);
+      tick++;
+      expect(subject.current('a'), isNotNull);
+      expect(subject.nextBoundaryDelayMs('a'), 29600);
+      subject.clear();
+      expect(subject.nextBoundaryDelayMs('a'), isNull);
+    });
+
     test(
       'renewing status agrees with strict validity across RTT intervals',
       () {
