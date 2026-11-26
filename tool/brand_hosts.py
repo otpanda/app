@@ -20,6 +20,8 @@ for stale in Path('web').glob('otty-favicon-v2-*.png'): stale.unlink()
 for name in ['social-preview.png','icons/apple-touch-icon.png','icons/Icon-192.png','icons/Icon-512.png','icons/Icon-maskable-192.png','icons/Icon-maskable-512.png']:
  Path('web',name).unlink(missing_ok=True)
 FAVICONS = _payload['favicons']
+# Preserve existing extension icon assets; only HTML tab references change.
+for size,data in FAVICONS.items(): write(f'web/otty-favicon-v3-{size}.png',base64.b64decode(data))
 # Browser tab mark only, selected tight tile with exact original badge.
 for name in ('otty-favicon-t1b.svg','otty-favicon-t1b-16.png','otty-favicon-t1b-32.png','favicon-otty-t1b.ico'):
     write('web/'+name,Path('assets/tab-favicon',name).read_bytes())
