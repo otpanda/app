@@ -113,6 +113,18 @@ class MainPageBatchController extends ChangeNotifier {
     }
   }
 
+  /// Reconcile an authenticated workspace refresh without blanking still-valid
+  /// generated codes. The caller separately invalidates on owner/session loss.
+  void retainAuthorized(Set<String> ids) {
+    _generation++;
+    busy = false;
+    store.retainAuthorized(ids);
+    _ids = _ids.where(ids.contains).toList();
+    _warmAttempts.removeWhere(
+      (key, _) => !ids.any((id) => key.startsWith('$id/')),
+    );
+  }
+
   void invalidate({bool notify = true}) {
     _generation++;
     _successAt = 0;

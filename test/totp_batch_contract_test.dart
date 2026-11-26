@@ -425,6 +425,28 @@ void main() {
 
     BatchRequest begin(Set<String> ids) => store.begin(ids);
 
+    test('authoritative refresh retains valid entries, revokes missing, drops late replies', () {
+      final r = begin({'a', 'b'});
+      store.accept(r, body({'a': (30, 6), 'b': (30, 6)}), policy: policy);
+      final prior = store.current('a')!;
+      final pending = begin({'a', 'b'});
+      store.retainAuthorized({'a'});
+      expect(store.current('a')!.value, prior.value);
+      expect(store.current('a')!.remainingMs, prior.remainingMs);
+      expect(store.current('b'), isNull);
+      expect(
+        store.accept(
+          pending,
+          body({'a': (30, 6), 'b': (30, 6)}),
+          policy: policy,
+        ),
+        false,
+      );
+      expect(store.current('b'), isNull);
+      store.retainAuthorized({});
+      expect(store.current('a'), isNull);
+    });
+
     test(
       'zero latency: shows the exact code and switches at the period boundary',
       () {

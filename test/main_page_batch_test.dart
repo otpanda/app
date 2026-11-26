@@ -1899,6 +1899,78 @@ void main() {
     }
     c.dispose();
   });
+  testWidgets(
+    'unchanged workspace refresh never blanks a still-valid batch tile',
+    (tester) async {
+      var wall = 45000;
+      final bridge = BatchBridge({
+        '/v1/manage/session': const SessionResponse(
+          200,
+          '{"ownerId":"owner","expiresAt":9999999}',
+        ),
+        '/v1/manage/entries': const SessionResponse(
+          200,
+          '{"entries":[{"entry_id":"a","label":"Test","service_id":"custom-totp","capabilities":{"manage":true},"account_name":"me"}]}',
+        ),
+        '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+        '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+        '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+      });
+      final c = ReadWorkspaceController(bridge: bridge, clock: () => wall);
+      await c.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: c,
+            copyHintStore: TestCopyHint(),
+            batchClock: () => 0,
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+            clock: () => wall,
+            onSignedOut: () {},
+            batchPolicy: const BatchPolicy(
+              maxEntries: 1,
+              maxTotalCodes: 32,
+              minPeriodSeconds: 20,
+              maxPeriodSeconds: 86400,
+              maxWindowSeconds: 600,
+              minRemainingMs: 1000,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('0000001'), findsOneWidget);
+      final before = bridge.batches;
+      wall =
+          60000; // open workspace read gate; batch monotonic clock is unchanged
+      await c.refresh();
+      await tester.pump();
+      await tester.pump();
+      // Post-frame reconciliation must not clear the code or request duplicates.
+      expect(find.text('0000001'), findsOneWidget);
+      expect(bridge.batches, before);
+      c.applyEntryEdit('a', service: 'Renamed');
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('0000001'), findsOneWidget);
+      expect(bridge.batches, before);
+      // A freshly authenticated list no longer authorizes the removed entry.
+      bridge.routes['/v1/manage/entries'] = const SessionResponse(
+        200,
+        '{"entries":[]}',
+      );
+      wall = 75000;
+      await c.refresh();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('0000001'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      c.dispose();
+    },
+  );
 }
 
 class DelayedBatchBridge extends BatchBridge {

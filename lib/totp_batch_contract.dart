@@ -567,6 +567,16 @@ final class BatchCodeStore {
     return coverageRemainingMs() <= leadMs;
   }
 
+  /// A fresh authoritative entry list revokes missing entries without dropping
+  /// valid codes for unchanged authorized entries. Late replies cannot restore
+  /// an entry after this reconciliation.
+  void retainAuthorized(Set<String> ids) {
+    _generation++;
+    _held.removeWhere((id, _) => !ids.contains(id));
+    omitted.removeWhere((id, _) => !ids.contains(id));
+    _omittedAt.removeWhere((id, _) => !ids.contains(id));
+  }
+
   /// Drops every code and invalidates all in-flight requests.
   void clear() {
     _generation++;

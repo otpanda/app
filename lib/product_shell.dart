@@ -193,6 +193,7 @@ class _ProductShellState extends State<ProductShell>
   }
 
   int _batchRevision = -1;
+  String? _batchOwner;
   void syncBatch() {
     final b = batch;
     if (b == null) return;
@@ -202,11 +203,20 @@ class _ProductShellState extends State<ProductShell>
       b.invalidate();
       return;
     }
+    final validIds = widget.controller.store.entries
+        .where((e) => e.totp)
+        .map((e) => e.id)
+        .toSet();
     if (_batchRevision != widget.controller.publishedRevision) {
       _batchRevision = widget.controller.publishedRevision;
-      b.invalidate();
+      final owner = widget.controller.store.ownerId;
+      if (owner == null || owner != _batchOwner) {
+        b.invalidate();
+      } else {
+        b.retainAuthorized(validIds);
+      }
+      _batchOwner = owner;
     }
-    final validIds = widget.controller.store.entries.map((e) => e.id).toSet();
     _batchKeys.removeWhere((id, _) => !validIds.contains(id));
     final q = query.trim().toLowerCase();
     final ids = [
