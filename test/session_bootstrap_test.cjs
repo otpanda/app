@@ -312,7 +312,18 @@ test('public route exit restores existing cookie hint and public routes are not 
 
 test('hung management read and body abort and permit the next read automatically',async()=>{for(const bodyHung of [false,true]){const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});await e.context.OTPandaSession.ready;let timer,aborted;e.context.setTimeout=f=>(timer=f,1);e.context.clearTimeout=()=>{};e.context.fetch=async(u,o)=>{aborted=o.signal;return bodyHung?{status:200,body:{getReader:()=>({read:()=>new Promise(()=>{}),cancel(){},releaseLock(){}})}}:await new Promise(()=>{});};const pending=e.context.OTPandaSession.read('/v1/manage/entries');await new Promise(r=>setImmediate(r));timer();await assert.rejects(pending);assert.equal(aborted.aborted,true);e.context.fetch=async()=>({status:200,text:async()=>'{}'});assert.equal((await e.context.OTPandaSession.read('/v1/manage/entries')).status,200);}});
 
-test('hung signed renewal is bounded and valid access remains usable',async()=>{const e=await renewingEnv();e.setClock(NOW+250000);let timer,signal;e.context.setTimeout=f=>(timer=f,1);e.context.clearTimeout=()=>{};e.context.fetch=async(u,o)=>{signal=o.signal;return await new Promise(()=>{});};const pending=e.context.OTPandaSession.read('/v1/manage/entries');await new Promise(r=>setTimeout(r,20));timer();await new Promise(r=>setTimeout(r,20));timer();await assert.rejects(pending);assert.equal(signal.aborted,true);assert.equal(e.context.OTPandaSession.status(),'restored');});
+test('hung signed renewal is bounded and valid access remains usable',async()=>{
+ const e=await renewingEnv();e.setClock(NOW+250000);const timers=[];let signal;
+ e.context.setTimeout=f=>(timers.push(f),timers.length);e.context.clearTimeout=()=>{};
+ e.context.fetch=async(u,o)=>{signal=o.signal;return await new Promise(()=>{});};
+ const pending=e.context.OTPandaSession.read('/v1/manage/entries');
+ // Crypto signing is asynchronous. Wait for the deadline to be installed,
+ // rather than assuming the runner can finish the signature in 20ms.
+ const nextDeadline=async()=>{const until=Date.now()+5000;while(!timers.length&&Date.now()<until)await new Promise(r=>setTimeout(r,2));assert.ok(timers.length,'request installed its deadline');return timers.shift();};
+ (await nextDeadline())();
+ (await nextDeadline())();
+ await assert.rejects(pending);assert.equal(signal.aborted,true);assert.equal(e.context.OTPandaSession.status(),'restored');
+});
 
 test('TOTP enrollment requires exact passkey proof, no cookies or persisted key',async()=>{
  const e=await addKeyEnv(),steps=[],key='GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';let prompts=0;
