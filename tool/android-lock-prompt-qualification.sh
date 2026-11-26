@@ -87,7 +87,7 @@ run(){ # scenario action steps... (env RUN_MODE=loopback|dart, RUN_CANCEL_MS)
         rf=$(grep -m1 mCurrentFocus "$OUT/window-$s-return.txt" | sed 's/.*{[^ ]* [^ ]* //; s/}.*//' | tr -c 'A-Za-z0-9._/\n' '_'); mark "$s" RETURN_FOCUS "value=$rf"
         # HOME does not dismiss the selector task. If it still covers the app, press BACK once so the app can resume (logged; the selector state is a reported fact).
         case "$rf" in com.android.credentialmanager*|com.google.android.gms*) mark "$s" BACK_AFTER_RETURN ""; "${A[@]}" shell input keyevent KEYCODE_BACK;; esac
-        for _ in $(seq 1 20); do "${A[@]}" logcat -d -b all 2>/dev/null | grep LOCKFX | grep "scenario=$s" | grep -q 'ev=dart_lifecycle.*state=resumed' && break; sleep 1; done
+        for _ in $(seq 1 20); do "${A[@]}" logcat -d -b all 2>/dev/null | grep LOCKFX | awk -v scenario="scenario=$s" 'index($0,scenario) && /name=RETURN / {seen=1;next} seen && index($0,scenario)' | grep -q 'ev=dart_lifecycle.*state=resumed' && break; sleep 1; done
         "${A[@]}" shell dumpsys window displays 2>&1 | tr -d '\r' > "$OUT/window-$s-resumed.txt"
         mark "$s" FOCUS_AFTER_RESUME "value=$(grep -m1 mCurrentFocus "$OUT/window-$s-resumed.txt" | sed 's/.*{[^ ]* [^ ]* //; s/}.*//' | tr -c 'A-Za-z0-9._/\n' '_')"
         sleep 3;;

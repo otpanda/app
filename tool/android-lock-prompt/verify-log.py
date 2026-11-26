@@ -190,6 +190,7 @@ def analyze_dart(sc, require_no_self_stop):
             if len(st) != 1: errs.append(f'{name}: no single dart_settled checkpoint')
             else:
                 g = st[0]
+                if g.get('stable') != 'true': errs.append(f'{name}: controller state never stable for600ms')
                 if g.get('resumed') != 'true': errs.append(f'{name}: app never resumed before the settled checkpoint')
                 if (g.get('enabled'), g.get('locked')) != want or g.get('busy') != 'false' or g.get('error') != 'none': errs.append(f'{name}: settled state must be enabled={want[0]} locked={want[1]} busy=false error=none, got {g}')
                 ri = idx(e, 'dart_settled'); rs = [i for i, x in enumerate(e) if x['ev'] == 'dart_lifecycle' and x.get('state') == 'resumed']

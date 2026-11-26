@@ -146,10 +146,11 @@ Future<void> main() async {
     if (resumed) break;
     await Future<void>.delayed(const Duration(milliseconds: 100));
   }
+  final settleClock = Stopwatch()..start();
+  var stable = 0;
   if (resumed) {
     String snap() => '${c.enabled}/${c.locked}/${c.busy}/${c.error == null}';
     var seen = snap();
-    var stable = 0;
     for (var i = 0; i < 100 && stable < 6; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 100));
       final now = snap();
@@ -159,6 +160,8 @@ Future<void> main() async {
   }
   await _log('settled', {
     'resumed': resumed,
+    'stable': stable >= 6,
+    'elapsedMs': settleClock.elapsedMilliseconds,
     'enabled': c.enabled,
     'locked': c.locked,
     'busy': c.busy,
