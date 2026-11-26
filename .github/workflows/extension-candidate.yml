@@ -1,0 +1,37 @@
+name: Stable Chromium sign-in extension candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tool/extension/*.test.mjs tool/extension/autofill/test/*.test.js
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.50.1'
+          channel: stable
+          cache: true
+      - run: flutter --disable-analytics
+      - run: bash tool/bootstrap.sh
+      - run: flutter build web --csp --no-web-resources-cdn --base-href / --no-wasm-dry-run
+      - name: Package stable sign-in candidate, no production activation
+        env:
+          OTPANDA_EXTENSION_SIGNIN: '1'
+          OTPANDA_EXTENSION_API: https://otpanda-api.abrahammurciano.workers.dev
+          OTPANDA_EXTENSION_WEB: https://otpanda.github.io/app/
+        run: |
+          export OTPANDA_EXTENSION_MANIFEST_KEY="$(cat tool/extension/chromium-public-key.txt)"
+          node tool/extension/package.mjs build/extension-candidate
+          node tool/extension/verify-candidate.mjs build/extension-candidate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chromium-signin-candidate-gate-not-activated
+          path: build/extension-candidate
+          retention-days: 7
