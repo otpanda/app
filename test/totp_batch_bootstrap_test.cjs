@@ -2,7 +2,7 @@ const {test}=require('node:test');const assert=require('node:assert/strict');con
 const boot=fs.readFileSync('tool/session-bootstrap.js','utf8'),client=fs.readFileSync('tool/realtime-client.js','utf8');
 const NOW=1800000000000,token='otpda_'+'a'.repeat(55),state='s'.repeat(43),TICKET='rt1.'+'A'.repeat(16)+'.'+'B'.repeat(43);
 function streaming(r){if(r&&typeof r.text==='function'&&!r.body){r.body={getReader(){let sent=false;return{async read(){if(sent)return{done:true};sent=true;return{done:false,value:new TextEncoder().encode(await r.text())};},async cancel(){},releaseLock(){}};}};}return r;}
-async function env({withClient=true,withWS=true,noSession=false}={}){
+async function env({withClient=true,withWS=true,noSession=false,doc}={}){
   const ctl={ticketStatus:200,statuses:[],fast:false};
   const sockets=[],fetches=[];let stored=noSession?undefined:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW});const hints=new Map(),sess=new Map();
   class WS{constructor(u,p){this.url=u;this.protocols=p;this.protocol='otpanda.v1';this.closed=[];sockets.push(this);}close(c){this.closed.push(c);}}
@@ -13,6 +13,7 @@ async function env({withClient=true,withWS=true,noSession=false}={}){
      if(url.endsWith('/auth/realtime/ticket'))return streaming({status:ctl.statuses.length?ctl.statuses.shift():ctl.ticketStatus,headers:{get:()=>null},text:async()=>JSON.stringify({ticket:TICKET,expiresAt:NOW+30000,closeAt:NOW+300000,serverTime:NOW})});
      return streaming({status:200,ok:true,headers:{get:k=>k==='Retry-After'?ctl.retryAfter??null:null},text:async()=>'{"ownerId":"o","expiresAt":1}'});},
    URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),btoa:s=>Buffer.from(s,'binary').toString('base64'),crypto:require('node:crypto').webcrypto,Date:class extends Date{static now(){return NOW;}}};
+  if(doc)context.document=doc;
   if(withWS)context.WebSocket=WS;
   vm.createContext(context);if(withClient)vm.runInContext(client,context);vm.runInContext(boot,context);await context.OTPandaSession.ready;
   return {context,sockets,fetches,ctl};
@@ -33,4 +34,19 @@ test('totpCodes validates 1 to 5 distinct entries before any request and sends o
 test('totpCodes without a session makes no request and answers 401',async()=>{
   const e=await env({withClient:false,noSession:true});const r=await e.context.OTPandaSession.totpCodes(['a']);
   assert.equal(r.status,401);assert.equal(e.fetches.filter(f=>f.url.startsWith(codesUrl)).length,0);
+});
+test('page visibility reflects document.visibilityState and notifies listeners; a throwing listener is isolated',async()=>{
+  let vis='visible';const ls=[];
+  const doc={get visibilityState(){return vis;},addEventListener:(k,f)=>{if(k==='visibilitychange')ls.push(f);}};
+  const e=await env({withClient:false,doc});const S=e.context.OTPandaSession;
+  assert.equal(ls.length,1);assert.equal(S.pageHidden(),false);
+  const seen=[];S.onPageVisibility(()=>{throw new Error('x');});const off=S.onPageVisibility(h=>seen.push(h));S.onPageVisibility('nope')();
+  vis='hidden';ls[0]();assert.equal(S.pageHidden(),true);
+  vis='visible';ls[0]();assert.equal(S.pageHidden(),false);
+  assert.deepEqual(seen,[true,false]);
+  off();off();vis='hidden';ls[0]();assert.deepEqual(seen,[true,false]);
+});
+test('page visibility without a document is visible and inert',async()=>{
+  const e=await env({withClient:false});const S=e.context.OTPandaSession;
+  assert.equal(S.pageHidden(),false);S.onPageVisibility(()=>{});
 });

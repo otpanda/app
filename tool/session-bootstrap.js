@@ -13,6 +13,8 @@
   const forgetProfile=()=>{try{localStorage.removeItem(PROFILE_KEY);}catch{}};
   // Another tab ended or replaced the sign-in: this tab stops using and showing
   // the cached identity until it starts a sign-in itself.
+  const visibilityListeners=new Set();
+  try{globalThis.document?.addEventListener?.('visibilitychange',()=>{const hidden=globalThis.document.visibilityState==='hidden';for(const f of [...visibilityListeners]){try{f(hidden);}catch{}}});}catch{}
   let profileRevoked=false;const revokeListeners=new Set();
   const revokeProfile=()=>{if(profileRevoked)return;profileRevoked=true;forgetProfile();for(const f of [...revokeListeners]){try{f();}catch{}}};
   try{globalThis.addEventListener?.('storage',e=>{if(e.key===null||(e.key==='otpanda-session-present'&&e.newValue!=='yes')||(e.key===PROFILE_KEY&&e.newValue===null))revokeProfile();});}catch{}
@@ -598,6 +600,9 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     },
     profileClear:forgetProfile,
     profileRevoked:()=>profileRevoked,
+    // Real page visibility (document.visibilityState), not an inferred app lifecycle. Read-only: it changes no session state.
+    pageHidden:()=>{try{return globalThis.document?.visibilityState==='hidden';}catch{return false;}},
+    onPageVisibility:f=>{if(typeof f!=='function')return()=>{};visibilityListeners.add(f);return()=>{visibilityListeners.delete(f);};},
     onProfileRevoked:f=>{if(typeof f!=='function')return;revokeListeners.add(f);},
     addPasskey:async()=>{
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)throw Error('Sign in again.');

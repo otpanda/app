@@ -95,6 +95,8 @@ extension type _Session(JSObject _) implements JSObject {
   ]);
   external JSPromise<_ReadResponse> totpCode(JSString entryId);
   external JSPromise<_ReadResponse> totpCodes(JSArray<JSString> entryIds);
+  external JSBoolean pageHidden();
+  external JSFunction onPageVisibility(JSFunction listener);
   external JSPromise<_ReadResponse> read(JSString path);
   external JSPromise<_ReadResponse> organize(JSString method, JSString body);
   external JSPromise<_ReadResponse> copied(
@@ -127,6 +129,7 @@ class _Browser
         ProfileCacheBridge,
         TotpManagementBridge,
         TotpBatchBridge,
+        PageVisibilityBridge,
         GmailSourceBridge,
         GoogleLinkBridge,
         GoogleConnectBridge,
@@ -219,6 +222,16 @@ class _Browser
   Future<SessionResponse> totpCode(String entryId) async {
     final r = await _session.totpCode(entryId.toJS).toDart;
     return SessionResponse(r.status.toDartInt, r.body.toDart);
+  }
+
+  @override
+  bool get pageHidden => _session.pageHidden().toDart;
+  @override
+  void Function() onPageVisibility(void Function(bool hidden) listener) {
+    final remove = _session.onPageVisibility(
+      ((JSBoolean h) => listener(h.toDart)).toJS,
+    );
+    return () => remove.callAsFunction();
   }
 
   @override

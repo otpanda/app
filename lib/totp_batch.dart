@@ -9,8 +9,11 @@ const _safeInteger = 9007199254740991;
 /// Entries per request (the server accepts 1 to 5).
 const totpBatchMaxEntries = 5;
 
-/// Entries prefetched per window, fetched as sequential requests of at most
-/// [totpBatchMaxEntries]. Anything beyond is requested one code at a time.
+/// Entries selected per ensure call, fetched as sequential requests of at most
+/// [totpBatchMaxEntries]. A later search may select other entries. Cached codes
+/// can outlive a selection until their expiry or session clear; this is not a
+/// ten-minute distinct-entry or memory cap. Anything beyond the current selection
+/// is requested one code at a time.
 const totpBatchMaxTracked = 20;
 
 /// Requests one chain may send. A chain never loops: it stops here, on a rate
@@ -31,6 +34,15 @@ bool _id(Object? id) =>
 /// Fetches one batch of generated codes for the given entries.
 abstract interface class TotpBatchBridge {
   Future<SessionResponse> totpCodes(List<String> entryIds);
+}
+
+/// Real page visibility from the browser (document.visibilityState). Only the
+/// web session implements it; without it the shell relies on app lifecycle.
+abstract interface class PageVisibilityBridge {
+  bool get pageHidden;
+
+  /// Returns a function that removes the listener. Call it on dispose.
+  void Function() onPageVisibility(void Function(bool hidden) listener);
 }
 
 /// A code that is current now, with whole seconds left in its period.
