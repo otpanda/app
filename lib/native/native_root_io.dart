@@ -62,6 +62,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   late final NativeSessionBridge bridge;
   final passkeys = AndroidPasskeySource();
   bool ready = false;
+  final navigationHistory = NativeNavigationHistory();
   late final NativeStartupRecovery startup;
   late final NativeDevicesService devices;
   late final BearerRequest _bearer;
@@ -150,6 +151,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
         startup.sessionChanged(controller.session);
       case NativeSessionPhase.signedOut:
       case NativeSessionPhase.signInRequired:
+        navigationHistory.clear();
         devices.sessionChanged(null);
         startup.sessionChanged(null);
       case NativeSessionPhase.unknown:
@@ -175,6 +177,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     startup.dispose();
     devices.dispose();
     bridge.disposeRealtime();
+    navigationHistory.dispose();
     super.dispose();
   }
 
@@ -186,6 +189,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
           version: const String.fromEnvironment('APP_VERSION'),
           authBridge: bridge,
           signedInBuilder: (context) => NativeNavigation(
+            history: navigationHistory,
             builder: (context, route, navigate) {
               final page = BrowserAccountPage(
                 bridge: bridge,
