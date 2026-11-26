@@ -9,6 +9,7 @@ import 'package:otpanda_client/totp_preview_panel.dart';
 
 class Fake implements SessionTransport {
   int calls = 0;
+  String code = '001234';
   Completer<SessionResponse>? pending;
   @override
   Future<SessionResponse> getManagement(String p) async {
@@ -25,7 +26,7 @@ class Fake implements SessionTransport {
             200,
             jsonEncode({
               'entryId': 'entry',
-              'code': '001234',
+              'code': code,
               'period': 30,
               'validFrom': 30,
               'validUntil': 60,
@@ -49,6 +50,21 @@ Widget host(
   ),
 );
 void main() {
+  testWidgets(
+    'seven-digit generated value renders without truncating leading zeros',
+    (t) async {
+      final transport = Fake()..code = '0000001';
+      final store = TotpReadStore(transport, monotonicMilliseconds: () => 0);
+      await t.pumpWidget(host(store));
+      await t.tap(find.text('Load fictional code'));
+      await t.pumpAndSettle();
+      expect(find.text('000 0001'), findsOneWidget);
+      expect(t.takeException(), isNull);
+      await t.pumpWidget(const SizedBox());
+      store.clear();
+    },
+  );
+
   testWidgets(
     'explicit load shows leading zeros and clears at monotonic expiry without refetch',
     (t) async {
