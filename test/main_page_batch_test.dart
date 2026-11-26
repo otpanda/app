@@ -741,9 +741,37 @@ void main() {
           return null;
         },
       );
-      await tester.tap(find.byTooltip('Copy code'));
+      expect(find.byIcon(Icons.copy_outlined), findsNothing);
+      final tileBefore = tester.getRect(find.byType(Card).last);
+      // Tap the identity area, not the code or a former button.
+      await tester.tap(find.text('Test'));
       await tester.pump();
       expect(copied, '0000001');
+      expect(find.text('Copied'), findsOneWidget);
+      expect(tester.getRect(find.byType(Card).last), tileBefore);
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      await tester.pump();
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/tile-copied-mobile.png'),
+        );
+      }
+      await tester.binding.setSurfaceSize(null);
+      await tester.pump(const Duration(milliseconds: 1500));
+      expect(find.text('Copied'), findsNothing);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData')
+            throw PlatformException(code: 'denied');
+          return null;
+        },
+      );
+      await tester.tap(find.text('Test'));
+      await tester.pump();
+      expect(find.text('Copied'), findsNothing);
+      expect(find.text('Could not copy code.'), findsOneWidget);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -757,7 +785,7 @@ void main() {
       controller.dispose();
     },
   );
-  testWidgets('batch 503 keeps previous entry tap single-code flow usable', (
+  testWidgets('batch 503 leaves card inert and never opens a details dialog', (
     tester,
   ) async {
     final bridge = FallbackBridge({
@@ -816,8 +844,9 @@ void main() {
     await tester.tap(find.text('Test'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(bridge.singles, 1);
-    expect(find.text('123456'), findsWidgets);
+    expect(bridge.singles, 0);
+    expect(find.text('123456'), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
     controller.dispose();
@@ -1319,6 +1348,20 @@ void main() {
       expect(find.text('No active code'), findsNothing);
       expect(find.text('0000001'), findsNothing);
       expect(find.byTooltip('Copy code'), findsNothing);
+      String? invalidCopy;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData')
+            invalidCopy = (call.arguments as Map)['text'] as String;
+          return null;
+        },
+      );
+      await tester.tap(find.text('Test'));
+      await tester.pump();
+      expect(invalidCopy, isNull);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('Copied'), findsNothing);
       expect(tester.getSize(find.byType(Card).last).height, before);
       if (Platform.isLinux) {
         await expectLater(
