@@ -437,32 +437,34 @@ void main() {
   testWidgets(
     'main page automatically requests a batch and shows padded generated code with copy control',
     (tester) async {
-      for (final family in ['Figtree', 'BricolageGrotesque']) {
-        final loader = FontLoader(family);
-        for (final weight
-            in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
-          final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
-          loader.addFont(
+      if (Platform.isLinux) {
+        for (final family in ['Figtree', 'BricolageGrotesque']) {
+          final loader = FontLoader(family);
+          for (final weight
+              in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+            final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                ),
+              ),
+            );
+          }
+          await loader.load();
+        }
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(
             Future.value(
               ByteData.sublistView(
-                File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                File(
+                  '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
               ),
             ),
           );
-        }
-        await loader.load();
+        await icons.load();
       }
-      final icons = FontLoader('MaterialIcons')
-        ..addFont(
-          Future.value(
-            ByteData.sublistView(
-              File(
-                '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-              ).readAsBytesSync(),
-            ),
-          ),
-        );
-      await icons.load();
       final bridge = BatchBridge({
         '/v1/manage/session': SessionResponse(
           200,
@@ -617,32 +619,34 @@ void main() {
   testWidgets(
     'viewport batching advances beyond first cap and scrolls to later entries without duplicate keys',
     (tester) async {
-      for (final family in ['Figtree', 'BricolageGrotesque']) {
-        final loader = FontLoader(family);
-        for (final weight
-            in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
-          final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
-          loader.addFont(
+      if (Platform.isLinux) {
+        for (final family in ['Figtree', 'BricolageGrotesque']) {
+          final loader = FontLoader(family);
+          for (final weight
+              in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+            final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                ),
+              ),
+            );
+          }
+          await loader.load();
+        }
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(
             Future.value(
               ByteData.sublistView(
-                File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                File(
+                  '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
               ),
             ),
           );
-        }
-        await loader.load();
+        await icons.load();
       }
-      final icons = FontLoader('MaterialIcons')
-        ..addFont(
-          Future.value(
-            ByteData.sublistView(
-              File(
-                '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-              ).readAsBytesSync(),
-            ),
-          ),
-        );
-      await icons.load();
       final bridge = BatchBridge({
         '/v1/manage/session': SessionResponse(
           200,
