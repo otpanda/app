@@ -37,9 +37,27 @@ Widget buildNativeRoot() {
   return _Boot(google: google);
 }
 
+/// Android composition seam for widget qualification. Production always uses
+/// [buildNativeRoot] and the real session, bearer transport and Android channels.
+@visibleForTesting
+Widget buildAndroidNativeRootForTest({
+  required NativeSessionController session,
+  required BearerRequest request,
+}) => _Boot(
+  google: AndroidGoogleSource(),
+  sessionOverride: session,
+  requestOverride: request,
+);
+
 class _Boot extends StatefulWidget {
-  const _Boot({required this.google});
+  const _Boot({
+    required this.google,
+    this.sessionOverride,
+    this.requestOverride,
+  });
   final AndroidGoogleSource google;
+  final NativeSessionController? sessionOverride;
+  final BearerRequest? requestOverride;
   @override
   State<_Boot> createState() => _BootState();
 }
@@ -66,20 +84,22 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     _lockChanged();
     localLock.addListener(_lockChanged);
     WidgetsBinding.instance.addObserver(this);
-    controller = NativeSessionController(
-      NativeAuth(
-        post: androidJsonPost(apiOrigin),
-        keystore: AndroidKeystoreAdapter(),
-        browser: CustomTabHandoff(),
-        google: widget.google,
-        store: _PrefsDeviceStore(),
-        apiOrigin: apiOrigin,
-        launchUrl: pagesNativeLaunchUrl,
-        passkeys: passkeys,
-        recognition: AndroidRecognitionStore(),
-      ),
-    );
-    _bearer = androidBearerRequest(apiOrigin);
+    controller =
+        widget.sessionOverride ??
+        NativeSessionController(
+          NativeAuth(
+            post: androidJsonPost(apiOrigin),
+            keystore: AndroidKeystoreAdapter(),
+            browser: CustomTabHandoff(),
+            google: widget.google,
+            store: _PrefsDeviceStore(),
+            apiOrigin: apiOrigin,
+            launchUrl: pagesNativeLaunchUrl,
+            passkeys: passkeys,
+            recognition: AndroidRecognitionStore(),
+          ),
+        );
+    _bearer = widget.requestOverride ?? androidBearerRequest(apiOrigin);
     final proof = ChannelDeviceProofSource();
     final rawEnroll = ChannelPendingStore();
     startup = NativeStartupRecovery(
