@@ -1074,6 +1074,8 @@ private fun exportStatusFixture(path: String) {
   val en=ok(h.handle("syncEnroll",mapOf("owner" to "owner","installId" to INST,"generation" to 1L))) as Map<*,*>
   val key=en["keyId"] as String
   if(kind=="pending") { r.sv.deleteDown=true; h.handle("syncErase",mapOf("owner" to "owner","epoch" to 0L,"trigger" to "sign_out")) }
+  if(kind=="pending") check((h.handle("syncStatusSign", mapOf("owner" to "owner", "keyId" to key, "challenge" to "A".repeat(43), "expiresAt" to now+60000L)) as ChannelReply.Err).code == "NOT_ENROLLED")
+
   if(kind=="unreadable") r.ss.docs[ownerKey("owner")]="garbage"
   outcomes[kind]=ok(h.handle("syncStatusApply",mapOf("owner" to "owner","keyId" to if(kind=="noop") "f".repeat(32) else key,"state" to if(kind=="kept") "active" else "key-revoked")))
  }
