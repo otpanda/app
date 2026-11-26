@@ -59,6 +59,7 @@ extension type _Session(JSObject _) implements JSObject {
   );
   external JSPromise<JSAny?> googleContinue(JSString action, JSString proof);
   external JSPromise<JSAny?> googleStart(JSBoolean remember);
+  external JSPromise<JSAny?> waitForAuthNavigation();
   external JSPromise<JSString> connectGoogle();
   external JSString googleLinkResult();
   external JSString extensionIntent();
@@ -328,6 +329,7 @@ class _Browser
   @override
   Future<void> googleStart(bool remember) async {
     await _session.googleStart(remember.toJS).toDart;
+    await _session.waitForAuthNavigation().toDart;
   }
 
   @override
@@ -415,6 +417,8 @@ class _Browser
   @override
   Future<void> start(String mode) async {
     await _session.start(mode.toJS).toDart;
+    // Every non-restore start is an API navigation, not an in-place ceremony.
+    if (mode != 'restore') await _session.waitForAuthNavigation().toDart;
   }
 
   @override
