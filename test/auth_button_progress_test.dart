@@ -55,7 +55,7 @@ void main() {
     testWidgets(
       '$mode keeps only the clicked button spinning during pending flow',
       (t) async {
-        await _fonts();
+        if (Platform.isLinux) await _fonts();
         final b = Bridge();
         t.view.physicalSize = const Size(390, 844);
         t.view.devicePixelRatio = 1;
