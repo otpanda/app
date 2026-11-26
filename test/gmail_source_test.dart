@@ -70,7 +70,10 @@ void main() {
     );
     b.pending = 2;
     b.skipped = 2;
-    await t.pump(const Duration(seconds: 31));
+    expect(b.checks, 1, reason: 'no timer read');
+    await t.pump(const Duration(seconds: 95));
+    expect(b.checks, 1, reason: 'still no timer read');
+    t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await t.pumpAndSettle();
     expect(find.textContaining('2 messages are waiting'), findsOneWidget);
     expect(
@@ -91,12 +94,15 @@ void main() {
       );
       await t.pumpAndSettle();
       expect(b.checks, 1);
-      await t.pump(const Duration(seconds: 31));
+      await t.pump(const Duration(seconds: 95));
+      expect(b.checks, 1, reason: 'no timer read');
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await t.pumpAndSettle();
       expect(b.checks, 2);
       await t.pumpWidget(const MaterialApp(home: SizedBox()));
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await t.pump(const Duration(seconds: 31));
-      expect(b.checks, 2);
+      expect(b.checks, 2, reason: 'nothing after dispose');
     },
   );
 
@@ -219,7 +225,7 @@ void main() {
       expect(find.text('Connecting Gmail is paused.'), findsOneWidget);
       // A later status that no longer reports the blocker re-enables connect.
       b.blocked = false;
-      await t.pump(const Duration(seconds: 31));
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await t.pumpAndSettle();
       expect(find.text('Connecting Gmail is paused.'), findsNothing);
       expect(
@@ -243,7 +249,7 @@ void main() {
       findsOneWidget,
     );
     b.leftover = 2;
-    await t.pump(const Duration(seconds: 31));
+    t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await t.pumpAndSettle();
     expect(
       find.textContaining('2 OTPanda labels and 2 filters may remain'),
