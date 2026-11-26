@@ -696,7 +696,7 @@ private fun handleChecks() {
                 check(st["keyId"] == e1["keyId"] && st["provable"] == false)
                 val dig = SeedSyncWire.enrollActionDigest("o", INST, e1["publicKey"] as ByteArray, 1)
                 check(err(h2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to e1["keyId"]))) == "WIRE_KEY")
-                check(err(h2.handle("syncEnroll", mapOf("owner" to "o", "installId" to "X".repeat(22), "generation" to 1L))) == "INVALID_INPUT") // install id is pinned
+                check(err(h2.handle("syncEnroll", mapOf("owner" to "o", "installId" to "X".repeat(22), "generation" to 1L))) == "INSTALL_ID_MISMATCH") // install id is pinned
                 check(r.sv.keys.size == 1)
                 val seedsBefore = r.cv.keys.size
                 val e2 = ok(h2.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) as Map<*, *>
@@ -769,6 +769,77 @@ private fun handleChecks() {
                 ok(h.handle("syncBatchOpen", mapOf("handleId" to id, "entryId" to "e1", "serverPublicKey" to srv.pub, "nonce" to n, "ciphertext" to c)))
                 t!!.join(5000)
                 check(eraseReply is ChannelReply.Ok && aliveDuring && !t!!.isAlive && r.cv.keys.size == 0 && !r.c.purgeOwed("o"))
+            }
+            // W16b. two active owners and a lost id: Ensure is MISMATCH until BOTH are erased; erasing one leaves the other untouched; erasing the last lets Ensure and enroll work
+            run {
+                class Mem2(var text: String? = null) : InstallIdStore {
+                    override fun read(): String? = text
+                    override fun createIfAbsent(candidate: String): Pair<String, Boolean> { text?.let { return it to false }; text = candidate; return candidate to true }
+                }
+                val r = Rig(); val st = Mem2(INST); val h = SeedSyncChannelHandler(r.c, r.custody, { now }, installIds = st); val other = "J".repeat(22)
+                fun enr(o: String) = ok(h.handle("syncEnroll", mapOf("owner" to o, "installId" to INST, "generation" to 1L)))
+                fun ers(o: String) = ok(h.handle("syncErase", mapOf("owner" to o, "epoch" to r.custody.readOwnerState(o).epoch, "trigger" to "sign_out")))
+                enr("o1"); enr("o2"); val k2 = ok(h.handle("syncStatusKeyId", mapOf("owner" to "o2")))
+                st.text = null
+                check(err(h.handle("syncInstallIdEnsure", mapOf("installId" to other))) == "INSTALL_ID_MISMATCH" && st.text == null)
+                ers("o1")
+                check(err(h.handle("syncInstallIdEnsure", mapOf("installId" to other))) == "INSTALL_ID_MISMATCH" && st.text == null) { "o2 still active" }
+                check(ok(h.handle("syncStatusKeyId", mapOf("owner" to "o2"))) == k2 && r.c.enrolled("o2") && !r.c.enrolled("o1")) { "other owner untouched" }
+                ers("o2")
+                check((ok(h.handle("syncInstallIdEnsure", mapOf("installId" to other))) as Map<*, *>)["created"] == true)
+                ok(h.handle("syncEnroll", mapOf("owner" to "o1", "installId" to other, "generation" to 1L)))
+                check(r.c.enrolled("o1"))
+                // incomplete discovery (an unreadable owner document): Ensure with an empty store is METADATA_UNAVAILABLE and creates nothing
+                st.text = null; r.ss.docs[ownerKey("bad")] = "garbage"
+                check(err(h.handle("syncInstallIdEnsure", mapOf("installId" to INST))) == "METADATA_UNAVAILABLE" && st.text == null) { "no id on incomplete discovery" }
+            }
+            // W16. install id through the channel: Ensure returns the winner, Enroll requires the stored id, an unreadable store never enrolls, no store means NotImplemented
+            run {
+                class Mem(var text: String? = null, var broken: Boolean = false) : InstallIdStore {
+                    override fun read(): String? { if (broken) throw InstallIdFailure(InstallIdFailure.Kind.UNREADABLE); return text }
+                    override fun createIfAbsent(candidate: String): Pair<String, Boolean> {
+                        if (!validInstallId(candidate)) throw InstallIdFailure(InstallIdFailure.Kind.INVALID_INPUT)
+                        if (broken) throw InstallIdFailure(InstallIdFailure.Kind.UNREADABLE)
+                        text?.let { return it to false }; text = candidate; return candidate to true }
+                }
+                val none = SeedSyncChannelHandler(Rig().let { it.c }, Rig().custody, { now })
+                check(none.handle("syncInstallIdGet", null) == ChannelReply.NotImplemented && none.handle("syncInstallIdEnsure", mapOf("installId" to INST)) == ChannelReply.NotImplemented)
+                val r = Rig(); val st = Mem(); val h = SeedSyncChannelHandler(r.c, r.custody, { now }, installIds = st)
+                check(ok(h.handle("syncInstallIdGet", null)).let { (it as Map<*, *>)["installId"] == null })
+                check(err(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) == "INVALID_INPUT" && !r.c.enrolled("o")) // before Ensure
+                check(err(h.handle("syncInstallIdEnsure", mapOf("installId" to "short"))) == "INVALID_INPUT" && st.text == null)
+                check(err(h.handle("syncInstallIdEnsure", mapOf("installId" to INST, "extra" to 1L))) == "INVALID_INPUT")
+                val e1 = ok(h.handle("syncInstallIdEnsure", mapOf("installId" to INST))) as Map<*, *>
+                check(e1["installId"] == INST && e1["created"] == true)
+                val other = "J".repeat(22)
+                val e2 = ok(h.handle("syncInstallIdEnsure", mapOf("installId" to other))) as Map<*, *>
+                check(e2["installId"] == INST && e2["created"] == false) // the winner, not the candidate
+                check(err(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to other, "generation" to 1L))) == "INSTALL_ID_MISMATCH" && !r.c.enrolled("o"))
+                ok(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L)))
+                check(r.c.enrolled("o") && (ok(h.handle("syncInstallIdGet", null)) as Map<*, *>)["installId"] == INST)
+                // erase and purge never touch the install id
+                ok(h.handle("syncErase", mapOf("owner" to "o", "epoch" to r.custody.readOwnerState("o").epoch, "trigger" to "sign_out")))
+                check(st.text == INST)
+                // lost id with an ACTIVE enrollment: fail closed, nothing changes; an authorized local erase then a fresh Ensure and enroll repairs
+                ok(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L)))
+                val lostKey = ok(h.handle("syncStatusKeyId", mapOf("owner" to "o")))
+                st.text = null
+                check(err(h.handle("syncInstallIdEnsure", mapOf("installId" to other))) == "INSTALL_ID_MISMATCH" && st.text == null) { "no silent new id" }
+                check(err(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to other, "generation" to 1L))) == "INSTALL_ID_MISMATCH")
+                check(err(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) == "INSTALL_ID_MISMATCH")
+                check(ok(h.handle("syncStatusKeyId", mapOf("owner" to "o"))) == lostKey && r.c.enrolled("o")) { "enrollment untouched" }
+                st.text = other // a changed (not lost) store against the pin
+                check(err(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to other, "generation" to 1L))) == "INSTALL_ID_MISMATCH" && ok(h.handle("syncStatusKeyId", mapOf("owner" to "o"))) == lostKey)
+                st.text = null
+                ok(h.handle("syncErase", mapOf("owner" to "o", "epoch" to r.custody.readOwnerState("o").epoch, "trigger" to "sign_out")))
+                check((ok(h.handle("syncInstallIdEnsure", mapOf("installId" to other))) as Map<*, *>)["created"] == true)
+                ok(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to other, "generation" to 1L)))
+                check(r.c.enrolled("o"))
+                st.text = other
+                ok(h.handle("syncErase", mapOf("owner" to "o", "epoch" to r.custody.readOwnerState("o").epoch, "trigger" to "sign_out")))
+                st.broken = true
+                check(err(h.handle("syncInstallIdGet", null)) == "INSTALL_ID_UNREADABLE" && err(h.handle("syncInstallIdEnsure", mapOf("installId" to INST))) == "INSTALL_ID_UNREADABLE")
+                check(err(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) == "INSTALL_ID_UNREADABLE" && !r.c.enrolled("o"))
             }
         }
     }

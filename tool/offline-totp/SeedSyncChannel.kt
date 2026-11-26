@@ -65,6 +65,8 @@ class SeedSyncChannelHandler(
     private val provisioner: (String, SealedEntrySpec, ByteArray, Long) -> Unit = { owner, spec, seed, epoch ->
         custody.provision(owner, spec.entryId, spec.seedVersion, wireAlgorithm(spec.algorithm), spec.digits, spec.period, seed, epoch)
     },
+    /** Optional install id store. null: the two install id methods are NotImplemented and syncEnroll does not consult it. Present: syncEnroll requires the stored id. */
+    private val installIds: InstallIdStore? = null,
 ) {
     companion object { const val MAX_HANDLES = 4; const val HANDLE_TTL_MS = 150_000L }
 
@@ -83,7 +85,7 @@ class SeedSyncChannelHandler(
     private fun Map<*, *>.exact(vararg keys: String) { if (this.keys != keys.toSet()) throw Bad() }
 
     private val known = setOf("syncEnroll", "syncEnrollmentState", "syncSignEnrollProof", "syncSignSnapshotProof", "syncSignRevokeProof", "syncBatchBegin", "syncBatchBind", "syncBatchSign",
-        "syncBatchOpen", "syncBatchSkip", "syncBatchFinish", "syncDiscoverOwners", "syncStatusKeyId", "syncStatusSign", "syncStatusApply", "syncErase", "syncRetryPending")
+        "syncBatchOpen", "syncBatchSkip", "syncBatchFinish", "syncDiscoverOwners", "syncStatusKeyId", "syncStatusSign", "syncStatusApply", "syncErase", "syncRetryPending", "syncInstallIdGet", "syncInstallIdEnsure")
 
     private fun sweep(now: Long) {
         val it = handles.entries.iterator()
@@ -108,14 +110,21 @@ class SeedSyncChannelHandler(
     fun handle(method: String, arguments: Any?): ChannelReply {
         if (method !in known) return ChannelReply.NotImplemented
         return try {
-            val a = arguments as? Map<*, *> ?: if (method == "syncRetryPending" || method == "syncDiscoverOwners") emptyMap<Any, Any>() else throw Bad()
+            val a = arguments as? Map<*, *> ?: if (method == "syncRetryPending" || method == "syncDiscoverOwners" || method == "syncInstallIdGet") emptyMap<Any, Any>() else throw Bad()
             val now = clockMs()
             when (method) {
                 "syncEnroll" -> { a.exact("owner", "installId", "generation"); val owner = a.str("owner"); val install = a.str("installId")
                     synchronized(lock) {
                         // Dart is the single source of installId (a random per-install id it persists). Native pins it in the enrollment record and refuses a different one
                         // for the same owner while an enrollment is active: an id that changes inside one install is a bug or tampering, never a repair.
-                        core.installIdFor(owner)?.let { if (it != install) return ChannelReply.Err("INVALID_INPUT") }
+                        // The store id and the owner's pinned id must both equal the caller's. A lost or changed store against an active pin is INSTALL_ID_MISMATCH (nothing changes);
+                        // recovery is an explicit, authorized local erase of that owner (syncErase) and then a fresh Ensure and enroll, never an automatic one.
+                        // EFFECT of that erase: it deletes that owner's native sync key and, for sign_out, purges that owner's native seeds, so offline codes for that owner stay unavailable
+                        // until the owner re-enrolls and re-syncs. Ensure succeeds only after EVERY owner with an active enrollment has been erased; erasing one leaves the others untouched.
+                        installIds?.let { st -> val stored = st.read() // unreadable throws InstallIdFailure: nothing enrolled
+                            if (stored == null) return ChannelReply.Err(if (core.installIdFor(owner) != null) "INSTALL_ID_MISMATCH" else "INVALID_INPUT")
+                            if (stored != install) return ChannelReply.Err("INSTALL_ID_MISMATCH") }
+                        core.installIdFor(owner)?.let { if (it != install) return ChannelReply.Err("INSTALL_ID_MISMATCH") }
                         try {
                             core.enroll(owner, install, a.long("generation")).let { enrolled[owner] = it
                                 ChannelReply.Ok(mapOf("keyId" to it.keyId, "publicKey" to it.publicKey.copyOf(), "generation" to it.generation, "installId" to it.installId)) }
@@ -151,6 +160,15 @@ class SeedSyncChannelHandler(
                         try { core.erase(owner, a.long("epoch"), tr).let { ChannelReply.Ok(mapOf("seedsPurged" to it.seedsPurged, "keyDeleted" to it.keyDeleted, "epoch" to it.epoch)) } }
                         finally { discardOwner(owner); enrolled.remove(owner) }
                     } }
+                "syncInstallIdGet" -> { a.exact(); val st = installIds ?: return ChannelReply.NotImplemented; ChannelReply.Ok(mapOf("installId" to st.read())) }
+                "syncInstallIdEnsure" -> { a.exact("installId"); val st = installIds ?: return ChannelReply.NotImplemented
+                    synchronized(lock) {
+                        // A lost id (store empty) while any owner still has an ACTIVE enrollment must not mint a new id silently: that enrollment is pinned to the old one.
+                        if (st.read() == null) { val d = core.discoverOwners()
+                            if (!d.complete) return ChannelReply.Err("METADATA_UNAVAILABLE")
+                            if (d.owners.any { it.keyId != null }) return ChannelReply.Err("INSTALL_ID_MISMATCH") }
+                        st.createIfAbsent(a.str("installId")).let { ChannelReply.Ok(mapOf("installId" to it.first, "created" to it.second)) }
+                    } }
                 "syncRetryPending" -> { a.exact(); core.retryPending().let { ChannelReply.Ok(mapOf("keyDeletesPending" to it.keyDeletesPending.toLong(), "purgesOwed" to it.purgesOwed.toLong(), "unreadableOwners" to it.unreadableOwners.toLong())) } }
                 "syncBatchBegin" -> { a.exact("owner", "deviceId", "generation", "epoch", "entries")
                     val specs = (a["entries"] as? List<*> ?: throw Bad()).map { e ->
@@ -179,7 +197,8 @@ class SeedSyncChannelHandler(
                 "syncBatchFinish" -> { a.exact("handleId"); synchronized(lock) { handles.remove(a.str("handleId"))?.handle?.finish(); sweep(now) }; ChannelReply.Ok(null) }
                 else -> ChannelReply.NotImplemented
             }
-        } catch (e: SyncKeyFailure) { ChannelReply.Err(e.error.name) }
+        } catch (e: InstallIdFailure) { ChannelReply.Err(when (e.kind) { InstallIdFailure.Kind.INVALID_INPUT -> "INVALID_INPUT"; InstallIdFailure.Kind.UNREADABLE -> "INSTALL_ID_UNREADABLE"; InstallIdFailure.Kind.UNAVAILABLE -> "UNAVAILABLE" }) }
+        catch (e: SyncKeyFailure) { ChannelReply.Err(e.error.name) }
         catch (e: WireException) { ChannelReply.Err("WIRE_" + e.reason.substringBefore(':').uppercase().filter { it in 'A'..'Z' || it == '_' }) }
         catch (e: CustodyFailure) { ChannelReply.Err(e.error.name) }
         catch (_: Bad) { ChannelReply.Err("INVALID_INPUT") }

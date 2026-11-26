@@ -12,7 +12,7 @@ work=$(mktemp -d)
 java -cp "$KOTLIN_LIB/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect \
   -classpath "$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar:$ANDROID_JAR" -d "$work/classes.jar" \
   "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt" \
-  "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/OwnerStateFileStore.kt" "$root/SeedSyncKey.kt" "$root/SeedSyncWire.kt" "$root/SeedSyncHandle.kt" "$root/SeedSyncChannel.kt" "$root/AndroidSyncKeyVault.kt" "$root/SeedSyncStateFileStore.kt" "$root/runtime/RuntimeFixture.kt" "$root/runtime/RuntimeFixtureV2.kt" "$root/runtime/RuntimeFixtureV3.kt" "$root/runtime/FixtureRunner.kt"
+  "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/OwnerStateFileStore.kt" "$root/SeedSyncKey.kt" "$root/SeedSyncWire.kt" "$root/SeedSyncHandle.kt" "$root/SeedSyncChannel.kt" "$root/InstallId.kt" "$root/AndroidInstallIdStore.kt" "$root/AndroidSyncKeyVault.kt" "$root/SeedSyncStateFileStore.kt" "$root/runtime/RuntimeFixture.kt" "$root/runtime/RuntimeFixtureV2.kt" "$root/runtime/RuntimeFixtureV3.kt" "$root/runtime/FixtureRunner.kt"
 mkdir "$work/dex"; "${bt}d8" --lib "$ANDROID_JAR" --min-api 30 --output "$work/dex" "$work/classes.jar" "$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar"
 "${bt}aapt2" link -o "$work/base.apk" -I "$ANDROID_JAR" --manifest "$root/runtime/AndroidManifest.xml" --min-sdk-version 30 --target-sdk-version 34
 (cd "$work/dex" && zip -q -j "$work/base.apk" classes*.dex)
@@ -25,7 +25,7 @@ actual=$(adb shell getprop ro.build.version.sdk | tr -d '\r\n')
 adb uninstall org.otpanda.totp.fixture >/dev/null 2>&1 || true
 adb install -t -r "$work/fixture.apk" > "$out/install.txt" 2>&1 || { cat "$out/install.txt" >&2; echo "HARNESS FAIL: install" >&2; exit 4; }
 : > "$out/fixture.log"
-for phase in env secure-default seam-provision seam-restart seam-loss seam-orphan size cleanup v2-capability v2-provision v2-restart v2-rotate v2-pending v2-pending-retry v2-metadata v2-keylen v2-cleanup v3-vault v3-enroll v3-restart v3-status v3-missing v3-pending v3-pending-retry v3-cleanup; do
+for phase in env secure-default seam-provision seam-restart seam-loss seam-orphan size cleanup v2-capability v2-provision v2-restart v2-rotate v2-pending v2-pending-retry v2-metadata v2-keylen v2-cleanup v3-vault v3-enroll v3-restart v3-status v3-missing v3-pending v3-pending-retry v3-install v3-cleanup; do
   echo "== phase $phase" >> "$out/fixture.log"
   adb shell am instrument -w -e phase "$phase" org.otpanda.totp.fixture/.FixtureRunner 2>&1 \
     | tee "$out/instrument-$phase.txt" | python3 "$root/runtime/extract-instrument.py" "$phase" "$EXPECT_API" >> "$out/fixture.log" || true

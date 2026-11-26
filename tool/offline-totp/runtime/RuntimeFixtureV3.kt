@@ -139,6 +139,21 @@ class FixtureV3(private val ctx: Context, private val out: (String) -> Unit) {
             need(rp["keyDeletesPending"] == 0L, "retry in a new process clears the pending delete")
             need(seedAliases().isEmpty() && core.pendingKeyDeletes(o) == 0, "the pending key is physically gone")
         }
+        "v3-install" -> {
+            // The install id file on the real app filesystem, in a scratch directory of its own (never the production directory). Verifies the create-only hard link and the Os.open/fsync/close directory confirmation work for app data.
+            val dir = File(ctx.noBackupFilesDir, "fx-install-scratch"); dir.deleteRecursively()
+            val a = "A".repeat(43); val b = "B".repeat(43)
+            val s = InstallIdFile(dir, AndroidDirSync())
+            need(s.read() == null, "no install id before create")
+            need(s.createIfAbsent(a) == (a to true), "create-only publish with the platform directory fsync works on this filesystem")
+            need(InstallIdFile(dir, AndroidDirSync()).createIfAbsent(b) == (a to false), "a second creator gets the winner")
+            need(InstallIdFile(dir, AndroidDirSync()).read() == a && dir.list()!!.toList() == listOf("install-id"), "one id file and no temp file remains")
+            File(dir, "install-id").writeText("bad")
+            need(runCatching { InstallIdFile(dir, AndroidDirSync()).read() }.exceptionOrNull() is InstallIdFailure, "a malformed file is reported unreadable")
+            need(File(dir, "install-id").readText() == "bad", "a malformed file is never overwritten")
+            dir.deleteRecursively()
+            need(!dir.exists(), "scratch directory removed")
+        }
         "v3-cleanup" -> {
             runCatching { okv(call("syncErase", mapOf("owner" to o, "epoch" to custody.readOwnerState(o).epoch, "trigger" to "sign_out"))) }
             need(core.retryPending().keyDeletesPending == 0, "no pending key deletes remain")
