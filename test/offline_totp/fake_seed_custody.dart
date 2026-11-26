@@ -145,6 +145,20 @@ final class FakeSeedCustody implements NativeSeedCustody {
   }
 
   @override
+  Future<CustodyOwnerState> readOwnerState(String ownerId) async {
+    if (!validCustodyId(ownerId)) {
+      throw const CustodyException(CustodyError.invalidInput);
+    }
+    if (metadataDown) {
+      throw const CustodyException(CustodyError.metadataUnavailable);
+    }
+    return CustodyOwnerState(
+      epoch: _epoch[ownerId] ?? 0,
+      enabled: !_disabled.contains(ownerId),
+    );
+  }
+
+  @override
   Future<CustodyCapability> capability() async => unavailable
       ? CustodyCapability(CustodyProtection.unavailable, unavailableReason)
       : CustodyCapability(reportedProtection, null);

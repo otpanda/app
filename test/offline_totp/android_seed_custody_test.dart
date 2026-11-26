@@ -1,4 +1,3 @@
-
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/offline_totp/android_seed_custody.dart';
@@ -14,6 +13,28 @@ void main() {
     custody = AndroidSeedCustody(channel: channel);
   });
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+  test('owner state is strict, read-only metadata', () async {
+    messenger.setMockMethodCallHandler(channel, (c) async {
+      expect(c.method, 'readOwnerState');
+      expect(c.arguments, {'owner': 'owner'});
+      return {'epoch': 4, 'enabled': false};
+    });
+    final state = await custody.readOwnerState('owner');
+    expect(state.epoch, 4);
+    expect(state.enabled, false);
+    for (final value in [
+      {'epoch': -1, 'enabled': true},
+      {'epoch': 1.5, 'enabled': true},
+      {'epoch': 0, 'enabled': 'true'},
+      {'epoch': 0, 'enabled': true, 'extra': 0},
+    ]) {
+      messenger.setMockMethodCallHandler(channel, (c) async => value);
+      await expectLater(
+        custody.readOwnerState('owner'),
+        throwsA(isA<CustodyException>()),
+      );
+    }
+  });
   test('measured software protection is not upgraded to hardware', () async {
     messenger.setMockMethodCallHandler(
       channel,

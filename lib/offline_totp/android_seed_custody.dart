@@ -1,4 +1,3 @@
-
 import 'package:flutter/services.dart';
 
 import 'native_seed_custody.dart';
@@ -54,6 +53,25 @@ final class AndroidSeedCustody implements NativeSeedCustody {
       _invalid();
     }
     return List<String>.from(v);
+  }
+
+  @override
+  Future<CustodyOwnerState> readOwnerState(String ownerId) async {
+    if (!validCustodyId(ownerId)) {
+      throw const CustodyException(CustodyError.invalidInput);
+    }
+    final v = _map(await _call('readOwnerState', {'owner': ownerId}), {
+      'epoch',
+      'enabled',
+    });
+    final epoch = v['epoch'];
+    if (epoch is! int ||
+        epoch < 0 ||
+        epoch >= custodyMaxSafeInt ||
+        v['enabled'] is! bool) {
+      _invalid();
+    }
+    return CustodyOwnerState(epoch: epoch, enabled: v['enabled'] as bool);
   }
 
   @override
@@ -161,7 +179,8 @@ final class AndroidSeedCustody implements NativeSeedCustody {
 
   @override
   Future<void> enableOwner(String ownerId, {required int epoch}) async {
-    if (await _call('enableOwner', {'owner': ownerId, 'epoch': epoch}) != null) {
+    if (await _call('enableOwner', {'owner': ownerId, 'epoch': epoch}) !=
+        null) {
       _invalid();
     }
   }

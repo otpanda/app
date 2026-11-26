@@ -51,6 +51,36 @@ fun main() {
     val expected = "0000001d6f7470616e64612d6e61746976652d736565642d7265636f72642d7631000000076f776e6572203100000008656e7472792fc3a900000001370000000673686132353600000001370000000236300000000133"
     check(hexOf(custodyAad("owner 1", "entry/\u00e9", 7, TotpCalculator.Algorithm.SHA256, 7, 60, 3)) == expected) { "AAD differs from Dart" }
 
+    // Owner metadata reads neither touch the vault nor mutate durable state.
+    run {
+        val store = V2Store()
+        val noVault = object : KeyVault {
+            override fun containsAlias(alias: String): Boolean = error("vault touched")
+            override fun aliases(): Set<String> = error("vault touched")
+            override fun importSeed(alias: String, seed: ByteArray, algorithm: TotpCalculator.Algorithm): ProtectionReport = error("vault touched")
+            override fun key(alias: String): SecretKey? = error("vault touched")
+            override fun delete(alias: String) { error("vault touched") }
+            override fun probe(): ProtectionReport = error("vault touched")
+        }
+        val c = NativeSeedCustodyCore(noVault, store)
+        check(c.readOwnerState("o") == CustodyOwnerState(0, true)); check(store.docs.isEmpty())
+        // Persist a disabled owner without live records, then recreate the core.
+        c.clearOwner("o", 0)
+        val saved = store.docs.toMap()
+        val restarted = NativeSeedCustodyCore(noVault, store)
+        check(restarted.readOwnerState("o") == CustodyOwnerState(1, false)); check(store.docs == saved)
+        restarted.enableOwner("o", 1)
+        check(restarted.readOwnerState("o") == CustodyOwnerState(1, true))
+        val doc = store.docs.getValue(ownerKey("o"))
+        for (bad in listOf("corrupt", doc.replace("owner bw", "owner eA"), doc.replace("epoch 1", "epoch 01"))) {
+            store.docs[ownerKey("o")] = bad
+            want(CustodyError.METADATA_UNAVAILABLE) { restarted.readOwnerState("o") }
+        }
+        store.docs[ownerKey("o")] = doc; store.down = true
+        want(CustodyError.METADATA_UNAVAILABLE) { restarted.readOwnerState("o") }
+        store.down = false; want(CustodyError.INVALID_INPUT) { restarted.readOwnerState("") }
+    }
+
     // Provision then generate; RFC 6238 SHA1 vector; seed zeroed.
     run {
         val t = Env(); val seed = s1(); t.c.provision("o", "e", 1, SHA1, 8, 30, seed, 0)
@@ -244,6 +274,17 @@ internal fun channelTests() {
     val t = Env(); val h = NativeCustodyChannelHandler(t.c)
     fun ok(r: ChannelReply) = (r as? ChannelReply.Ok) ?: error("expected Ok got $r")
     fun code(r: ChannelReply) = (r as? ChannelReply.Err)?.code
+    check(ok(h.handle("readOwnerState", mapOf("owner" to "fresh"))).value == mapOf("epoch" to 0L, "enabled" to true))
+    check(t.store.docs.isEmpty()) // reading a new owner writes nothing
+    ok(h.handle("clearOwner", mapOf("owner" to "fresh", "epoch" to 0L)))
+    check(ok(h.handle("readOwnerState", mapOf("owner" to "fresh"))).value == mapOf("epoch" to 1L, "enabled" to false))
+    val before = t.store.docs.toMap()
+    check(ok(h.handle("readOwnerState", mapOf("owner" to "fresh"))).value == mapOf("epoch" to 1L, "enabled" to false))
+    check(t.store.docs == before)
+    check(code(h.handle("readOwnerState", mapOf("owner" to "fresh", "extra" to true))) == "INVALID_INPUT")
+    t.store.down = true
+    check(code(h.handle("readOwnerState", mapOf("owner" to "fresh"))) == "METADATA_UNAVAILABLE")
+    t.store.down = false
     val base = mapOf("owner" to "o", "entry" to "e", "seedVersion" to 1, "epoch" to 0L, "algorithm" to "sha1", "digits" to 8, "periodSeconds" to 30)
     val seed = s1()
     ok(h.handle("provision", base + ("seed" to seed))); check(seed.all { it == 0.toByte() })

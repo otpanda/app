@@ -26,6 +26,7 @@ class CustodyFailure(val error: CustodyError) : Exception(error.name)
 
 enum class Protection { HARDWARE_HMAC, HARDWARE_WRAPPED, OS_ENCRYPTED, UNAVAILABLE }
 data class Capability(val protection: Protection, val reason: String?)
+data class CustodyOwnerState(val epoch: Long, val enabled: Boolean)
 
 data class Snapshot(
     val epoch: Long, val revision: Long, val complete: Boolean,
@@ -182,6 +183,13 @@ class NativeSeedCustodyCore(private val vault: KeyVault, private val store: Owne
 
     /** The protection level the vault reported when the live record was stored (e.g. secure_hardware, software), or null. No secrets. */
     fun levelOf(owner: String, entry: String): String? = synchronized(lock) { checkIds(owner, entry); load(owner).records[entry]?.level }
+
+    /** Read-only local opt-out metadata. Does not authorize sync or create keys. */
+    fun readOwnerState(owner: String): CustodyOwnerState = synchronized(lock) {
+        checkIds(owner)
+        val state = load(owner)
+        CustodyOwnerState(state.epoch, !state.disabled)
+    }
 
     fun capability(): Capability = try {
         val r = vault.probe()

@@ -177,7 +177,18 @@ final class ClearOwnerResult {
 ///
 /// Remote revocation is not instant: a device that is offline keeps its
 /// records until it reconnects and reconciles or is cleared.
+/// Durable local opt-out state only. Never restores sync authorization.
+final class CustodyOwnerState {
+  const CustodyOwnerState({required this.epoch, required this.enabled});
+  final int epoch;
+  final bool enabled;
+}
+
 abstract interface class NativeSeedCustody {
+  /// Read-only. A never-seen owner starts at epoch 0, enabled by default.
+  /// Unreadable metadata fails closed; it is never treated as a new owner.
+  Future<CustodyOwnerState> readOwnerState(String ownerId);
+
   Future<CustodyCapability> capability();
 
   /// Stores [seed] for the owner and entry. [seedVersion] must be greater than

@@ -34,7 +34,7 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
     private fun Map<*, *>.idLongs(k: String): Map<String, Long> =
         map(k).entries.associate { (key, v) -> (key as? String ?: throw Bad()) to (when (v) { is Long -> v; is Int -> v.toLong(); else -> throw Bad() }) }
 
-    private val known = setOf("capability", "provision", "generate", "delete", "clearOwner", "enableOwner", "purgePending", "sweepOrphans", "reconcile")
+    private val known = setOf("readOwnerState", "capability", "provision", "generate", "delete", "clearOwner", "enableOwner", "purgePending", "sweepOrphans", "reconcile")
     fun handle(method: String, arguments: Any?): ChannelReply {
         if (method !in known) { ((arguments as? Map<*, *>)?.get("seed") as? ByteArray)?.fill(0); return ChannelReply.NotImplemented }
         val seed = (arguments as? Map<*, *>)?.get("seed") as? ByteArray
@@ -42,6 +42,7 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
             val a = arguments as? Map<*, *> ?: if (method == "capability" || method == "purgePending" || method == "sweepOrphans") emptyMap<Any, Any>() else throw Bad()
             when (method) {
                 "capability", "purgePending", "sweepOrphans" -> a.exact()
+                "readOwnerState" -> a.exact("owner")
                 "provision" -> a.exact("owner", "entry", "seedVersion", "algorithm", "digits", "periodSeconds", "seed", "epoch")
                 "generate" -> a.exact("owner", "entry", "seedVersion", "unixSeconds")
                 "delete" -> a.exact("owner", "entry", "seedVersion")
@@ -49,6 +50,7 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
                 "reconcile" -> { a.exact("owner", "snapshot"); a.map("snapshot").exact("epoch", "revision", "complete", "versions", "tombstones") }
             }
             when (method) {
+                "readOwnerState" -> core.readOwnerState(a.str("owner")).let { ChannelReply.Ok(mapOf("epoch" to it.epoch, "enabled" to it.enabled)) }
                 "capability" -> core.capability().let { ChannelReply.Ok(mapOf("protection" to it.protection.name, "reason" to it.reason)) }
                 "provision" -> { core.provision(a.str("owner"), a.str("entry"), a.long("seedVersion"), a.alg(), a.int("digits"), a.int("periodSeconds"), a.bytes("seed"), a.long("epoch")); ChannelReply.Ok(null) }
                 "generate" -> ChannelReply.Ok(core.generate(a.str("owner"), a.str("entry"), a.long("seedVersion"), a.long("unixSeconds")))
