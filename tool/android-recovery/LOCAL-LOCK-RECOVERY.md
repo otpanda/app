@@ -15,7 +15,7 @@ Server contract read from otpanda-api `src/local-lock-recovery-http.js` (begin a
    - UNLOCK_GRANTED: call `consumeUnlock`. Only when it returns true, unlock as today.
    - USER_CANCELLED and ABORTED: no message (nothing changed).
    - NETWORK_UNAVAILABLE: "No connection. App lock remains on." OUTCOME_UNKNOWN: "Could not confirm. App lock remains on. Try again."
-   - UNAUTHORIZED: `forceRenew` and retry once. RESTART: start again. Everything else: generic failure, lock stays on.
+   - UNAUTHORIZED: show the session-unavailable message and let the user retry with a newly obtained bearer. RESTART: start again. Everything else: generic failure, lock stays on.
    Dart `lockGeneration` stops being the server binding. It can stay as a UI rotate counter.
 3. Call `cancel` on sign-out, session change or device change, and on dispose.
 4. MainActivity (primary-owned): `LocalLockRecoveryHost.register(this, messenger)` after `AppLockHost.register(...)` (idempotent, disposes a previous registration), `reset()` when the activity stops or is destroyed, `dispose()` when the engine detaches. Do not cancel on pause alone. That stop or destroy really ends an in-flight system prompt is NOT proven here and needs device testing.

@@ -70,7 +70,8 @@ object LocalLockRecoveryHost {
                 "start" -> {
                     val intent = LockIntent.entries.firstOrNull { it.wire == call.argument<String>("intent") }
                     val bearer = call.argument<String>("bearer")
-                    if (Build.VERSION.SDK_INT < 30 || intent == null || bearer == null) { result.error("invalid", null, null); return@setMethodCallHandler }
+                    if (Build.VERSION.SDK_INT < 30) { result.success("UNSUPPORTED_OS"); return@setMethodCallHandler }
+                    if (intent == null || bearer == null) { result.error("invalid", null, null); return@setMethodCallHandler }
                     // The core completes each attempt exactly once. A dead engine can still throw here; that must never crash or change state.
                     rec.start(intent, bearer) { outcome -> try { result.success(outcome.name) } catch (_: Exception) { } }
                 }

@@ -38,7 +38,7 @@ class NativeLocalLockRecovery {
     final outcome = await platform.start(intent, token);
     if (generation != _generation) return 'ABORTED';
     if (outcome == 'UNLOCK_GRANTED' && !await platform.consumeUnlock()) {
-      return 'ABORTED';
+      return 'UNLOCK_EXPIRED';
     }
     return generation == _generation ? outcome : 'ABORTED';
   }

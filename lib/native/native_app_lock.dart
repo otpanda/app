@@ -52,6 +52,9 @@ class LocalLockController extends ChangeNotifier {
       if (outcome != (disable ? 'DISABLED' : 'UNLOCK_GRANTED')) {
         error = switch (outcome) {
           'ABORTED' || 'USER_CANCELLED' => null,
+          'UNLOCK_EXPIRED' => 'Passkey unlock expired. Verify again to unlock.',
+          'PASSKEY_UNAVAILABLE' => 'Passkey verification is unavailable on this device. App lock remains on.',
+          'UNSUPPORTED_OS' => 'Passkey app-lock recovery requires Android 11 or later. App lock remains on.',
           'NETWORK_UNAVAILABLE' => 'No connection. App lock remains on.',
           'OUTCOME_UNKNOWN' =>
             'Could not confirm. App lock remains on. Try again.',
