@@ -151,6 +151,11 @@ class _AuthEntryState extends State<AuthEntry> {
                 semanticLabel: 'OTPanda',
               ),
             ),
+            if (widget.message.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(widget.message),
+              ),
             const SizedBox(height: 24),
             Text(
               protected
@@ -552,11 +557,6 @@ class _AuthEntryState extends State<AuthEntry> {
               Padding(
                 padding: const EdgeInsets.only(top: 16),
                 child: Text(error!),
-              ),
-            if (widget.message.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: Text(widget.message),
               ),
           ],
         ),
