@@ -222,13 +222,23 @@ final class CommonHorizonBatch {
 
 /// A code that is valid right now under the conservative clock.
 final class BatchCode {
-  const BatchCode._(this.entryId, this.value, this.period, this.remainingMs);
+  const BatchCode._(
+    this.entryId,
+    this.value,
+    this.period,
+    this.remainingMs,
+    this.periodStartMs,
+  );
   final String entryId, value;
   final int period;
 
   /// Milliseconds until this code stops being valid, rounded down by the
   /// latest possible server clock.
   final int remainingMs;
+
+  /// Start of this code's period, in server milliseconds. With [entryId] it
+  /// identifies the code without using its value (for UI keys).
+  final int periodStartMs;
   @override
   String toString() => 'BatchCode(redacted)';
 }
@@ -402,7 +412,24 @@ final class BatchCodeStore {
       e.codes[iHigh],
       e.period,
       startMs + (iHigh + 1) * periodMs - high,
+      startMs + iHigh * periodMs,
     );
+  }
+
+  /// True when a code after the current one is held for [id], so the tile can
+  /// change at the next boundary without a request.
+  bool hasNextCode(String id) {
+    final h = _held[id];
+    if (h == null) return false;
+    try {
+      final e = h.entry;
+      final startMs = e.validFrom * 1000, periodMs = e.period * 1000;
+      final i = (_tick() + h.hiOffset - startMs) ~/ periodMs;
+      return i >= 0 && i + 1 < e.codes.length;
+    } catch (_) {
+      clear();
+      return false;
+    }
   }
 
   /// Entry ids that currently have a valid code, in no particular order.
