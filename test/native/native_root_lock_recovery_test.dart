@@ -52,10 +52,19 @@ void main() {
             .then((b) => ByteData.sublistView(b)),
       );
     await loader.load();
+    var flutterRoot = File(Platform.resolvedExecutable).parent;
+    while (!File(
+      '${flutterRoot.path}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+    ).existsSync()) {
+      if (flutterRoot.parent.path == flutterRoot.path) {
+        throw StateError('Flutter icon font not found');
+      }
+      flutterRoot = flutterRoot.parent;
+    }
     final icons = FontLoader('MaterialIcons')
       ..addFont(
         File(
-          '/downloads/otpanda/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+          '${flutterRoot.path}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
         ).readAsBytes().then((b) => ByteData.sublistView(b)),
       );
     await icons.load();
@@ -165,7 +174,8 @@ void main() {
           expect(find.text('OTPanda is locked'), findsOneWidget);
           expect(renews, 1);
           expect(calls, isEmpty); // no auto-recovery or lock enable
-          if (!disable && !cancelSession) {
+          final screenshot = Platform.environment['OTPANDA_TEST_SCREENSHOT'];
+          if (!disable && !cancelSession && screenshot != null) {
             await t.runAsync(() async {
               final image =
                   await (pixels.currentContext!.findRenderObject()!
@@ -174,8 +184,7 @@ void main() {
               final data = await image.toByteData(
                 format: ui.ImageByteFormat.png,
               );
-              await File('/downloads/root-lock-before.png')
-                  .writeAsBytes(data!.buffer.asUint8List());
+              await File(screenshot).writeAsBytes(data!.buffer.asUint8List());
               image.dispose();
             });
           }
