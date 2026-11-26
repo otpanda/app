@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/native/native_app_lock.dart';
@@ -5,6 +7,7 @@ import 'package:otpanda_client/native/native_app_lock.dart';
 class Fake implements LocalLockPlatform {
   bool saved = false, allow = true, fail = false;
   int checks = 0, writes = 0;
+  Completer<bool>? prompt;
   @override
   Future<bool> enabled() async {
     if (fail) throw StateError('failed');
@@ -14,7 +17,7 @@ class Fake implements LocalLockPlatform {
   @override
   Future<bool> verify() async {
     checks++;
-    return allow;
+    return prompt?.future ?? allow;
   }
 
   @override
@@ -25,6 +28,35 @@ class Fake implements LocalLockPlatform {
 }
 
 void main() {
+  test(
+    'OS prompt may pause app and finish before resumed without deadlock',
+    () async {
+      final p = Fake()..saved = true;
+      final c = LocalLockController(p);
+      await c.load();
+      p.prompt = Completer<bool>();
+      final f = c.unlock();
+      c.background();
+      p.prompt!.complete(true);
+      await f;
+      expect(c.locked, true);
+      c.resume();
+      expect(c.locked, false);
+      c.background();
+      expect(c.locked, true);
+    },
+  );
+  test('async verification completion after dispose is ignored', () async {
+    final p = Fake()..saved = true;
+    final c = LocalLockController(p);
+    await c.load();
+    p.prompt = Completer<bool>();
+    final f = c.unlock();
+    c.dispose();
+    p.prompt!.complete(true);
+    await f;
+  });
+
   test(
     'off by default, enable and disable each require fresh verification',
     () async {
@@ -44,7 +76,7 @@ void main() {
       expect(c.enabled, true);
       expect(p.writes, 1);
       p.allow = true;
-      c.foreground=true;
+      c.foreground = true;
       await c.unlock();
       expect(c.locked, false);
       await c.change(false);
@@ -86,6 +118,9 @@ void main() {
       t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       await t.pump();
       expect(find.text('private-code'), findsNothing);
+      await t.binding.handlePopRoute();
+      await t.pump();
+      expect(find.text('OTPanda is locked'), findsOneWidget);
       t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await t.pump();
       expect(find.text('private-code'), findsNothing);
