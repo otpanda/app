@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Fail-closed verifier for the emulator fixture log. Usage: verify-log.py LOG EXPECTED_API. Exit 0 only if every check holds."""
 import re, sys
-PHASES = ["env", "secure-default", "seam-provision", "seam-restart", "seam-loss", "seam-orphan", "size", "cleanup", "v2-capability", "v2-provision", "v2-restart", "v2-rotate", "v2-pending", "v2-pending-retry", "v2-metadata", "v2-keylen", "v2-cleanup"]
+PHASES = ["env", "secure-default", "seam-provision", "seam-restart", "seam-loss", "seam-orphan", "size", "cleanup", "v2-capability", "v2-provision", "v2-restart", "v2-rotate", "v2-pending", "v2-pending-retry", "v2-metadata", "v2-keylen", "v2-cleanup", "v3-vault", "v3-enroll", "v3-restart", "v3-status", "v3-missing", "v3-pending", "v3-pending-retry", "v3-cleanup"]
 MIN_OKS = {"env": 0, "secure-default": 2, "seam-provision": 4, "seam-restart": 4, "seam-loss": 4, "seam-orphan": 3, "size": 0, "cleanup": 1,
-            "v2-capability": 2, "v2-provision": 5, "v2-restart": 3, "v2-rotate": 8, "v2-pending": 4, "v2-pending-retry": 5, "v2-metadata": 11, "v2-keylen": 7, "v2-cleanup": 3}
+            "v2-capability": 2, "v2-provision": 5, "v2-restart": 3, "v2-rotate": 8, "v2-pending": 4, "v2-pending-retry": 5, "v2-metadata": 11, "v2-keylen": 7, "v2-cleanup": 3, "v3-vault": 10, "v3-enroll": 6, "v3-restart": 5, "v3-status": 5, "v3-missing": 3, "v3-pending": 5, "v3-pending-retry": 2, "v3-cleanup": 3}
 BAD = re.compile(r"FIXTURE api=\d+ FAIL|FATAL|Aborted|INSTRUMENTATION_FAILED|Process crashed|Exception|Traceback|\bsignal \d+|Segmentation|not found|inaccessible", re.I)
 def verify(text, api):
     errs = []
@@ -30,6 +30,7 @@ def verify(text, api):
         if name == "v2-provision":
             for e in ("fxsha1", "fxsha256", "fxsha512"):
                 if not re.search(rf"RESULT v2-level {e}=(secure_hardware|software)\s*$", body, flags=re.M): errs.append(f"v2-provision: missing level for {e}")
+        if name == "v3-vault" and not re.search(r"RESULT v3-vault-level=(secure_hardware|software|unknown)\s*$", body, flags=re.M): errs.append("v3-vault: missing level RESULT")
         if name == "v2-keylen":
             for n in (10, 20, 32, 64, 65, 100, 128):
                 if not re.search(rf"RESULT keylen {n}=\S+\s*$", body, flags=re.M): errs.append(f"v2-keylen: missing RESULT for {n}")

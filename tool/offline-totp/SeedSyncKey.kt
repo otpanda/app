@@ -261,19 +261,35 @@ class SeedSyncKeyCore(
         null
     }
 
-    /** Erase for a purge decided by a STATUS answer about key [expectKeyId]: under the core lock, does nothing unless that exact key is STILL the active key with no
-     * erase pending or owed (a re-enrolled key, an already erased key, or a pending erase make it a no-op that returns false and must not be retried as a purge).
-     * Otherwise runs the same erase sequence with the REAL native epoch read here (never a caller value); an unreadable epoch throws METADATA_UNAVAILABLE with
-     * nothing changed, so the caller retries later. INTERNAL: SeedSyncWire.applyStatus is the only caller. */
-    internal fun eraseIfActive(owner: String, expectKeyId: String, trigger: EraseTrigger): Boolean = synchronized(lock) {
+    /** Result of [eraseIfActive]. ERASED: the asked key was active and the erase ran. SUPERSEDED: the asked key is not the active key (re-enrolled, or already erased
+     * with nothing pending): nothing changed and nothing is owed, so the caller must not retry. PENDING: an erase intent, owed purge or unresolved key delete exists:
+     * retryPending owns it, no new purge is started. UNREADABLE: the durable document cannot be read: nothing changed. */
+    internal enum class StatusErase { ERASED, SUPERSEDED, PENDING, UNREADABLE }
+
+    /** Erase for a purge decided by a STATUS answer about key [expectKeyId]: under the core lock, acts only if that exact key is STILL the active key with no erase
+     * pending or owed. Otherwise returns a typed no-op result. Runs the same erase sequence with the REAL native epoch read here (never a caller value); an unreadable
+     * epoch throws METADATA_UNAVAILABLE with nothing changed, so the caller retries later. INTERNAL: SeedSyncWire.applyStatus is the only caller. */
+    internal fun eraseIfActive(owner: String, expectKeyId: String, trigger: EraseTrigger): StatusErase = synchronized(lock) {
         noReentry()
         checkOwner(owner)
-        if (owner in intents) return false
-        val st = try { load(owner) } catch (_: SyncKeyFailure) { return false }
-        if (st.owed != Owed.NONE || st.active?.keyId != expectKeyId) return false
+        if (owner in intents) return StatusErase.PENDING
+        val st = try { load(owner) } catch (_: SyncKeyFailure) { return StatusErase.UNREADABLE }
+        if (st.owed != Owed.NONE) return StatusErase.PENDING
+        val act = st.active
+        if (act == null) return if (st.deny.isNotEmpty()) StatusErase.PENDING else StatusErase.SUPERSEDED
+        if (act.keyId != expectKeyId) return StatusErase.SUPERSEDED
         val real = nativeEpochOrNull(owner) ?: fail(SyncKeyError.METADATA_UNAVAILABLE)
         eraseLocked(owner, real, trigger)
-        true
+        StatusErase.ERASED
+    }
+
+    /** Install id recorded in the ACTIVE enrollment, or null (not enrolled, erase pending, unreadable). Public data. INTERNAL: the channel uses it to refuse a changed
+     * install id for the same owner. */
+    internal fun installIdFor(owner: String): String? = synchronized(lock) {
+        checkOwner(owner)
+        if (owner in intents) return null
+        val st = try { load(owner) } catch (_: SyncKeyFailure) { return null }
+        if (st.owed != Owed.NONE || st.active == null) null else st.activeInstall
     }
 
     /** The one erase sequence captures the real native epoch to erase all owner records even with a stale caller bound.
@@ -380,6 +396,35 @@ class SeedSyncKeyCore(
             } catch (_: Exception) { unreadable++ }
         }
         RetryResult(keyLeft, owedLeft, unreadable)
+    }
+
+    /** One owner found by [discoverOwners]: [keyId] is the ACTIVE enrollment key or null; [pending] is true while an erase intent, owed purge or unresolved key delete
+     * exists (retryPending owns it, no status request). No alias, install id or generation is exposed. */
+    data class OwnerEntry(val owner: String, val keyId: String?, val pending: Boolean)
+    /** [unreadable] documents could not be used and were left untouched: the listing is complete only when it is 0. */
+    data class OwnerDiscovery(val owners: List<OwnerEntry>, val unreadable: Int) { val complete: Boolean get() = unreadable == 0 }
+
+    /** Durable owner discovery, independent of any session or bearer: every owner that has a seed-sync document (or an in-memory erase intent), read from the same store
+     * as retryPending. An unlistable store throws METADATA_UNAVAILABLE, so a failure is never an empty result. Read-only. */
+    fun discoverOwners(): OwnerDiscovery = synchronized(lock) {
+        noReentry()
+        val keys = try { store.keys() } catch (_: Exception) { fail(SyncKeyError.METADATA_UNAVAILABLE) }
+        val owners = LinkedHashSet<String>(intents.keys)
+        var unreadable = 0
+        for (k in keys) {
+            try {
+                val text = store.read(k) ?: continue
+                owners.add(Base64.getUrlDecoder().decode(text.split('\n')[1].removePrefix("owner ")).toString(Charsets.UTF_8).also { require(ownerKey(it) == k && validCustodyId(it)) })
+            } catch (_: Exception) { unreadable++ }
+        }
+        val out = ArrayList<OwnerEntry>()
+        for (o in owners) {
+            val pendingIntent = o in intents
+            val st = try { load(o) } catch (_: SyncKeyFailure) { if (!pendingIntent) unreadable++; null }
+            if (st == null) { if (pendingIntent) out.add(OwnerEntry(o, null, true)); continue }
+            out.add(OwnerEntry(o, if (pendingIntent || st.owed != Owed.NONE) null else st.active?.keyId, pendingIntent || st.owed != Owed.NONE || st.deny.isNotEmpty()))
+        }
+        OwnerDiscovery(out.sortedBy { it.owner }, unreadable)
     }
 
     /** Explicit recovery for ONE owner whose document is present but unusable (corrupt, wrong owner). Never automatic. Replaces it with an empty document that

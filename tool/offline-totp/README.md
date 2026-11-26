@@ -57,3 +57,10 @@ the state file by code running as the app UID (not prevented). `NativeCustodyCha
 
 ### Inactive wire contract
 `SeedSyncWire.kt` builds enroll, snapshot, revoke and batch proofs from the signing key's stored generation and install id, and the current native custody epoch. The old three-field active enrollment record is rejected, not migrated; this foundation has never been active. An epoch read and signing are not atomic with a concurrent custody transition. A server epoch mismatch must discard the work and obtain a fresh begin, never trigger a purge. Raw signing is test-only and production references fail the release guard. Full native handle ownership, lifecycle, registration and network coordination remain separate work.
+
+## Seed-sync Keystore adapter and channel contract (inactive, unregistered)
+
+`AndroidSyncKeyVault.kt` is the Android Keystore EC P-256 signing vault for the seed-sync key (non-exportable, SHA-256, no user-auth requirement, fresh alias only, DER out).
+`SeedSyncChannel.kt` is the strict, Flutter-free channel contract (`SeedSyncChannelHandler`): native builds every signed message and uses its own clock; seeds never
+cross the channel; replies carry codes only. The method list and rules are in the header of that file. Neither is registered, wired or constructed in production (release
+guard). Not verified: hardware level, lock, uninstall, backup, OS invalidation, a real MethodChannel. The JVM tests use fakes and synthetic keys.

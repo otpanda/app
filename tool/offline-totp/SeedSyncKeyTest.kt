@@ -384,7 +384,7 @@ private fun wireChecks() {
             r.sv.deleteDown = true
             runCatching { r.c.erase("o", r.custody.readOwnerState("o").epoch, EraseTrigger.SIGN_OUT) }
             val docBefore = r.ss.docs.getValue(ownerKey("o"))
-            check(SeedSyncWire.applyStatus(r.c, "o", x.keyId, "key-revoked") == SeedSyncWire.StatusOutcome.NOOP && r.ss.docs.getValue(ownerKey("o")) == docBefore)
+            check(SeedSyncWire.applyStatus(r.c, "o", x.keyId, "key-revoked") == SeedSyncWire.StatusOutcome.PENDING && r.ss.docs.getValue(ownerKey("o")) == docBefore)
         }
         // unknown state: byte-identical state, other owner's seeds untouched
         run {
@@ -588,12 +588,196 @@ private fun handleChecks() {
             val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
             refused("entries") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs + SealedEntrySpec("e4", 1, "SHA-1", 6, 30), maxEntries = 10) }
         }
+        // W14. unregistered channel contract: native clock, strict argument sets, no secrets in replies, whole flow incl. provision into custody, status key targeting,
+        // handle cap/TTL/sweep, error codes carry no data.
+        run {
+            val r = Rig(); var clock = now
+            val ch = SeedSyncChannelHandler(r.c, r.custody, { clock })
+            fun call(m: String, a: Any?) = ch.handle(m, a)
+            fun ok(x: ChannelReply): Any? = (x as? ChannelReply.Ok ?: error("not ok: $x")).value
+            fun err(x: ChannelReply): String = (x as? ChannelReply.Err ?: error("not err: $x")).code
+            check(call("nope", mapOf<String, Any>()) === ChannelReply.NotImplemented)
+            val en = ok(call("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) as Map<*, *>
+            val keyId = en["keyId"] as String; val pubRaw = en["publicKey"] as ByteArray
+            check(keyId.length == 32 && pubRaw.size == 65 && en["generation"] == 1L && en["installId"] == INST)
+            val pubKey = KeyFactory.getInstance("EC").generatePublic(ECPublicKeySpec(ECPoint(BigInteger(1, pubRaw.copyOfRange(1, 33)), BigInteger(1, pubRaw.copyOfRange(33, 65))), jp))
+            // strict arguments: extra, missing, wrong types, Double, no map
+            check(err(call("syncEnroll", mapOf("owner" to "o", "installId" to INST))) == "INVALID_INPUT")
+            check(err(call("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1.0))) == "INVALID_INPUT")
+            check(err(call("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L, "x" to 1L))) == "INVALID_INPUT")
+            check(err(call("syncEnroll", null)) == "INVALID_INPUT")
+            // enroll proof: native digest recheck, only the enrollment this process made
+            val dig = SeedSyncWire.enrollActionDigest("o", INST, pubRaw, 1)
+            val ep = ok(call("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to keyId))) as String
+            check(verifyServerSig(SeedSyncWire.proofMessage(SyncPurpose.ENROLL, mapOf("ownerId" to "o", "keyId" to keyId, "installId" to INST, "generation" to 1L, "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000)), ep, pubKey))
+            check(err(call("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to "0".repeat(64), "expiresAt" to now + 60_000, "keyId" to keyId))) == "WIRE_ACTIONDIGEST")
+            check(err(call("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to "f".repeat(32)))) == "WIRE_KEY")
+            // snapshot/revoke/status proofs: the native clock bounds expiry, wrong generation/epoch refuse
+            val epoch0 = r.custody.readOwnerState("o").epoch
+            val sn = mapOf("owner" to "o", "deviceId" to "device", "generation" to 1L, "epoch" to epoch0, "challenge" to chl, "expiresAt" to now + 60_000, "keyId" to keyId)
+            check((ok(call("syncSignSnapshotProof", sn)) as String).length == 86)
+            check(err(call("syncSignSnapshotProof", sn + ("generation" to 2L))) == "WIRE_GENERATION" && err(call("syncSignSnapshotProof", sn + ("epoch" to epoch0 + 1))) == "WIRE_EPOCH")
+            check(err(call("syncSignSnapshotProof", sn + ("expiresAt" to now))) == "WIRE_EXPIRESAT")
+            check(err(call("syncSignSnapshotProof", sn + ("ownerId" to "evil"))) == "INVALID_INPUT")
+            check((ok(call("syncSignRevokeProof", mapOf("owner" to "o", "deviceId" to "device", "generation" to 1L, "challenge" to chl, "expiresAt" to now + 60_000, "keyId" to keyId))) as String).length == 86)
+            check(ok(call("syncStatusKeyId", mapOf("owner" to "o"))) == keyId)
+            check((ok(call("syncStatusSign", mapOf("owner" to "o", "keyId" to keyId, "challenge" to chl, "expiresAt" to now + 60_000))) as String).length == 86)
+            check(err(call("syncStatusSign", mapOf("owner" to "o", "keyId" to "f".repeat(32), "challenge" to chl, "expiresAt" to now + 60_000))) == "WIRE_KEY")
+            // full batch: begin, bind, sign, open two entries into custody, skip the third; seeds exist in custody, replies hold no secrets
+            val ents = specs.map { mapOf("entryId" to it.entryId, "seedVersion" to it.seedVersion, "algorithm" to it.algorithm, "digits" to it.digits.toLong(), "periodSeconds" to it.period.toLong()) }
+            val bb = mapOf("owner" to "o", "deviceId" to "device", "generation" to 1L, "epoch" to epoch0, "entries" to ents)
+            val b1 = ok(call("syncBatchBegin", bb)) as Map<*, *>; val hid = b1["handleId"] as String
+            check(hid.length == 32 && (b1["ephemeralPublic"] as String).isNotEmpty())
+            ok(call("syncBatchBind", mapOf("handleId" to hid, "challenge" to chl, "expiresAt" to now + 60_000)))
+            check((ok(call("syncBatchSign", mapOf("handleId" to hid))) as String).length == 86)
+            val srv = Srv()
+            fun open(i: Int): ChannelReply { val (n, c) = seal(srv, b1["ephemeralPublic"] as String, ctxOf(specs[i], epoch0), seedOf(i))
+                return call("syncBatchOpen", mapOf("handleId" to hid, "entryId" to specs[i].entryId, "serverPublicKey" to srv.pub, "nonce" to n, "ciphertext" to c)) }
+            val o1 = ok(open(0)) as Map<*, *>; check(o1["pending"] == listOf("e2", "e3") && o1.toString().none { false })
+            check(r.custody.readCatalog("o").entries.map { it.entry } == listOf("e1"))
+            ok(open(1)); check((ok(call("syncBatchSkip", mapOf("handleId" to hid, "entryId" to "e3"))) as Map<*, *>)["pending"] == emptyList<String>())
+            check(r.custody.readCatalog("o").entries.map { it.entry }.toSet() == setOf("e1", "e2"))
+            check(err(call("syncBatchSign", mapOf("handleId" to hid))) == "WIRE_STATE") // finished handle is gone
+            ok(call("syncBatchFinish", mapOf("handleId" to hid))); ok(call("syncBatchFinish", mapOf("handleId" to "0".repeat(32)))) // idempotent
+            // cap: MAX_HANDLES live, then BUSY; finish frees; TTL sweeps
+            val ids = (1..SeedSyncChannelHandler.MAX_HANDLES).map { (ok(call("syncBatchBegin", bb)) as Map<*, *>)["handleId"] as String }
+            check(err(call("syncBatchBegin", bb)) == "BUSY")
+            ok(call("syncBatchFinish", mapOf("handleId" to ids[0]))); ok(call("syncBatchBegin", bb))
+            clock += SeedSyncChannelHandler.HANDLE_TTL_MS
+            check(err(call("syncBatchBind", mapOf("handleId" to ids[1], "challenge" to chl, "expiresAt" to clock + 60_000))) == "WIRE_STATE")
+            ok(call("syncBatchBegin", bb)) // table was swept by the TTL
+            // a failed open discards the whole handle and the error is a bare code
+            clock = now
+            val b2 = ok(call("syncBatchBegin", bb)) as Map<*, *>; val h2 = b2["handleId"] as String
+            ok(call("syncBatchBind", mapOf("handleId" to h2, "challenge" to chl, "expiresAt" to now + 60_000))); ok(call("syncBatchSign", mapOf("handleId" to h2)))
+            val bad = call("syncBatchOpen", mapOf("handleId" to h2, "entryId" to "e1", "serverPublicKey" to srv.pub, "nonce" to SeedSyncWire.b64(ByteArray(12)), "ciphertext" to SeedSyncWire.b64(ByteArray(40))))
+            check(err(bad).matches(Regex("WIRE_[A-Z_]+")) && err(call("syncBatchSkip", mapOf("handleId" to h2, "entryId" to "e2"))) == "WIRE_STATE")
+            // erase and status targeting through the channel; remote triggers are not accepted by syncErase
+            check(err(call("syncErase", mapOf("owner" to "o", "epoch" to epoch0, "trigger" to "key-revoked"))) == "INVALID_INPUT")
+            val y = ok(call("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) as Map<*, *>
+            check((ok(call("syncStatusApply", mapOf("owner" to "o", "keyId" to keyId, "state" to "key-revoked"))) as Map<*, *>)["outcome"] == "noop") // X asked, Y active
+            check(ok(call("syncStatusKeyId", mapOf("owner" to "o"))) == y["keyId"])
+            check(err(call("syncStatusApply", mapOf("owner" to "o", "keyId" to y["keyId"], "state" to "revoked"))) == "WIRE_STATUS")
+            check((ok(call("syncStatusApply", mapOf("owner" to "o", "keyId" to y["keyId"], "state" to "generation-changed"))) as Map<*, *>)["outcome"] == "purged")
+            check(r.custody.readCatalog("o").entries.isEmpty() && ok(call("syncStatusKeyId", mapOf("owner" to "o"))) == null)
+            val rp = ok(call("syncRetryPending", null)) as Map<*, *>; check(rp["purgesOwed"] == 0L)
+            val e3 = ok(call("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) as Map<*, *>
+            val er = ok(call("syncErase", mapOf("owner" to "o", "epoch" to r.custody.readOwnerState("o").epoch, "trigger" to "sign_out"))) as Map<*, *>
+            check(er["keyDeleted"] == true && ok(call("syncStatusKeyId", mapOf("owner" to "o"))) == null && e3["keyId"] != null)
+        }
+        // W15. review v9: seed zeroing through the channel, half enrollment repair, owner discovery, handle discard on erase/purge/enroll, finish only discards, concurrent erase
+        run {
+            fun ok(x: ChannelReply): Any? = (x as? ChannelReply.Ok ?: error("not ok: $x")).value
+            fun err(x: ChannelReply): String = (x as? ChannelReply.Err ?: error("not err: $x")).code
+            fun ents(): List<Map<String, Any?>> = specs.map { mapOf("entryId" to it.entryId, "seedVersion" to it.seedVersion, "algorithm" to it.algorithm, "digits" to it.digits.toLong(), "periodSeconds" to it.period.toLong()) }
+            fun begin(h: SeedSyncChannelHandler, ep: Long, owner: String = "o"): Pair<String, String> {
+                val b = ok(h.handle("syncBatchBegin", mapOf("owner" to owner, "deviceId" to "device", "generation" to 1L, "epoch" to ep, "entries" to ents()))) as Map<*, *>
+                val id = b["handleId"] as String
+                ok(h.handle("syncBatchBind", mapOf("handleId" to id, "challenge" to chl, "expiresAt" to now + 60_000))); ok(h.handle("syncBatchSign", mapOf("handleId" to id)))
+                return id to (b["ephemeralPublic"] as String)
+            }
+            // seed zeroing: the same array reaches the provisioner (no copy), and is zero afterwards on success, on RuntimeException and on Error
+            for (kind in listOf("ok", "runtime", "death")) {
+                val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch; var ref: ByteArray? = null; var seen: ByteArray? = null
+                val h = SeedSyncChannelHandler(r.c, r.custody, { now }, provisioner = { _, _, seed, _ -> ref = seed; seen = seed.copyOf(); if (kind == "runtime") throw IllegalStateException("x") else if (kind == "death") throw ProcessDeath() })
+                val (id, eph) = begin(h, ep); val srv = Srv(); val (n, c) = seal(srv, eph, ctxOf(specs[0], ep), seedOf(0))
+                val call = { h.handle("syncBatchOpen", mapOf("handleId" to id, "entryId" to "e1", "serverPublicKey" to srv.pub, "nonce" to n, "ciphertext" to c)) }
+                when (kind) { "ok" -> ok(call()); "runtime" -> check(err(call()) == "UNAVAILABLE"); else -> check(died { call() }) }
+                check(seen!!.contentEquals(seedOf(0)) && ref!!.all { it == 0.toByte() }) { "seed copy not zeroed $kind" }
+                if (kind != "ok") check(err(h.handle("syncBatchSkip", mapOf("handleId" to id, "entryId" to "e2"))) == "WIRE_STATE") // whole handle discarded
+            }
+            // half enrollment: restart loses the public point; not provable; proof refused; re-enroll replaces deny-first, only the new alias remains, seeds untouched
+            run {
+                val r = Rig(); val h1 = SeedSyncChannelHandler(r.c, r.custody, { now })
+                val e1 = ok(h1.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) as Map<*, *>; r.seed("o")
+                check((ok(h1.handle("syncEnrollmentState", mapOf("owner" to "o"))) as Map<*, *>)["provable"] == true)
+                val c2 = r.restart(); val h2 = SeedSyncChannelHandler(c2, r.custody, { now })
+                val st = ok(h2.handle("syncEnrollmentState", mapOf("owner" to "o"))) as Map<*, *>
+                check(st["keyId"] == e1["keyId"] && st["provable"] == false)
+                val dig = SeedSyncWire.enrollActionDigest("o", INST, e1["publicKey"] as ByteArray, 1)
+                check(err(h2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to e1["keyId"]))) == "WIRE_KEY")
+                check(err(h2.handle("syncEnroll", mapOf("owner" to "o", "installId" to "X".repeat(22), "generation" to 1L))) == "INVALID_INPUT") // install id is pinned
+                check(r.sv.keys.size == 1)
+                val seedsBefore = r.cv.keys.size
+                val e2 = ok(h2.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) as Map<*, *>
+                check(e2["keyId"] != e1["keyId"] && r.sv.keys.size == 1 && c2.pendingKeyDeletes("o") == 0 && r.cv.keys.size == seedsBefore) { "replace left old key or touched seeds" }
+                check((ok(h2.handle("syncEnrollmentState", mapOf("owner" to "o"))) as Map<*, *>)["provable"] == true)
+                val dig2 = SeedSyncWire.enrollActionDigest("o", INST, e2["publicKey"] as ByteArray, 1)
+                check((ok(h2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig2, "expiresAt" to now + 60_000, "keyId" to e2["keyId"]))) as String).length == 86)
+            }
+            // owner discovery without any session: empty and complete, active, pending, unreadable (incomplete), unlistable (error, never empty)
+            run {
+                val r = Rig(); val h = SeedSyncChannelHandler(r.c, r.custody, { now })
+                val d0 = ok(h.handle("syncDiscoverOwners", null)) as Map<*, *>; check((d0["owners"] as List<*>).isEmpty() && d0["complete"] == true && d0["unreadable"] == 0L)
+                val ea = ok(h.handle("syncEnroll", mapOf("owner" to "a", "installId" to INST, "generation" to 1L))) as Map<*, *>
+                ok(h.handle("syncEnroll", mapOf("owner" to "b", "installId" to INST, "generation" to 1L)))
+                r.sv.deleteDown = true; ok(h.handle("syncErase", mapOf("owner" to "b", "epoch" to 0L, "trigger" to "sign_out"))); r.sv.deleteDown = false
+                val d1 = ok(h.handle("syncDiscoverOwners", mapOf<String, Any>())) as Map<*, *>
+                val list = (d1["owners"] as List<*>).map { it as Map<*, *> }
+                check(list.map { it["owner"] } == listOf("a", "b") && list[0]["keyId"] == ea["keyId"] && list[0]["pending"] == false && list[1]["keyId"] == null && list[1]["pending"] == true && d1["complete"] == true)
+                check(list.all { it.keys == setOf("owner", "keyId", "pending") }) // nothing else is disclosed
+                check(ok(h.handle("syncRetryPending", null)).let { (it as Map<*, *>)["keyDeletesPending"] } == 0L)
+                check(((ok(h.handle("syncDiscoverOwners", null)) as Map<*, *>)["owners"] as List<*>).map { (it as Map<*, *>)["pending"] } == listOf(false, false))
+                r.ss.docs[ownerKey("zz")] = "garbage"
+                val d2 = ok(h.handle("syncDiscoverOwners", null)) as Map<*, *>; check(d2["complete"] == false && d2["unreadable"] == 1L && (d2["owners"] as List<*>).size == 2)
+                // corrupt body for a known owner: also counted, never silently dropped, nothing changed
+                r.ss.docs.remove(ownerKey("zz"))
+                val before = r.ss.docs.getValue(ownerKey("a")); r.ss.docs[ownerKey("a")] = before.replace("end\n", "xend\n")
+                val d3 = ok(h.handle("syncDiscoverOwners", null)) as Map<*, *>; check(d3["complete"] == false && (d3["unreadable"] as Long) >= 1L)
+                check((ok(h.handle("syncStatusApply", mapOf("owner" to "a", "keyId" to ea["keyId"], "state" to "key-revoked"))) as Map<*, *>)["outcome"] == "unreadable")
+                r.ss.docs[ownerKey("a")] = before
+                r.ss.down = true; check(err(h.handle("syncDiscoverOwners", null)) == "METADATA_UNAVAILABLE"); r.ss.down = false
+            }
+            // erase, status purge and re-enroll discard that owner's handles at once; another owner's handle is untouched; noop/pending leave handles alone
+            for (how in listOf("erase", "purge", "enroll")) {
+                val r = Rig(); val h = SeedSyncChannelHandler(r.c, r.custody, { now })
+                val k = (ok(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) as Map<*, *>)["keyId"] as String
+                r.c.enroll("p", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+                val (ho, _) = begin(h, ep); val (hp, _) = begin(h, r.custody.readOwnerState("p").epoch, "p")
+                check((ok(h.handle("syncStatusApply", mapOf("owner" to "o", "keyId" to "f".repeat(32), "state" to "key-revoked"))) as Map<*, *>)["outcome"] == "noop")
+                val (ho2, _) = begin(h, ep)
+                when (how) {
+                    "erase" -> ok(h.handle("syncErase", mapOf("owner" to "o", "epoch" to ep, "trigger" to "sign_out")))
+                    "purge" -> check((ok(h.handle("syncStatusApply", mapOf("owner" to "o", "keyId" to k, "state" to "key-revoked"))) as Map<*, *>)["outcome"] == "purged")
+                    else -> ok(h.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L)))
+                }
+                check(err(h.handle("syncBatchSkip", mapOf("handleId" to ho2, "entryId" to "e1"))) == "WIRE_STATE") { "owner handle survived $how (skip)" }
+                check(err(h.handle("syncBatchBind", mapOf("handleId" to ho2, "challenge" to chl, "expiresAt" to now + 60_000))) == "WIRE_STATE") { "owner handle survived $how" }
+                check(ok(h.handle("syncBatchFinish", mapOf("handleId" to hp))) == null)
+            }
+            // finish only discards: nothing is signed, opened or provisioned
+            run {
+                val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch; var provisioned = 0
+                val h = SeedSyncChannelHandler(r.c, r.custody, { now }, provisioner = { _, _, _, _ -> provisioned++ })
+                val b = ok(h.handle("syncBatchBegin", mapOf("owner" to "o", "deviceId" to "device", "generation" to 1L, "epoch" to ep, "entries" to ents()))) as Map<*, *>
+                ok(h.handle("syncBatchFinish", mapOf("handleId" to b["handleId"])))
+                check(err(h.handle("syncBatchSign", mapOf("handleId" to b["handleId"]))) == "WIRE_STATE" && provisioned == 0)
+                val (id, eph) = begin(h, ep); ok(h.handle("syncBatchFinish", mapOf("handleId" to id)))
+                val srv = Srv(); val (n, c) = seal(srv, eph, ctxOf(specs[0], ep), seedOf(0))
+                check(err(h.handle("syncBatchOpen", mapOf("handleId" to id, "entryId" to "e1", "serverPublicKey" to srv.pub, "nonce" to n, "ciphertext" to c))) == "WIRE_STATE" && provisioned == 0)
+            }
+            // concurrent erase through the handler while an open is provisioning: the erase waits, then purges what was provisioned
+            run {
+                val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+                var t: Thread? = null; var aliveDuring = false; var hh: SeedSyncChannelHandler? = null; var eraseReply: ChannelReply? = null
+                val h = SeedSyncChannelHandler(r.c, r.custody, { now }, provisioner = { owner, spec, seed, epoch ->
+                    r.custody.provision(owner, spec.entryId, spec.seedVersion, wireAlgorithm(spec.algorithm), spec.digits, spec.period, seed, epoch)
+                    t = Thread { eraseReply = hh!!.handle("syncErase", mapOf("owner" to "o", "epoch" to ep, "trigger" to "sign_out")) }.also { it.start() }
+                    Thread.sleep(300); aliveDuring = t!!.isAlive; check(r.cv.keys.size == 1)
+                })
+                hh = h; val (id, eph) = begin(h, ep); val srv = Srv(); val (n, c) = seal(srv, eph, ctxOf(specs[0], ep), seedOf(0))
+                ok(h.handle("syncBatchOpen", mapOf("handleId" to id, "entryId" to "e1", "serverPublicKey" to srv.pub, "nonce" to n, "ciphertext" to c)))
+                t!!.join(5000)
+                check(eraseReply is ChannelReply.Ok && aliveDuring && !t!!.isAlive && r.cv.keys.size == 0 && !r.c.purgeOwed("o"))
+            }
+        }
     }
 }
 
 private fun owners(r: Rig) = r.ss.docs.keys.toList()
 
 fun main() {
+    System.getenv("SEED_STATUS_FIXTURE_OUT")?.let { exportStatusFixture(it) }
     // 1. enroll, sign with the enrolled key only; the durable document holds ids and aliases, no key material.
     run {
         val r = Rig(); check(!r.c.enrolled("o"))
@@ -872,4 +1056,31 @@ fun main() {
     wireChecks()
     handleChecks()
     println("PASS seed-sync enrollment key, deny-first erase state machine and wire interop vs vector a0ccb879 (JVM fakes, synthetic keys, simulated process death)")
+}
+
+private fun j(v: Any?): String = when(v) {
+ null -> "null"
+ is String -> "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""
+ is Map<*,*> -> v.entries.joinToString(",", "{", "}") { j(it.key.toString()) + ":" + j(it.value) }
+ is List<*> -> v.joinToString(",", "[", "]") { j(it) }
+ else -> v.toString()
+}
+private fun exportStatusFixture(path: String) {
+ val now=1800000000000L
+ fun ok(r:ChannelReply):Any? = (r as ChannelReply.Ok).value
+ val outcomes=linkedMapOf<String,Any?>()
+ for(kind in listOf("kept","purged","noop","pending","unreadable")) {
+  val r=Rig();val h=SeedSyncChannelHandler(r.c,r.custody,{now})
+  val en=ok(h.handle("syncEnroll",mapOf("owner" to "owner","installId" to INST,"generation" to 1L))) as Map<*,*>
+  val key=en["keyId"] as String
+  if(kind=="pending") { r.sv.deleteDown=true; h.handle("syncErase",mapOf("owner" to "owner","epoch" to 0L,"trigger" to "sign_out")) }
+  if(kind=="unreadable") r.ss.docs[ownerKey("owner")]="garbage"
+  outcomes[kind]=ok(h.handle("syncStatusApply",mapOf("owner" to "owner","keyId" to if(kind=="noop") "f".repeat(32) else key,"state" to if(kind=="kept") "active" else "key-revoked")))
+ }
+ val r=Rig();val h=SeedSyncChannelHandler(r.c,r.custody,{now})
+ h.handle("syncEnroll",mapOf("owner" to "healthy","installId" to INST,"generation" to 1L))
+ h.handle("syncEnroll",mapOf("owner" to "pending","installId" to INST,"generation" to 1L))
+ r.sv.deleteDown=true;h.handle("syncErase",mapOf("owner" to "pending","epoch" to 0L,"trigger" to "sign_out"));r.ss.docs[ownerKey("bad")]="garbage"
+ java.io.File(path).writeText(j(mapOf("outcomes" to outcomes,"discovery" to ok(h.handle("syncDiscoverOwners",emptyMap<String,Any>())))))
+
 }

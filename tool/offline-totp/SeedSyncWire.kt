@@ -166,14 +166,19 @@ object SeedSyncWire {
         else -> bad("status")
     }
 
-    enum class StatusOutcome { KEPT, PURGED, NOOP }
+    enum class StatusOutcome { KEPT, PURGED, NOOP, PENDING, UNREADABLE }
     /** The only way to act on a status answer. [askedKeyId] is the key id the status-begin request used. An unknown [state] throws WireException("status") before
      * anything is read or changed (caller: change nothing, retry later). "active" keeps everything. A purge state erases ONLY if [askedKeyId] is still the active
-     * key (core.eraseIfActive): a re-enrolled key, an already erased key or a pending erase give NOOP. A custody failure inside the erase is rethrown after the
+     * key (core.eraseIfActive): a re-enrolled key, an already erased key gives NOOP (terminal, never retried); an erase intent, owed purge or unresolved key delete gives PENDING (retryPending owns it, no new request); an unreadable document gives UNREADABLE (nothing changed). A custody failure inside the erase is rethrown after the
      * deny-first steps as for any erase, and retryPending continues it. */
     fun applyStatus(core: SeedSyncKeyCore, owner: String, askedKeyId: String, state: String?): StatusOutcome {
         val trigger = when (statusAction(state)) { StatusAction.KEEP -> return StatusOutcome.KEPT; StatusAction.PURGE -> statusEraseTrigger(state) }
-        return if (core.eraseIfActive(owner, askedKeyId, trigger)) StatusOutcome.PURGED else StatusOutcome.NOOP
+        return when (core.eraseIfActive(owner, askedKeyId, trigger)) {
+            SeedSyncKeyCore.StatusErase.ERASED -> StatusOutcome.PURGED
+            SeedSyncKeyCore.StatusErase.SUPERSEDED -> StatusOutcome.NOOP
+            SeedSyncKeyCore.StatusErase.PENDING -> StatusOutcome.PENDING
+            SeedSyncKeyCore.StatusErase.UNREADABLE -> StatusOutcome.UNREADABLE
+        }
     }
 
     /** Batch proof with ephemeralDigest and entriesDigest computed here from the native handle and the exact requested entry set. */
