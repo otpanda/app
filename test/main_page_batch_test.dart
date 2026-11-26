@@ -552,32 +552,6 @@ void main() {
   testWidgets('batch 503 keeps previous entry tap single-code flow usable', (
     tester,
   ) async {
-    for (final family in ['Figtree', 'BricolageGrotesque']) {
-      final loader = FontLoader(family);
-      for (final weight
-          in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
-        final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
-        loader.addFont(
-          Future.value(
-            ByteData.sublistView(
-              File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
-            ),
-          ),
-        );
-      }
-      await loader.load();
-    }
-    final icons = FontLoader('MaterialIcons')
-      ..addFont(
-        Future.value(
-          ByteData.sublistView(
-            File(
-              '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-            ).readAsBytesSync(),
-          ),
-        ),
-      );
-    await icons.load();
     final bridge = FallbackBridge({
       '/v1/manage/session': SessionResponse(
         200,
@@ -637,6 +611,7 @@ void main() {
     expect(bridge.singles, 1);
     expect(find.text('123456'), findsWidgets);
     await tester.pumpWidget(const SizedBox());
+    await tester.pump();
     controller.dispose();
   });
   testWidgets(
