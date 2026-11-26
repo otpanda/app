@@ -19,7 +19,9 @@ Scenarios (adb drives user actions, written into the same log as marks):
 - unlock_idle: prompt up 12 s, nothing pressed. Pending outcome expected. Any onStop before a mark is a PROMPT-CAUSED self-stop (fact; fails only with REQUIRE_NO_SELF_STOP=1).
 - unlock_back: BACK -> USER_CANCELLED once. unlock_home: HOME -> onStop after the mark, ABORTED once.
 - unlock_select: tap the synthetic entry (uiautomator) -> provider selected, fake finish ok with matching challenge, UNLOCK_GRANTED once, consumeUnlock true then false.
-- disable_select: the same with the disable intent -> DISABLED once, flag file gone.
+- disable_select: the same with the disable intent -> DISABLED once. After the outcome the flag file is read (must be absent) and the real AppLockHost 'enabled' handler is read (must be false). In unlock_select both must still be true. The confirm step is one tap at most, only on an exact clickable Continue/Sign in node, logged as TAP_CONFIRM (the dump ui-*-after1.xml shows the node).
+- FakeLockApi matches the server's strictness (key sets, types, regexes, options shape from the api repo); a mismatch is a 400 and fails the run.
+- With REQUIRE_NO_SELF_STOP=1 any onStop before the first user action (including before TAP_ENTRY) fails the run; otherwise it is printed as self_stop_before_any_user_action.
 Every scenario first requires: the credential selector window focused (credentialmanager, or gms credential activity; keyguard/ANR/launcher/app do not count), the synthetic entry visible in the uiautomator dump (an error or other-provider sheet does not count), a screenshot, provider_begin_get, and no outcome before the idle check.
 
 Scope of a pass: real MainActivity hooks + real host + real Credential Manager with THIS fixture provider on the emulator image. NOT Google Password Manager, Samsung, biometrics, server signature verification or hardware. Locally verified: compile of the whole set against real androidx.credentials 1.3.0, the Flutter embedding jar and android.jar 35; verifier/tap/release-check self-tests; source guard. Not verified: any device behavior, the Gradle build, the settings write, the selector tap path.

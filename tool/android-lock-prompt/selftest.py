@@ -10,8 +10,9 @@ def ev(e, s, **k): return f'I LOCKFX : ev={e} t=0 scenario={s} pid=1 ' + ' '.joi
 def pe(e, **k): return f'I LOCKFX : ev={e} ' + ' '.join(f'{a}={b}' for a, b in k.items())
 def mk(s, n, **k): return f'I LOCKFX : ev=mark scenario={s} name={n} ' + ' '.join(f'{a}={b}' for a, b in k.items())
 OUT = {'unlock_back': 'USER_CANCELLED', 'unlock_home': 'ABORTED', 'unlock_select': 'UNLOCK_GRANTED', 'disable_select': 'DISABLED'}
-def scen(s, focus=CM, entry='yes', outcome=True, home_mark=True, early_outcome=False, extra_stop=False, begin_ok='1', host='realHost=1', flag='true', selected=True, finish_ok='1', consume=('true', 'false'), flag_after='false', shot=True, provider_begin=True):
+def scen(s, ready_enabled='true', after_enabled=None, focus=CM, entry='yes', outcome=True, home_mark=True, early_outcome=False, extra_stop=False, begin_ok='1', host='realHost=1', flag='true', selected=True, finish_ok='1', consume=('true', 'false'), flag_after=None, shot=True, provider_begin=True):
     L = [f'== scenario {s}', mk(s, 'BEGIN'), ev('onCreate', s), f'I LOCKFX : ev=host_ready t=0 scenario={s} pid=1 api=fake loopback=1 {host} flag={flag}', ev('attempt_start', s)]
+    L.append(ev('app_lock_enabled', s, phase='ready', value=ready_enabled))
     L.append(ev('fake_begin', s, ok=begin_ok, intent='local-lock-disable' if s.startswith('disable') else 'local-unlock-once'))
     if provider_begin: L.append(pe('provider_begin_get', options=1))
     if early_outcome: L.append(ev('outcome', s, value='PASSKEY_UNAVAILABLE'))
@@ -28,7 +29,9 @@ def scen(s, focus=CM, entry='yes', outcome=True, home_mark=True, early_outcome=F
         L.append(ev('fake_finish', s, ok=finish_ok, challenge_match=finish_ok))
     if outcome and s in OUT: L.append(ev('outcome', s, value=OUT[s]))
     if s == 'unlock_select' and consume: L.append(ev('consume_unlock', s, first=consume[0], second=consume[1]))
-    if s == 'disable_select': L.append(ev('flag_after', s, present=flag_after))
+    if s.endswith('select') and outcome:
+        want = 'true' if s == 'unlock_select' else 'false'
+        L.append(ev('flag_after', s, present=flag_after or want)); L.append(ev('app_lock_enabled', s, phase='after', value=after_enabled or want))
     return L
 def build(head=('API=34', 'ENABLE=OK'), tail=(), **over):
     L = list(head)
@@ -75,7 +78,16 @@ v('select without UNLOCK_GRANTED fails', build(unlock_select={'outcome': False})
 v('consumeUnlock twice true fails', build(unlock_select={'consume': ('true', 'true')}), 1, 'consumeUnlock')
 v('consumeUnlock missing fails', build(unlock_select={'consume': None}), 1, 'consumeUnlock')
 v('disable without DISABLED fails', build(disable_select={'outcome': False}), 1, 'DISABLED')
-v('disable with flag still present fails', build(disable_select={'flag_after': 'true'}), 1, 'flag still present')
+v('disable with flag still present fails', build(disable_select={'flag_after': 'true'}), 1, 'lock flag present must be false')
+v('disable with AppLockHost still enabled fails', build(disable_select={'after_enabled': 'true'}), 1, 'AppLockHost enabled must be false')
+v('unlock with flag gone fails', build(unlock_select={'flag_after': 'false'}), 1, 'lock flag present must be true')
+v('unlock with AppLockHost disabled fails', build(unlock_select={'after_enabled': 'false'}), 1, 'AppLockHost enabled must be true')
+v('AppLockHost not enabled at ready fails', build(unlock_idle={'ready_enabled': 'false'}), 1, 'at host_ready')
+bb = build(); i = bb.index(mk('unlock_select', 'TAP_ENTRY')); bb[i + 1:i + 1] = [mk('unlock_select', 'TAP_CONFIRM', xy='1,2'), mk('unlock_select', 'TAP_CONFIRM', xy='1,2')]
+v('two confirm taps fail', bb, 1, 'more than one confirm')
+bb = build(); bb.insert(bb.index(mk('unlock_select', 'TAP_ENTRY')), ev('onStop', 'unlock_select'))
+v('self-stop before TAP_ENTRY is a fact', bb, 0, 'self_stop_before_any_user_action=YES')
+v('self-stop before TAP_ENTRY fails when required', bb, 1, 'REQUIRE_NO_SELF_STOP', env={'REQUIRE_NO_SELF_STOP': '1'})
 bb = build(); i = bb.index(ev('outcome', 'unlock_back', value='USER_CANCELLED')); bb.insert(i, ev('outcome', 'unlock_back', value='ABORTED'))
 v('two outcomes fail', bb, 1)
 # tap-entry
@@ -84,6 +96,9 @@ open(x, 'w').write('<hierarchy><node text="Other" bounds="[0,0][10,10]"/><node t
 r = subprocess.run([PY, f'{H}/tap-entry.py', x, 'Synthetic fixture passkey', 'synthetic-fixture-user'], capture_output=True, text=True)
 expect('tap-entry finds the center', (r.returncode, r.stdout.strip()), (0, '200 230'))
 r = subprocess.run([PY, f'{H}/tap-entry.py', x, 'No such text'], capture_output=True, text=True); expect('tap-entry absent text exits 1', r.returncode, 1)
+open(x, 'w').write('<hierarchy><node text="Continue" clickable="false" bounds="[0,0][10,10]"/><node text="Continue anyway later" clickable="true" bounds="[0,20][10,30]"/><node text="Sign in" clickable="true" bounds="[100,100][200,140]"/></hierarchy>')
+r = subprocess.run([PY, f'{H}/tap-entry.py', '--exact-clickable', x, 'Continue'], capture_output=True, text=True); expect('exact-clickable ignores non-clickable and partial text', r.returncode, 1)
+r = subprocess.run([PY, f'{H}/tap-entry.py', '--exact-clickable', x, 'Continue', 'Sign in'], capture_output=True, text=True); expect('exact-clickable finds Sign in', (r.returncode, r.stdout.strip()), (0, '150 120'))
 open(x, 'w').write('<broken'); r = subprocess.run([PY, f'{H}/tap-entry.py', x, 'a'], capture_output=True, text=True); expect('tap-entry bad xml exits 1', r.returncode, 1)
 # release artifact check
 def apk(name, entries):

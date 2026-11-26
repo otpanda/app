@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
+import app.otpanda.AppLockHost
 import app.otpanda.MainActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.BinaryMessenger
@@ -30,6 +31,7 @@ class LockPromptHostActivity : MainActivity() {
     private var scenario = "none"
     private var action = "unlock"
     private var loop: Loopback? = null
+    private var appLockLoop: Loopback? = null
     private var started = false
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -63,11 +65,14 @@ class LockPromptHostActivity : MainActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine) // real registrations (production default LockApi)
         val deviceId = "fixture-device-not-real"
+        val lockLoop = Loopback(); appLockLoop = lockLoop
+        AppLockHost.register(this, lockLoop) // the REAL AppLockHost handler ("enabled" is read through it), before the flag exists
         getSharedPreferences("otpanda_native", Context.MODE_PRIVATE).edit().putString("device_id", deviceId).commit()
         File(noBackupFilesDir, "local-app-lock-v1").let { if (!it.exists()) it.createNewFile() }
         val l = Loopback(); loop = l
         LocalLockRecoveryHost.register(this, l, FakeLockApi(deviceId) { ev, x -> log(ev, x) })
         log("host_ready", "api=fake loopback=1 realHost=1 flag=${File(noBackupFilesDir, "local-app-lock-v1").exists()}")
+        appLockLoop?.invoke("app.otpanda/app-lock", "enabled", null) { v, _ -> log("app_lock_enabled", "phase=ready value=$v") }
     }
 
     override fun onResume() {
@@ -86,7 +91,9 @@ class LockPromptHostActivity : MainActivity() {
                     l.invoke("app.otpanda/lock-recovery", "consumeUnlock", null) { b, _ -> log("consume_unlock", "first=$a second=$b") }
                 }
             }
-            if (r == "DISABLED") log("flag_after", "present=${File(noBackupFilesDir, "local-app-lock-v1").exists()}")
+            // Actual reads after the outcome: the flag file, and the real AppLockHost's own answer.
+            log("flag_after", "present=${File(noBackupFilesDir, "local-app-lock-v1").exists()}")
+            appLockLoop?.invoke("app.otpanda/app-lock", "enabled", null) { v, _ -> log("app_lock_enabled", "phase=after value=$v") }
         }
     }
 
@@ -96,31 +103,49 @@ class LockPromptHostActivity : MainActivity() {
     override fun onDestroy() { log("onDestroy", "finishing=$isFinishing"); super.onDestroy() }
 }
 
-/** Fake begin/finish with the REAL wire shapes LocalLockRecovery validates. Validates the finish body structurally and checks the challenge round-trip. No crypto verification (synthetic key). */
+/**
+ * Fake begin/finish matching the REAL server's strictness (api src/local-lock-recovery-http.js, src/passkey-service.js, src/passkey-verifier.js): begin body keys exactly
+ * {intent, lockGeneration}; finish body keys exactly {intent, lockGeneration, response, token}; lockGeneration 32..128 base64url; token otpda_+55; begin response keys exactly
+ * {token, options, expiresAt}; options = simplewebauthn authentication options (rpId, challenge, allowCredentials[{id, transports}], timeout 120000, userVerification required);
+ * challenge = base64url SHA-256 (43 chars). The finish response object and its key sets and types are checked. No signature verification (synthetic key).
+ */
 class FakeLockApi(private val deviceId: String, private val log: (String, String) -> Unit) : LockApi {
     companion object { const val BEARER = "fixture-bearer-not-a-real-token" }
     private var intent: String? = null; private var gen: String? = null; private var token: String? = null; private var challenge: String? = null
     private fun b64u(b: ByteArray) = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(b)
+    private fun keys(o: JSONObject) = o.keys().asSequence().toSet()
+    private fun bad(ev: String, why: String): ApiResult { log(ev, "ok=0 reason=$why"); return ApiResult(400, "{\"error\":\"invalid_request\"}".toByteArray()) }
     override fun post(path: String, bearer: String, body: ByteArray): ApiResult {
-        if (bearer != BEARER) { log("fake_reject", "reason=bearer"); return ApiResult(401, "{}".toByteArray()) }
-        val j = try { JSONObject(String(body, Charsets.UTF_8)) } catch (e: Exception) { return ApiResult(400, "{}".toByteArray()) }
-        if (path.endsWith("/begin")) {
-            intent = j.optString("intent"); gen = j.optString("lockGeneration")
-            if (intent !in setOf("local-unlock-once", "local-lock-disable") || !Regex("^[A-Za-z0-9_-]{43}$").matches(gen!!)) { log("fake_begin", "ok=0"); return ApiResult(400, "{}".toByteArray()) }
+        if (bearer != BEARER) { log("fake_reject", "reason=bearer"); return ApiResult(401, "{\"error\":\"unauthorized\"}".toByteArray()) }
+        val j = try { JSONObject(String(body, Charsets.UTF_8)) } catch (e: Exception) { return bad("fake_body", "json") }
+        val begin = path.endsWith("/begin"); val ev = if (begin) "fake_begin" else "fake_finish"
+        if (keys(j) != (if (begin) setOf("intent", "lockGeneration") else setOf("intent", "lockGeneration", "response", "token"))) return bad(ev, "keys")
+        val it = j.opt("intent"); val lg = j.opt("lockGeneration")
+        if (it !is String || it !in setOf("local-unlock-once", "local-lock-disable") || lg !is String || !Regex("^[A-Za-z0-9_-]{32,128}$").matches(lg)) return bad(ev, "intent_or_generation")
+        if (begin) {
+            intent = it; gen = lg
             token = "otpda_" + b64u(ByteArray(41).also { java.security.SecureRandom().nextBytes(it) }).take(55)
-            challenge = b64u(ByteArray(32).also { java.security.SecureRandom().nextBytes(it) })
-            val o = JSONObject().put("token", token).put("expiresAt", System.currentTimeMillis() + 100_000).put("options", JSONObject()
-                .put("rpId", "otpanda.github.io").put("userVerification", "required").put("challenge", challenge)
-                .put("allowCredentials", org.json.JSONArray().put(JSONObject().put("type", "public-key").put("id", b64u("synthetic-fixture-credential".toByteArray())))))
-            log("fake_begin", "ok=1 intent=$intent")
+            challenge = b64u(java.security.MessageDigest.getInstance("SHA-256").digest(ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }))
+            val allow = org.json.JSONArray().put(JSONObject().put("id", b64u("synthetic-fixture-credential".toByteArray())).put("transports", org.json.JSONArray().put("internal")))
+            val o = JSONObject().put("token", token).put("options", JSONObject().put("challenge", challenge).put("rpId", "otpanda.github.io")
+                .put("allowCredentials", allow).put("timeout", 120000).put("userVerification", "required")).put("expiresAt", System.currentTimeMillis() + 120_000)
+            log(ev, "ok=1 intent=$intent")
             return ApiResult(200, o.toString().toByteArray())
         }
-        val resp = j.optJSONObject("response")?.optJSONObject("response")
-        val cd = try { JSONObject(String(java.util.Base64.getUrlDecoder().decode(resp?.optString("clientDataJSON") ?: ""), Charsets.UTF_8)) } catch (e: Exception) { null }
-        val ok = j.optString("intent") == intent && j.optString("lockGeneration") == gen && j.optString("token") == token &&
-            resp != null && resp.optString("authenticatorData").isNotEmpty() && resp.optString("signature").isNotEmpty() && cd?.optString("challenge") == challenge
-        log("fake_finish", "ok=${if (ok) 1 else 0} challenge_match=${if (cd?.optString("challenge") == challenge) 1 else 0}")
-        if (!ok) return ApiResult(400, "{}".toByteArray())
+        val tk = j.opt("token")
+        if (tk !is String || !Regex("^otpda_[A-Za-z0-9_-]{55}$").matches(tk)) return bad(ev, "token_shape")
+        val r = j.opt("response") as? JSONObject ?: return bad(ev, "response_type")
+        val inner = r.opt("response") as? JSONObject ?: return bad(ev, "inner_type")
+        if (keys(r) != setOf("id", "rawId", "type", "clientExtensionResults", "response") || r.opt("type") != "public-key" || r.opt("id") !is String || r.opt("rawId") != r.opt("id") ||
+            r.opt("clientExtensionResults") !is JSONObject) return bad(ev, "response_keys")
+        if (keys(inner) != setOf("clientDataJSON", "authenticatorData", "signature", "userHandle") ||
+            listOf("clientDataJSON", "authenticatorData", "signature").any { inner.opt(it) !is String || (inner.opt(it) as String).isEmpty() } ||
+            !(inner.isNull("userHandle") || inner.opt("userHandle") is String)) return bad(ev, "inner_keys")
+        val cd = try { JSONObject(String(java.util.Base64.getUrlDecoder().decode(inner.getString("clientDataJSON")), Charsets.UTF_8)) } catch (e: Exception) { null }
+        val match = cd?.optString("challenge") == challenge
+        val ok = it == intent && lg == gen && tk == token && match
+        log(ev, "ok=${if (ok) 1 else 0} challenge_match=${if (match) 1 else 0}")
+        if (!ok) return ApiResult(400, "{\"error\":\"invalid_request\"}".toByteArray())
         return ApiResult(200, JSONObject().put("intent", intent).put("lockGeneration", gen).put("deviceId", deviceId).put("generation", 1).toString().toByteArray())
     }
 }

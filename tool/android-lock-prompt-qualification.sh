@@ -53,11 +53,11 @@ select_entry(){
   local s="$1" xy
   xy=$(python3 "$fx/tap-entry.py" "$OUT/ui-$s-idle.xml" 'Synthetic fixture passkey' 'synthetic-fixture-user') || return 0
   mark "$s" TAP_ENTRY ""; "${A[@]}" shell input tap $xy; sleep 3
-  for n in 1 2 3; do  # a confirm step may follow: tap Continue/Use when present
-    dump_ui "$s" "after$n"
-    xy=$(python3 "$fx/tap-entry.py" "$OUT/ui-$s-after$n.xml" 'Continue' 'Use passkey' 'Use this passkey' 'Sign in') || break
-    mark "$s" TAP_CONFIRM "n=$n"; "${A[@]}" shell input tap $xy; sleep 3
-  done
+  # At most ONE confirm tap, and only on an exact clickable node (Sign in / Continue); logged with the node label.
+  dump_ui "$s" after1
+  if xy=$(python3 "$fx/tap-entry.py" --exact-clickable "$OUT/ui-$s-after1.xml" 'Continue' 'Sign in'); then
+    mark "$s" TAP_CONFIRM "xy=${xy// /,}"; "${A[@]}" shell input tap $xy; sleep 3
+  fi
   local p="$OUT/shots/$s-after.png"; "${A[@]}" exec-out screencap -p > "$p"
 }
 run(){ # scenario action steps...
