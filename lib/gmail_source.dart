@@ -9,6 +9,10 @@ import 'session_contract.dart';
 abstract interface class GmailSourceBridge {
   Future<SessionResponse> gmailSourceStatus();
   Future<void> connectGmail();
+
+  /// One-time neutral result of returning from Google: 'connected', 'refused' or ''.
+  /// Never carries a reason, mailbox or account detail.
+  Future<String> takeGmailResult();
   Future<GmailDisconnectResult> disconnectGmail(String sourceId);
 }
 
@@ -43,10 +47,14 @@ class GmailDisconnectResult {
 class GmailSourceConnect extends StatefulWidget {
   final GmailSourceBridge bridge;
   final VoidCallback? onOpenAccount;
+
+  /// True only when the account's own source list holds a Gmail source.
+  final bool hasGmailSource;
   const GmailSourceConnect({
     super.key,
     required this.bridge,
     this.onOpenAccount,
+    this.hasGmailSource = false,
   });
   @override
   State<GmailSourceConnect> createState() => _GmailSourceConnectState();
@@ -59,13 +67,18 @@ class _GmailSourceConnectState extends State<GmailSourceConnect>
   bool inFlight = false;
   Timer? refresh;
   String error = '';
+
+  /// The return marker is only a hint from the URL. It is shown as success only once status says ready AND the
+  /// account's own sources hold a Gmail source.
+  bool claim = false;
+  int unproven = 0;
   int pending = 0, skipped = 0, leftoverLabels = 0, leftoverFilters = 0;
   bool delayed = false;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    check();
+    start();
     refresh = Timer.periodic(const Duration(seconds: 30), (_) {
       if (WidgetsBinding.instance.lifecycleState == null ||
           WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
@@ -84,6 +97,30 @@ class _GmailSourceConnectState extends State<GmailSourceConnect>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) check();
+  }
+
+  /// Reads the one-shot marker first, then checks status, so the two cannot race.
+  Future<void> start() async {
+    String r = '';
+    try {
+      r = await widget.bridge.takeGmailResult();
+    } catch (_) {}
+    if (!mounted) return;
+    if (r == 'refused') {
+      setState(
+        () => error = 'Gmail was not connected. Try again when you are ready.',
+      );
+    } else if (r == 'connected') {
+      claim = true;
+    }
+    await check();
+  }
+
+  @override
+  void didUpdateWidget(GmailSourceConnect old) {
+    super.didUpdateWidget(old);
+    // A source that disappears (disconnect) contradicts any earlier success claim.
+    if (old.hasGmailSource && !widget.hasGmailSource) claim = false;
   }
 
   Future<void> check() async {
@@ -112,11 +149,16 @@ class _GmailSourceConnectState extends State<GmailSourceConnect>
                 (a, b) => a + b,
               )
             : 0;
+        if (!ready) claim = false;
       }
     } catch (_) {
       error = '';
     } finally {
       inFlight = false;
+    }
+    if (claim && !widget.hasGmailSource) {
+      // Status was read but no Gmail source is listed: after a second completed check the claim is dropped.
+      if (++unproven >= 2) claim = false;
     }
     if (mounted) setState(() => checking = false);
   }
@@ -147,6 +189,7 @@ class _GmailSourceConnectState extends State<GmailSourceConnect>
     setState(() {
       busy = true;
       error = '';
+      claim = false;
     });
     try {
       await widget.bridge.connectGmail();
@@ -214,6 +257,11 @@ class _GmailSourceConnectState extends State<GmailSourceConnect>
               child: Text(
                 '${skipped == 1 ? '1 message in the last 8 days was' : '$skipped messages in the last 8 days were'} not collected because ${skipped == 1 ? 'it was too large or invalid' : 'they were too large or invalid'}.',
               ),
+            ),
+          if (claim && !checking && ready && widget.hasGmailSource)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('Gmail connected.'),
             ),
           if (error.isNotEmpty)
             Padding(padding: const EdgeInsets.only(top: 8), child: Text(error)),

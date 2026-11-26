@@ -448,6 +448,7 @@ class _ProductShellState extends State<ProductShell> {
               GmailSourceConnect(
                 bridge: widget.controller.bridge as GmailSourceBridge,
                 onOpenAccount: widget.onOpenAccount,
+                hasGmailSource: store.sources.any((s) => s.kind == 'gmail'),
               ),
             if (store.sources.isEmpty)
               empty(
@@ -730,8 +731,7 @@ class _ProductShellState extends State<ProductShell> {
                 label: const Text('Reload'),
               ),
           ],
-          if (_canAddTotp)
-            const SizedBox(height: 80),
+          if (_canAddTotp) const SizedBox(height: 80),
         ],
       );
       final content = widget.pageReload == null
