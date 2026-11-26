@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:otpanda_client/native/android_adapters.dart';
@@ -268,6 +269,59 @@ void main() {
         await t.pumpWidget(const SizedBox.shrink());
       },
     );
+
+    for (final mode in ['unavailable', 'throws', 'timeout']) {
+      testWidgets('Google probe $mode retains browser fallback at tap', (
+        t,
+      ) async {
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        final methods = <String>[];
+        messenger.setMockMethodCallHandler(googleChannel, (call) async {
+          methods.add(call.method);
+          if (mode == 'throws') throw PlatformException(code: 'unavailable');
+          if (mode == 'timeout') return Completer<bool>().future;
+          return false;
+        });
+        addTearDown(
+          () => messenger.setMockMethodCallHandler(googleChannel, null),
+        );
+        final source = AndroidGoogleSource(
+          serverClientId: 'fixture',
+          probeTimeout: const Duration(milliseconds: 20),
+        );
+        final c = NativeSessionController(
+          NativeAuth(
+            post: (p, b) async => (status: 200, body: {'nonce': 'N'}),
+            keystore: _Ks(),
+            browser: br,
+            google: source,
+            store: st,
+            apiOrigin: 'https://api.example',
+            launchUrl: (c, s) => Uri.parse('https://x/'),
+          ),
+        );
+        final bridge = NativeSessionBridge(
+          c,
+          (m, p, {body, query, required bearer}) async =>
+              const SessionResponse(401, '{}'),
+          googleAvailability: () => source.available,
+        );
+        await t.pumpWidget(
+          NativeApp(controller: c, googleAvailable: false, authBridge: bridge),
+        );
+        await t.pumpAndSettle();
+        final probe = source.probe();
+        await t.pump(const Duration(milliseconds: 30));
+        await probe;
+        expect(source.available, isFalse);
+        await t.tap(find.textContaining('Google').first);
+        await t.pumpAndSettle();
+        expect(br.runs, 1);
+        expect(methods, ['available']);
+        await t.pumpWidget(const SizedBox.shrink());
+      });
+    }
 
     testWidgets('Google without SDK opens the browser handoff directly', (
       t,
