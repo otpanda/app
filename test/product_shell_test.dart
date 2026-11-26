@@ -151,6 +151,41 @@ Future<void> pump(
 
 void main() {
   testWidgets(
+    '32-character code and placeholder fit narrow screen without changing length',
+    (t) async {
+      final entry = {
+        'entry_id': 'e',
+        'service_name': 'Acme',
+        'account_name': 'me',
+        'digits': 32,
+        'capabilities': {'manage': true},
+      };
+      await pump(t, FakeTransport(routes(entries: [entry])));
+      expect(find.text('-' * 32), findsOneWidget);
+      expect(t.takeException(), isNull);
+      await t.pumpWidget(const SizedBox());
+      await pump(
+        t,
+        FakeTransport(
+          routes(
+            entries: [entry],
+            codes: [
+              {
+                'entryId': 'e',
+                'code': '1' * 32,
+                'receivedAt': now - 1,
+                'expiresAt': now + 60000,
+              },
+            ],
+          ),
+        ),
+      );
+      expect(find.text('1' * 32), findsOneWidget);
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'first-use copy hint disappears only after success and stays gone',
     (t) async {
       final pref = TestCopyHint();

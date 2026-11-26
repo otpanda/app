@@ -319,6 +319,11 @@ class _ProductShellState extends State<ProductShell>
         ink: ink,
       );
 
+  Widget codeSlot(Widget child) => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 160),
+    child: FittedBox(fit: BoxFit.scaleDown, child: child),
+  );
+
   Widget codeTile(
     String title,
     String sub,
@@ -391,71 +396,77 @@ class _ProductShellState extends State<ProductShell>
                     ),
                     if (code != null) ...[
                       const SizedBox(width: 6),
-                      Stack(
-                        clipBehavior: Clip.none,
-                        alignment: Alignment.center,
-                        children: [
-                          Opacity(
-                            opacity: _copiedTile == copyId && copyId != null
-                                ? 0
-                                : (expired ? 0.45 : 1),
-                            child: Text(
-                              spaced(code),
-                              style: TextStyle(
-                                fontFamily: 'CodeMono',
-                                fontFeatures: [FontFeature.tabularFigures()],
-                                fontSize: 22,
-                                fontWeight: FontWeight.w600,
-                                color: expired ? muted : ink,
-                              ),
-                            ),
-                          ),
-                          if (expired)
-                            const Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: -10,
-                              child: Align(
-                                alignment: Alignment.bottomCenter,
-                                child: Text(
-                                  'Updating',
-                                  style: TextStyle(fontSize: 9, color: muted),
+                      codeSlot(
+                        Stack(
+                          clipBehavior: Clip.none,
+                          alignment: Alignment.center,
+                          children: [
+                            Opacity(
+                              opacity: _copiedTile == copyId && copyId != null
+                                  ? 0
+                                  : (expired ? 0.45 : 1),
+                              child: Text(
+                                spaced(code),
+                                style: TextStyle(
+                                  fontFamily: 'CodeMono',
+                                  fontFeatures: [FontFeature.tabularFigures()],
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  color: expired ? muted : ink,
                                 ),
                               ),
                             ),
-                          if (_copiedTile == copyId && copyId != null)
-                            Semantics(
-                              liveRegion: true,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.check, size: 16, color: green),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    'Copied',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: green,
-                                    ),
+                            if (expired)
+                              const Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: -10,
+                                child: Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: Text(
+                                    'Updating',
+                                    style: TextStyle(fontSize: 9, color: muted),
                                   ),
-                                ],
+                                ),
                               ),
-                            ),
-                        ],
+                            if (_copiedTile == copyId && copyId != null)
+                              Semantics(
+                                liveRegion: true,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.check, size: 16, color: green),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'Copied',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: green,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ] else if (showCodeStatus) ...[
                       const SizedBox(width: 12),
                       SizedBox(
                         height: 48,
                         child: Center(
-                          child: Text(
-                            '-' * (expectedDigits ?? 6),
-                            semanticsLabel: 'No active code',
-                            style: const TextStyle(
-                              fontFamily: 'CodeMono',
-                              fontSize: 22,
-                              fontWeight: FontWeight.w600,
-                              color: muted,
+                          child: codeSlot(
+                            Text(
+                              '-' * (expectedDigits ?? 6),
+                              semanticsLabel: renewing
+                                  ? 'Updating code'
+                                  : 'No active code',
+                              style: const TextStyle(
+                                fontFamily: 'CodeMono',
+                                fontSize: 22,
+                                fontWeight: FontWeight.w600,
+                                color: muted,
+                              ),
                             ),
                           ),
                         ),
