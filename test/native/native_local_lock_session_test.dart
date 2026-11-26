@@ -19,8 +19,9 @@ void main() {
       final c = LocalLockController(_Platform());
       final boundary = NativeLocalLockSessionBoundary();
       void observe(NativeSession? s, {bool signedOut = false}) {
-        if (boundary.update(s?.deviceId, signedOut: signedOut))
+        if (boundary.update(s?.deviceId, signedOut: signedOut)) {
           c.sessionChanged();
+        }
       }
 
       await c.load();

@@ -14,3 +14,5 @@ printf '%s\n' 'PASS inactive Android primitive compiles; OS/Keystore lifecycle b
 # Native-owned local-lock recovery finish (proposal, inactive): JVM logic and transport tests with fakes. Not OS credential UI or device evidence.
 compile '' "$root/LocalLockRecovery.kt" "$root/HttpsLockApi.kt" "$root/LocalLockRecoveryTest.kt"
 java -cp "$out/classes:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.recovery.LocalLockRecoveryTestKt
+# Cross-language contract runner (test only) compiles here; it runs inside the API repo test test/local-lock-kotlin-contract.test.js (see LOCAL-LOCK-RECOVERY.md).
+compile '' "$root/LocalLockRecovery.kt" "$root/LocalLockContractRunner.kt"

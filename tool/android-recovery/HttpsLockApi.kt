@@ -13,6 +13,7 @@ class HttpsLockApi(
     override fun post(path: String, bearer: String, body: ByteArray): ApiResult {
         require(path == "/v1/manage/local-lock/begin" || path == "/v1/manage/local-lock/finish")
         require(body.size <= 24576)
+        if (java.net.CookieHandler.getDefault() != null) throw ApiUnreachable()
         val url = URL(origin + path)
         require(url.protocol == "https")
         var sent = false
@@ -22,8 +23,9 @@ class HttpsLockApi(
                 c.requestMethod = "POST"; c.instanceFollowRedirects = false; c.useCaches = false; c.connectTimeout = 10_000; c.readTimeout = 20_000
                 c.setRequestProperty("Content-Type", "application/json"); c.setRequestProperty("Accept", "application/json"); c.setRequestProperty("Authorization", "Bearer $bearer")
                 c.doOutput = true; c.setFixedLengthStreamingMode(body.size)
-                c.outputStream.use { it.write(body) }
-                sent = true
+                val output = c.outputStream
+                sent = true // A write/close failure may occur after bytes reached the server.
+                output.use { it.write(body) }
                 val status = c.responseCode
                 val stream = if (status in 200..299) c.inputStream else c.errorStream
                 val bytes = stream?.use { readBounded(it, 24577) } ?: ByteArray(0)

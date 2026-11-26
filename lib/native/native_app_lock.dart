@@ -12,14 +12,7 @@ abstract interface class LocalLockPlatform {
   Future<void> setEnabled(bool value);
 }
 
-abstract interface class PasskeyDisablePlatform {
-  Future<void> disableAfterPasskey();
-}
-
-class ChannelLocalLock implements LocalLockPlatform, PasskeyDisablePlatform {
-  @override
-  Future<void> disableAfterPasskey() =>
-      channel.invokeMethod('disableAfterPasskey');
+class ChannelLocalLock implements LocalLockPlatform {
   static const channel = MethodChannel('app.otpanda/app-lock');
   @override
   Future<bool> enabled() async =>
@@ -52,18 +45,22 @@ class LocalLockController extends ChangeNotifier {
     _emit();
     final generation = lockGeneration;
     try {
-      final ok = await recovery!.verify(
+      final outcome = await recovery!.verify(
         disable ? 'local-lock-disable' : 'local-unlock-once',
-        generation,
       );
-      if (_disposed || generation != lockGeneration || !ok) return;
-      if (disable) {
-        final p = platform;
-        if (p is! PasskeyDisablePlatform) throw StateError('Unavailable');
-        await (p as PasskeyDisablePlatform).disableAfterPasskey();
-        if (_disposed || generation != lockGeneration) return;
-        enabled = false;
+      if (_disposed || generation != lockGeneration) return;
+      if (outcome != (disable ? 'DISABLED' : 'UNLOCK_GRANTED')) {
+        error = switch (outcome) {
+          'ABORTED' || 'USER_CANCELLED' => null,
+          'NETWORK_UNAVAILABLE' => 'No connection. App lock remains on.',
+          'OUTCOME_UNKNOWN' =>
+            'Could not confirm. App lock remains on. Try again.',
+          'UNAUTHORIZED' => 'Session verification is unavailable. App lock remains on. Try again.',
+          _ => 'Passkey verification did not complete. App lock remains on.',
+        };
+        return;
       }
+      if (disable) enabled = false;
       if (foreground) {
         locked = false;
       } else {
@@ -74,12 +71,29 @@ class LocalLockController extends ChangeNotifier {
     } catch (_) {
       error = 'Passkey verification did not complete. App lock remains on.';
     } finally {
+      try {
+        final saved = await platform.enabled();
+        if (!_disposed) {
+          enabled = saved;
+          if (!saved) {
+            locked = false;
+            _verifiedAwaitingResume = false;
+            error = null;
+          }
+        }
+      } catch (_) {
+        if (!_disposed) {
+          locked = true;
+          error = 'Device lock state could not be confirmed. Try again.';
+        }
+      }
       busy = false;
       _emit();
     }
   }
 
   void sessionChanged() {
+    recovery?.cancel().catchError((_) {});
     _rotate();
     _verifiedAwaitingResume = false;
     if (enabled) locked = true;
@@ -95,6 +109,7 @@ class LocalLockController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    recovery?.cancel().catchError((_) {});
     super.dispose();
   }
 
@@ -249,7 +264,7 @@ class _NativeAppLockState extends State<NativeAppLock>
                             'If your secure screen lock was removed or device unlock is unavailable, verify a passkey to unlock once or turn app lock off.',
                           ),
                         ),
-                        if (c.recovery?.passkeys.available ?? false) ...[
+                        if (c.recovery != null) ...[
                           TextButton(
                             onPressed: c.busy
                                 ? null

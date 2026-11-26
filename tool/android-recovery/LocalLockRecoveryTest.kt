@@ -13,8 +13,9 @@ private val TOKEN = "otpda_" + "a".repeat(55)
 private val CHALLENGE = "c".repeat(43)
 
 private class Env : LockEnv {
-    var now = NOW; var device: String? = "dev1"
+    var now = NOW; var mono = 5_000L; var device: String? = "dev1"
     override fun nowMs() = now
+    override fun elapsedMs() = mono
     override fun random32() = ByteArray(32) { (n++).toByte() }.also { n += 7 }
     override fun deviceId() = device
     var n = 1
@@ -90,8 +91,9 @@ fun main() {
         t.api.script.add(ok(finishJson("local-unlock-once", lg(t.api)))); t.answer()
         expect(t, LockOutcome.UNLOCK_GRANTED); check(t.fx.disables == 0)
         check(t.rec.consumeUnlock()); check(!t.rec.consumeUnlock())
-        val u = T(LockIntent.UNLOCK_ONCE); u.toPrompt(); u.api.script.add(ok(finishJson("local-unlock-once", lg(u.api)))); u.answer(); u.env.now += 15_001; check(!u.rec.consumeUnlock())
-        val w = T(LockIntent.UNLOCK_ONCE); w.toPrompt(); w.api.script.add(ok(finishJson("local-unlock-once", lg(w.api)))); w.answer(); w.env.now -= 1; check(!w.rec.consumeUnlock()) // clock stepped back
+        val u = T(LockIntent.UNLOCK_ONCE); u.toPrompt(); u.api.script.add(ok(finishJson("local-unlock-once", lg(u.api)))); u.answer(); u.env.mono += 15_001; check(!u.rec.consumeUnlock())
+        val w = T(LockIntent.UNLOCK_ONCE); w.toPrompt(); w.api.script.add(ok(finishJson("local-unlock-once", lg(w.api)))); w.answer(); w.env.now -= 3_600_000; check(w.rec.consumeUnlock()) // wall clock jump does not matter
+        val z = T(LockIntent.UNLOCK_ONCE); z.toPrompt(); z.api.script.add(ok(finishJson("local-unlock-once", lg(z.api)))); z.answer(); z.env.now += 3_600_000; z.env.mono += 14_999; check(z.rec.consumeUnlock())
     }
     // Finish response must match this exact operation; otherwise no effect.
     run {
@@ -109,7 +111,7 @@ fun main() {
     }
     // Invalid begin responses never reach the passkey prompt.
     run {
-        for (b in listOf(beginJson(rp = "evil.example"), beginJson(uv = "preferred"), beginJson(ch = "short"), beginJson(exp = NOW), beginJson(exp = NOW + 120_001), beginJson(token = "tok"),
+        for (b in listOf(beginJson(rp = "evil.example"), beginJson(uv = "preferred"), beginJson(ch = "short"), beginJson(exp = NOW), beginJson(exp = NOW + 420_001), beginJson(token = "tok"),
             beginJson(allow = "[" + (0..50).joinToString(",") { """{"id":"a$it"}""" } + "]"), beginJson(allow = """[{"id":""}]"""), beginJson(allow = """[{"id":"a b"}]"""), "{}", "x")) {
             val t = T(); t.api.script.add(ok(b)); t.start(); t.pump(); expect(t, LockOutcome.MISMATCH); check(t.pk.requests.isEmpty() && t.api.calls.size == 1)
         }
@@ -159,6 +161,42 @@ fun main() {
         val h = T(); h.start(bearer = "has space bearer-token"); expect(h, LockOutcome.INVALID); check(h.api.calls.isEmpty())
         val i = T(); i.start(bearer = "short"); expect(i, LockOutcome.INVALID)
     }
+    // Clock skew: the device clock behind (-) or ahead (+) of the server. Server expiry is server-now + 120 s.
+    run {
+        fun skew(deviceOffsetMs: Long, accept: Boolean) {
+            val t = T(); t.env.now = NOW + deviceOffsetMs // device wall clock; server issued exp = NOW + 120_000
+            t.api.script.add(ok(beginJson(exp = NOW + 120_000))); t.start(); t.pump()
+            if (accept) { check(t.pk.requests.size == 1) { "skew $deviceOffsetMs should prompt: ${t.out}" }
+                val timeout = Json.parseObject(t.pk.requests[0].toByteArray())!!["timeout"] as Long; check(timeout in 1..120_000) { "timeout $timeout" } }
+            else { expect(t, LockOutcome.MISMATCH); check(t.pk.requests.isEmpty()) }
+        }
+        skew(-1_000, true); skew(-30_000, true); skew(+30_000, true); skew(-300_000, true)
+        skew(+130_000, false) // ahead by more than the ceremony TTL: already expired, fails closed
+        skew(-310_000, false) // behind by more than the tolerance: implausibly long expiry
+    }
+    // Synchronous executors and a passkey that completes inside get(): the whole attempt runs nested inside start() and still ends exactly once.
+    run {
+        val direct = Executor { it.run() }
+        val api = Api(); val fx = Effects(); val env = Env()
+        val pk = object : PasskeyAssertion { override fun get(requestJson: String, done: (AssertionResult) -> Unit): Cancellable { done(AssertionResult.Json(ASSERT)); return Cancellable { } } }
+        val rec = LocalLockRecovery(api, pk, fx, env, direct, direct); val out = ArrayList<LockOutcome>()
+        api.script.add(ok(beginJson())); api.script.add { ok(finishJson("local-lock-disable", lg(api)))() }
+        rec.start(LockIntent.DISABLE, "bearer-token-0123456789") { out.add(it) }
+        check(out == listOf(LockOutcome.DISABLED) && fx.disables == 1) { "$out" }
+        // a second start afterwards is allowed (no stale pending state), and reset after completion adds nothing
+        rec.reset(); check(out.size == 1)
+        // reset called from inside the completion callback does not end the attempt twice
+        val api2 = Api(); val fx2 = Effects(); val out2 = ArrayList<LockOutcome>(); lateinit var rec2: LocalLockRecovery
+        rec2 = LocalLockRecovery(api2, pk, fx2, Env(), direct, direct)
+        api2.script.add(ok(beginJson())); api2.script.add { ok(finishJson("local-lock-disable", lg(api2)))() }
+        rec2.start(LockIntent.DISABLE, "bearer-token-0123456789") { out2.add(it); rec2.reset() }
+        check(out2 == listOf(LockOutcome.DISABLED)) { "$out2" }
+        // a passkey that throws after completing synchronously cannot double-complete
+        val api3 = Api(); val out3 = ArrayList<LockOutcome>()
+        val pk3 = object : PasskeyAssertion { override fun get(requestJson: String, done: (AssertionResult) -> Unit): Cancellable { done(AssertionResult.UserCancelled); throw IllegalStateException() } }
+        api3.script.add(ok(beginJson())); LocalLockRecovery(api3, pk3, Effects(), Env(), direct, direct).start(LockIntent.DISABLE, "bearer-token-0123456789") { out3.add(it) }
+        check(out3 == listOf(LockOutcome.USER_CANCELLED)) { "$out3" }
+    }
     // Strict JSON.
     run {
         check(Json.parseObject("""{"a":1,"a":2}""".toByteArray()) == null); check(Json.parseObject("""{"a":1} x""".toByteArray()) == null)
@@ -181,6 +219,25 @@ fun main() {
         check(runCatching { api(body = ByteArray(24577)).post("/v1/manage/local-lock/finish", "t", "{}".toByteArray()) }.exceptionOrNull() is ApiUnknown)
         check(api(status = 503).post("/v1/manage/local-lock/finish", "t", "{}".toByteArray()).status == 503)
         check(api(status = 302).post("/v1/manage/local-lock/finish", "t", "{}".toByteArray()).status == 302)
+    }
+    run {
+        val old = java.net.CookieHandler.getDefault()
+        try {
+            java.net.CookieHandler.setDefault(java.net.CookieManager())
+            var opened = false
+            val api = HttpsLockApi("https://api.example") { opened = true; connection(it, 200, ByteArray(0)) }
+            check(runCatching { api.post("/v1/manage/local-lock/finish", "token", ByteArray(0)) }.exceptionOrNull() is ApiUnreachable)
+            check(!opened)
+        } finally { java.net.CookieHandler.setDefault(old) }
+    }
+    run {
+        val api = HttpsLockApi("https://api.example") { u -> object : HttpURLConnection(u) {
+            override fun getOutputStream() = object : java.io.OutputStream() { override fun write(b: Int) { throw java.io.IOException("partial write") } }
+            override fun disconnect() {}
+            override fun usingProxy() = false
+            override fun connect() {}
+        } }
+        check(runCatching { api.post("/v1/manage/local-lock/finish", "token", "{}".toByteArray()) }.exceptionOrNull() is ApiUnknown)
     }
     println("PASS LocalLockRecovery JVM logic and transport tests (fakes only; no OS UI, network, lifecycle or device evidence)")
 }

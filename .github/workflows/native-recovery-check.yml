@@ -19,4 +19,5 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - run: python3 tool/check_local_lock_boundary.py
       - run: bash tool/android-recovery/ci.sh

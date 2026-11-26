@@ -56,7 +56,10 @@ interface LockEffects {
 }
 
 interface LockEnv {
+    /** Wall clock. Used only to judge the server's begin expiry. */
     fun nowMs(): Long
+    /** Monotonic milliseconds (SystemClock.elapsedRealtime on Android). Used for the one-use unlock TTL so a wall-clock change cannot extend or break it. */
+    fun elapsedMs(): Long
     fun random32(): ByteArray
     /** The native-stored enrolled device id, or null. Read again before the effect. */
     fun deviceId(): String?
@@ -69,6 +72,10 @@ private val b64u43 = Regex("^[A-Za-z0-9_-]{43}$")
 private val b64u = Regex("^[A-Za-z0-9_-]+$")
 private const val RP_ID = "otpanda.github.io"
 private const val MAX_SAFE = 9007199254740991L
+/** Server ceremony TTL is 120 s. A device clock behind the server sees up to TTL + lag remaining; one ahead sees less and fails closed once expired.
+ * Accept remaining time in (0, TTL + BEHIND_TOLERANCE]. The prompt timeout is clamped to the TTL. */
+const val CEREMONY_TTL_MS = 120_000L
+const val CLOCK_BEHIND_TOLERANCE_MS = 300_000L
 
 class LocalLockRecovery(
     private val api: LockApi, private val passkeys: PasskeyAssertion, private val effects: LockEffects, private val env: LockEnv,
@@ -114,7 +121,7 @@ class LocalLockRecovery(
     /** One-use, short-lived. True only after a validated unlock-once finish, once. */
     fun consumeUnlock(): Boolean = synchronized(lock) {
         val at = unlockAt; unlockAt = -1
-        val elapsed = env.nowMs() - at
+        val elapsed = env.elapsedMs() - at
         at >= 0 && elapsed in 0..unlockTtlMs
     }
 
@@ -134,11 +141,11 @@ class LocalLockRecovery(
         val token = v["token"] as? String; val opts = v["options"] as? Map<*, *>; val exp = v["expiresAt"] as? Long
         val allow = opts?.get("allowCredentials") as? List<*>
         if (token == null || !tokenRe.matches(token) || opts == null || opts["rpId"] != RP_ID || opts["userVerification"] != "required" ||
-            (opts["challenge"] as? String)?.let { b64u43.matches(it) } != true || allow == null || allow.size > 50 || exp == null || exp <= now || exp > now + 120_000)
+            (opts["challenge"] as? String)?.let { b64u43.matches(it) } != true || allow == null || allow.size > 50 || exp == null || exp <= now || exp > now + CEREMONY_TTL_MS + CLOCK_BEHIND_TOLERANCE_MS)
             return end(me, LockOutcome.MISMATCH)
         val ids = allow.map { ((it as? Map<*, *>)?.get("id") as? String)?.takeIf { s -> s.isNotEmpty() && b64u.matches(s) } ?: return end(me, LockOutcome.MISMATCH) }
         val request = Json.write(linkedMapOf(
-            "rpId" to RP_ID, "challenge" to opts["challenge"], "userVerification" to "required", "timeout" to (exp - now).coerceIn(1, 120_000),
+            "rpId" to RP_ID, "challenge" to opts["challenge"], "userVerification" to "required", "timeout" to (exp - now).coerceIn(1, CEREMONY_TTL_MS),
             "allowCredentials" to ids.map { linkedMapOf("type" to "public-key", "id" to it) },
         ))
         // Re-check the exact context right before the prompt: device and lock state must not have changed.
@@ -188,7 +195,7 @@ class LocalLockRecovery(
                 end(me, if (ok) LockOutcome.DISABLED else LockOutcome.STORAGE)
             }
             LockIntent.UNLOCK_ONCE -> {
-                synchronized(lock) { if (op !== me) return; unlockAt = env.nowMs() }
+                synchronized(lock) { if (op !== me) return; unlockAt = env.elapsedMs() }
                 end(me, LockOutcome.UNLOCK_GRANTED)
             }
         }

@@ -1,64 +1,50 @@
-import 'dart:convert';
+import 'package:flutter/services.dart';
 
-import '../session_contract.dart';
-import 'native_passkey.dart';
+abstract interface class LocalRecoveryPlatform {
+  Future<String> start(String intent, String bearer);
+  Future<void> cancel();
+  Future<bool> consumeUnlock();
+}
 
-typedef LocalRecoveryPost = Future<SessionResponse> Function(
-  String path,
-  String body,
-);
+class ChannelLocalRecovery implements LocalRecoveryPlatform {
+  static const channel = MethodChannel('app.otpanda/lock-recovery');
+  @override
+  Future<String> start(String intent, String bearer) async =>
+      await channel.invokeMethod<String>('start', {
+        'intent': intent,
+        'bearer': bearer,
+      }) ??
+      'UNAVAILABLE';
+  @override
+  Future<void> cancel() => channel.invokeMethod('cancel');
+  @override
+  Future<bool> consumeUnlock() async =>
+      await channel.invokeMethod<bool>('consumeUnlock') == true;
+}
 
-/// A fresh exact-action ceremony. It cannot renew sessions or authorize account changes.
+/// Native owns the passkey ceremony, HTTPS finish and persistent lock effect.
+/// A Dart boolean never authorizes disabling the native lock flag.
 class NativeLocalLockRecovery {
-  NativeLocalLockRecovery({
-    required this.post,
-    required this.passkeys,
-    required this.deviceId,
-    int Function()? now,
-  }) : now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
-  final LocalRecoveryPost post;
-  final PasskeyAssertionSource passkeys;
-  final String? Function() deviceId;
-  final int Function() now;
-  Future<bool> verify(String intent, String generation) async {
-    if (!passkeys.available ||
-        !{'local-unlock-once', 'local-lock-disable'}.contains(intent)) {
-      return false;
-    }
-    final device = deviceId();
-    if (device == null) return false;
-    Map<String, dynamic> decode(SessionResponse r) {
-      if (r.status != 200) throw StateError('Verification unavailable');
-      final v = jsonDecode(r.body);
-      if (v is! Map<String, dynamic>) throw const FormatException();
-      return v;
-    }
+  NativeLocalLockRecovery({required this.platform, required this.bearer});
+  final LocalRecoveryPlatform platform;
+  final Future<String?> Function() bearer;
+  int _generation = 0;
 
-    final begin = decode(
-      await post(
-        '/v1/manage/local-lock/begin',
-        jsonEncode({'intent': intent, 'lockGeneration': generation}),
-      ),
-    );
-    final assertion = await passkeys.get(
-      passkeyRequestJson(begin, nowMs: now()),
-    );
-    if (assertion == null || deviceId() != device) return false;
-    final finish = decode(
-      await post(
-        '/v1/manage/local-lock/finish',
-        jsonEncode({
-          'intent': intent,
-          'lockGeneration': generation,
-          'token': begin['token'],
-          'response': passkeyAssertionBody(assertion),
-        }),
-      ),
-    );
-    return deviceId() == device &&
-        finish['intent'] == intent &&
-        finish['lockGeneration'] == generation &&
-        finish['deviceId'] == device &&
-        finish['generation'] is int;
+  Future<String> verify(String intent) async {
+    final generation = _generation;
+    final token = await bearer();
+    if (generation != _generation) return 'ABORTED';
+    if (token == null) return 'UNAUTHORIZED';
+    final outcome = await platform.start(intent, token);
+    if (generation != _generation) return 'ABORTED';
+    if (outcome == 'UNLOCK_GRANTED' && !await platform.consumeUnlock()) {
+      return 'ABORTED';
+    }
+    return generation == _generation ? outcome : 'ABORTED';
+  }
+
+  Future<void> cancel() async {
+    _generation++;
+    await platform.cancel();
   }
 }

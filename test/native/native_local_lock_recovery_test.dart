@@ -1,38 +1,12 @@
-import 'dart:convert';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/native/native_local_lock_recovery.dart';
 import 'package:otpanda_client/native/native_app_lock.dart';
-import 'package:otpanda_client/native/native_passkey.dart';
-import 'package:otpanda_client/session_contract.dart';
 
-class Keys implements PasskeyAssertionSource {
-  @override
-  bool available = true;
-  bool cancel = false;
-  Future<void> Function()? onGet;
-  @override
-  Future<String?> get(String request) async {
-    await onGet?.call();
-    return cancel
-        ? null
-        : jsonEncode({
-            'type': 'public-key',
-            'id': 'id',
-            'rawId': 'id',
-            'response': {
-              'clientDataJSON': 'a',
-              'authenticatorData': 'a',
-              'signature': 'a',
-              'userHandle': 'owner',
-            },
-          });
-  }
-}
-
-class Platform implements LocalLockPlatform, PasskeyDisablePlatform {
-  bool saved = true;
-  int disables = 0;
+class Platform implements LocalLockPlatform, LocalRecoveryPlatform {
+  bool saved = true, grant = true, failAfterDisable = false;
+  String outcome = 'UNLOCK_GRANTED';
+  int calls = 0, cancellations = 0;
+  Future<void> Function()? duringStart;
   @override
   Future<bool> enabled() async => saved;
   @override
@@ -43,111 +17,93 @@ class Platform implements LocalLockPlatform, PasskeyDisablePlatform {
   }
 
   @override
-  Future<void> disableAfterPasskey() async {
-    disables++;
-    saved = false;
+  Future<String> start(String intent, String bearer) async {
+    calls++;
+    await duringStart?.call();
+    if (intent == 'local-lock-disable') saved = false;
+    if (failAfterDisable) throw StateError('lost channel response');
+    return outcome;
+  }
+
+  @override
+  Future<bool> consumeUnlock() async {
+    final result = grant;
+    grant = false;
+    return result;
+  }
+
+  @override
+  Future<void> cancel() async {
+    cancellations++;
   }
 }
 
 void main() {
-  test('fresh exact-intent response unlocks once without disabling and disable is separate', () async {
-    for (final disable in [false, true]) {
-      final keys = Keys(), p = Platform(), calls = <Map<String, dynamic>>[];
-      final c = LocalLockController(p);
-      await c.load();
-      c.recovery = NativeLocalLockRecovery(
-        passkeys: keys,
-        deviceId: () => 'device',
-        now: () => 1000,
-        post: (path, body) async {
-          final v = jsonDecode(body) as Map<String, dynamic>;
-          calls.add(v);
-          if (path.endsWith('begin')) {
-            return SessionResponse(
-              200,
-              jsonEncode({
-                'token': 'otpda_${'a' * 55}',
-                'expiresAt': 121000,
-                'options': {
-                  'rpId': 'otpanda.github.io',
-                  'userVerification': 'required',
-                  'challenge': 'a' * 43,
-                  'allowCredentials': [],
-                },
-              }),
-            );
-          }
-          return SessionResponse(
-            200,
-            jsonEncode({
-              'intent': v['intent'],
-              'lockGeneration': v['lockGeneration'],
-              'deviceId': 'device',
-              'generation': 3,
-            }),
-          );
-        },
-      );
-      await c.recover(disable: disable);
-      expect(c.locked, false);
-      expect(c.enabled, !disable);
-      expect(p.disables, disable ? 1 : 0);
-      expect(calls.length, 2);
-      expect(
-        calls[0]['intent'],
-        disable ? 'local-lock-disable' : 'local-unlock-once',
-      );
-      c.dispose();
-    }
+  Future<LocalLockController> controller(Platform p) async {
+    final c = LocalLockController(p);
+    await c.load();
+    c.recovery = NativeLocalLockRecovery(
+      platform: p,
+      bearer: () async => 'synthetic-access',
+    );
+    return c;
+  }
+
+  test('native owns disable, unlock grant is consumed once', () async {
+    final p = Platform(), c = await controller(Platform());
+    c.dispose();
+    final once = await controller(p);
+    await once.recover(disable: false);
+    expect(once.locked, false);
+    expect(p.saved, true);
+    expect(p.grant, false);
+    once.sessionChanged();
+    await once.recover(disable: false);
+    expect(once.locked, true);
+    once.dispose();
+    final d = Platform()..outcome = 'DISABLED', disabled = await controller(d);
+    await disabled.recover(disable: true);
+    expect(disabled.enabled, false);
+    expect(disabled.locked, false);
+    expect(d.saved, false);
+    disabled.dispose();
   });
   test(
-    'cancellation, wrong echoed intent and device change stay locked',
+    'unavailable and canceled attempts keep lock, no resume grant',
     () async {
-      for (final mode in ['cancel', 'intent', 'device']) {
-        final keys = Keys()..cancel = mode == 'cancel';
-        final p = Platform(), c = LocalLockController(p);
-        await c.load();
-        var device = 'device';
-        if (mode == 'device') {
-          keys.onGet = () async {
-            device = 'other';
-          };
-        }
-        c.recovery = NativeLocalLockRecovery(
-          passkeys: keys,
-          deviceId: () => device,
-          now: () => 1000,
-          post: (path, body) async {
-            final v = jsonDecode(body);
-            return SessionResponse(
-              200,
-              jsonEncode(
-                path.endsWith('begin')
-                    ? {
-                        'token': 'otpda_${'a' * 55}',
-                        'expiresAt': 121000,
-                        'options': {
-                          'rpId': 'otpanda.github.io',
-                          'userVerification': 'required',
-                          'challenge': 'a' * 43,
-                          'allowCredentials': [],
-                        },
-                      }
-                    : {
-                        'intent': 'local-lock-disable',
-                        'lockGeneration': v['lockGeneration'],
-                        'deviceId': 'device',
-                        'generation': 3,
-                      },
-              ),
-            );
-          },
-        );
+      for (final outcome in [
+        'NETWORK_UNAVAILABLE',
+        'ABORTED',
+        'USER_CANCELLED',
+        'OUTCOME_UNKNOWN',
+        'UNAUTHORIZED',
+      ]) {
+        final p = Platform()..outcome = outcome, c = await controller(p);
         await c.recover(disable: false);
+        c.resume();
         expect(c.locked, true);
-        expect(p.disables, 0);
+        expect(c.enabled, true);
         c.dispose();
       }
     },
   );
+  test('session change during native attempt rejects late result', () async {
+    final p = Platform(), c = await controller(p);
+    p.duringStart = () async {
+      c.sessionChanged();
+    };
+    await c.recover(disable: false);
+    c.resume();
+    expect(c.locked, true);
+    expect(p.cancellations, greaterThan(0));
+    c.dispose();
+  });
+  test('failed disable answer re-reads durable native truth', () async {
+    final p = Platform()..failAfterDisable = true, c = await controller(p);
+    await c.recover(disable: true);
+    expect(c.enabled, false);
+    expect(c.locked, false);
+    expect(c.error, isNull);
+    c.dispose();
+  });
 }

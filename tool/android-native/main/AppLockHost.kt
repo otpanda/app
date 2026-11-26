@@ -46,12 +46,6 @@ object AppLockHost {
                         })
                     }catch(e:Exception){pending=false;result.error("unavailable",null,null)}
                 }
-                // Dart calls this only after the server consumed a fresh exact-intent
-                // passkey ceremony bound to this device and local lock generation.
-                "disableAfterPasskey"->{
-                    reset()
-                    try{if(flag(activity).exists()&&!flag(activity).delete())throw IllegalStateException();activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE);result.success(null)}catch(e:Exception){result.error("storage",null,null)}
-                }
                 "setEnabled"->{
                     val elapsed=android.os.SystemClock.elapsedRealtime()-verifiedAt
                     if(verifiedAt==0L||elapsed !in 0..15000){result.error("verification_required",null,null);return@setMethodCallHandler}

@@ -25,7 +25,9 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
     }
 
-    override fun onDestroy(){AppLockHost.reset();super.onDestroy()}
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) { LocalLockRecoveryHost.dispose(); super.cleanUpFlutterEngine(flutterEngine) }
+    override fun onStop(){LocalLockRecoveryHost.reset();super.onStop()}
+    override fun onDestroy(){LocalLockRecoveryHost.reset();AppLockHost.reset();super.onDestroy()}
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -42,8 +44,8 @@ class MainActivity : FlutterActivity() {
                     "sign" -> result.success(sign(call.argument<ByteArray>("message")!!, call.argument<Boolean>("pending") == true))
                     "deleteKey" -> { aliases.forEach { deleteKey(it) }; prefs.edit().remove("active").apply(); result.success(null) }
                     "readDeviceId" -> result.success(prefs.getString("device_id", null))
-                    "writeDeviceId" -> { prefs.edit().putString("device_id", call.argument<String>("id")).commit(); result.success(null) }
-                    "clearDeviceId" -> { prefs.edit().remove("device_id").commit(); result.success(null) }
+                    "writeDeviceId" -> { LocalLockRecoveryHost.reset(); prefs.edit().putString("device_id", call.argument<String>("id")).commit(); result.success(null) }
+                    "clearDeviceId" -> { LocalLockRecoveryHost.reset(); prefs.edit().remove("device_id").commit(); result.success(null) }
                     "readRecognition" -> result.success(readRecognition())
                     "writeRecognition" -> { writeRecognition(call.argument<String>("value")!!); result.success(null) }
                     "clearRecognition" -> { clearRecognition(); result.success(null) }
@@ -56,6 +58,7 @@ class MainActivity : FlutterActivity() {
             }
         }
         AppLockHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
+        LocalLockRecoveryHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
         GoogleFlavor.register(this, flutterEngine.dartExecutor.binaryMessenger)
         PasskeyHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
         DeviceProofHost.register(this, flutterEngine.dartExecutor.binaryMessenger)

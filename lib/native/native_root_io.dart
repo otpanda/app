@@ -112,9 +112,8 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       realtimeConnector: androidRealtimeConnector(apiOrigin),
     );
     localLock.recovery = NativeLocalLockRecovery(
-      post: bridge.localLockPost,
-      passkeys: passkeys,
-      deviceId: () => controller.session?.deviceId,
+      platform: ChannelLocalRecovery(),
+      bearer: controller.accessToken,
     );
     bridge.assignment = NativeAssignmentDriver(
       post: bridge.assignmentPost,
