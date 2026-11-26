@@ -25,6 +25,7 @@ jobs:
           cache: true
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
+      - run: python3 tool/check_supported_native.py
       - run: python3 tool/test_service_catalog.py
       - run: node --test test/assignment*.mjs test/session_bootstrap_test.cjs test/realtime*.cjs
       - run: flutter analyze
@@ -45,6 +46,7 @@ jobs:
           cache: true
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
+      - run: python3 tool/check_supported_native.py
       - name: Build web app and extension package
         shell: bash
         run: |
@@ -88,6 +90,7 @@ jobs:
           cache: true
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
+      - run: python3 tool/check_supported_native.py
       - name: Configure persistent release signing
         shell: bash
         run: |
@@ -112,7 +115,9 @@ jobs:
           EXPECTED_CERT_SHA256=$(sha256sum "$RUNNER_TEMP/expected-cert.der" | cut -d ' ' -f1)
           export EXPECTED_CERT_SHA256
           for flavor in fdroid google; do
-            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$version"
+            # Preserve upgrade ordering above the dated alpha1-6 candidate codes.
+            android_code=$((2026112600 + GITHUB_RUN_NUMBER))
+            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "$android_code" --dart-define=APP_VERSION="$version"
             apk="build/app/outputs/flutter-apk/app-$flavor-release.apk"
             bash .github/scripts/verify-apk-signature.sh "$apk"
             cp "$apk" "dist/otpanda-android-$flavor-${GITHUB_REF_NAME}.apk"
@@ -170,8 +175,50 @@ jobs:
           name: release-${{ matrix.target }}
           path: dist/*
           retention-days: 7
+  android-installed:
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-android
+          path: candidate
+      - name: Download immutable pinned upgrade fixtures
+        run: |
+          mkdir -p repair-out original-alpha6
+          base=https://github.com/otpanda/app/releases/download/qualification-fixtures-2026-11-26
+          curl -fLsS "$base/original-alpha6-google.apk" -o original-alpha6/otpanda-android-google-native-candidate.apk
+          curl -fLsS "$base/original-alpha6-fdroid.apk" -o original-alpha6/otpanda-android-fdroid-native-candidate.apk
+          curl -fLsS "$base/broken-alpha7-google.apk" -o broken-alpha7.apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: bash tool/release-apk-acceptance.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: actual-release-android-installed-proof
+          path: repair-out
   publish:
-    needs: [web, android, desktop]
+    needs: [web, android, desktop, android-installed]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -194,7 +241,7 @@ jobs:
           flags=(--verify-tag --generate-notes --title "OTPanda ${GITHUB_REF_NAME}")
           case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" "${flags[@]}" dist/*
+            echo '::error::Release already exists. Use a new version; assets are immutable.'
+            exit 1
           fi
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" dist/*

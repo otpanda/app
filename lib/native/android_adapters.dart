@@ -173,11 +173,12 @@ class AndroidGoogleSource implements GoogleIdTokenSource {
     this.probeTimeout = const Duration(seconds: 3),
     this.serverClientId = const String.fromEnvironment(
       'GOOGLE_SERVER_CLIENT_ID',
+      defaultValue: '367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com',
     ),
   }) : _c = channel;
   final MethodChannel _c;
 
-  /// Public Web client ID, a build-time define. Empty hides native Google.
+  /// Public OAuth Web client ID. Override only for a separately configured deployment.
   final String serverClientId;
   final Duration probeTimeout;
   bool _available = false;

@@ -19,6 +19,7 @@ import 'page_reload_stub.dart'
     as platform;
 import 'main.dart' show green;
 import 'pull_to_refresh.dart';
+import 'refresh_bar.dart';
 import 'service_logo.dart';
 import 'session_contract.dart';
 
@@ -29,6 +30,10 @@ import 'session_contract.dart';
 class ProductShell extends StatefulWidget {
   final ReadWorkspaceController controller;
   final BatchPolicy? batchPolicy;
+
+  /// Test seam: replaces the batch controller's monotonic and wall clocks.
+  @visibleForTesting
+  final int Function()? batchClock;
   final Future<void> Function(ReceivedCode) onCopyAssigned;
   final Future<void> Function(UnassignedCode) onCopyPrivate;
   final int Function() clock;
@@ -54,6 +59,7 @@ class ProductShell extends StatefulWidget {
     super.key,
     required this.controller,
     this.batchPolicy,
+    this.batchClock,
     required this.onCopyAssigned,
     required this.onCopyPrivate,
     required this.clock,
@@ -190,6 +196,10 @@ class _ProductShellState extends State<ProductShell>
       batch = MainPageBatchController(
         bridge: bridge as TotpBatchBridge,
         policy: policy,
+        wallMilliseconds: widget.batchClock == null
+            ? null
+            : () => 1000000 + widget.batchClock!(),
+        monotonicMilliseconds: widget.batchClock,
         active: () =>
             widget.controller.signedIn &&
             !widget.controller.suspended &&
@@ -261,7 +271,11 @@ class _ProductShellState extends State<ProductShell>
     Widget? trailing,
     String? serviceId,
     String? issuer,
+    int? remainingMs,
+    int? periodMs,
+    Object? barId,
   ]) => Card(
+    clipBehavior: remainingMs == null ? Clip.none : Clip.antiAlias,
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
     color: fresh ? const Color(0xffe6f5ec) : null,
     shape: fresh
@@ -270,60 +284,75 @@ class _ProductShellState extends State<ProductShell>
             side: const BorderSide(color: green, width: 1.2),
           )
         : null,
-    child: Padding(
-      padding: const EdgeInsets.all(12),
-      child: Row(
-        children: [
-          avatar(title, serviceId, issuer),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+    child: Stack(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              avatar(title, serviceId, issuer),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    if (sub.isNotEmpty)
+                      Text(
+                        sub,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, color: muted),
+                      ),
+                  ],
+                ),
+              ),
+              if (code != null) ...[
+                const SizedBox(width: 6),
                 Text(
-                  title,
-                  overflow: TextOverflow.ellipsis,
+                  spaced(code),
                   style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
+                    fontFamily: 'Figtree',
+                    fontFeatures: [FontFeature.tabularFigures()],
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                if (sub.isNotEmpty)
-                  Text(
-                    sub,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: muted),
-                  ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  tooltip: 'Copy code',
+                  onPressed: onCopy,
+                  icon: const Icon(Icons.copy_outlined, size: 18),
+                ),
+              ] else if (showCodeStatus) ...[
+                const SizedBox(width: 12),
+                const Text(
+                  'No active code',
+                  style: TextStyle(fontSize: 12, color: muted),
+                ),
               ],
+              if (trailing != null) ...[const SizedBox(width: 4), trailing],
+            ],
+          ),
+        ),
+        if (remainingMs != null && periodMs != null && code != null)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: RefreshBar(
+              key: ValueKey(barId ?? 'refresh-$title'),
+              remainingMs: remainingMs,
+              periodMs: periodMs,
             ),
           ),
-          if (code != null) ...[
-            const SizedBox(width: 6),
-            Text(
-              spaced(code),
-              style: const TextStyle(
-                fontFamily: 'Figtree',
-                fontFeatures: [FontFeature.tabularFigures()],
-                fontSize: 22,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filledTonal(
-              tooltip: 'Copy code',
-              onPressed: onCopy,
-              icon: const Icon(Icons.copy_outlined, size: 18),
-            ),
-          ] else if (showCodeStatus) ...[
-            const SizedBox(width: 12),
-            const Text(
-              'No active code',
-              style: TextStyle(fontSize: 12, color: muted),
-            ),
-          ],
-          if (trailing != null) ...[const SizedBox(width: 4), trailing],
-        ],
-      ),
+      ],
     ),
   );
 
@@ -512,18 +541,25 @@ class _ProductShellState extends State<ProductShell>
                           ),
                         )
                       : null,
-                  child: codeTile(
-                    e.service,
-                    e.account,
-                    e.totp ? batch?.current(e.id)?.value : null,
-                    e.totp && batch?.current(e.id) != null
-                        ? () => batch!.copy(e.id)
-                        : null,
-                    true,
-                    false,
-                    null,
-                    e.catalogId,
-                    e.issuer,
+                  child: Builder(
+                    builder: (_) {
+                      // One clock read for value, bar and copy state.
+                      final v = e.totp ? batch?.current(e.id) : null;
+                      return codeTile(
+                        e.service,
+                        e.account,
+                        v?.value,
+                        v != null ? () => batch!.copy(e.id) : null,
+                        true,
+                        false,
+                        null,
+                        e.catalogId,
+                        e.issuer,
+                        v?.remainingMs,
+                        v == null ? null : v.period * 1000,
+                        v == null ? null : '${e.id}/${v.periodStartMs}',
+                      );
+                    },
                   ),
                 ),
               ),

@@ -2,7 +2,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'main.dart' show green, ink, line, muted;
-import 'native_browser_fallback.dart' show appVersion;
+
+const String appVersion = String.fromEnvironment('APP_VERSION');
 
 final Uri githubUrl = Uri.parse('https://github.com/otpanda/app');
 final Uri iconLicenseUrl = Uri.parse('https://fontawesome.com/license/free');

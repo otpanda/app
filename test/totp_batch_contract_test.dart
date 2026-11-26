@@ -466,6 +466,17 @@ void main() {
       expect(store.current('a')!.value, code('a', 1, 6));
     });
 
+    test('hasNextCode is true only when a later code is held', () {
+      final r = begin({'a'});
+      store.accept(r, body({'a': (30, 6)}, window: 2), policy: policy);
+      expect(store.hasNextCode('a'), isFalse, reason: 'current-only');
+      expect(store.hasNextCode('zzz'), isFalse);
+      store.clear();
+      final r2 = begin({'a'});
+      store.accept(r2, body({'a': (30, 6)}), policy: policy);
+      expect(store.hasNextCode('a'), isTrue);
+    });
+
     test('a code never shows before it can be valid and never after it may have ended', () {
       final r = begin({'a'});
       tick = 5400;
