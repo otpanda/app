@@ -4,6 +4,7 @@ on:
     branches: [native-current-signed-applink]
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: native-current-signed-applink
   cancel-in-progress: true
