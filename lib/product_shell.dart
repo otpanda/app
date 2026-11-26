@@ -812,7 +812,6 @@ class _ProductShellState extends State<ProductShell> {
                               email: widget.profileEmail!,
                               googlePicture: widget.profilePicture,
                               size: 32,
-                              allowGravatar: false,
                             ),
                     ),
                   ],

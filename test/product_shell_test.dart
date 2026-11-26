@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/main.dart';
 import 'package:otpanda_client/product_shell.dart';
+import 'package:otpanda_client/profile_header.dart';
 import 'package:otpanda_client/browser_session_contract.dart';
 import 'package:otpanda_client/read_workspace_controller.dart';
 import 'package:otpanda_client/session_contract.dart';
@@ -789,5 +790,51 @@ void main() {
       find.descendant(of: bar, matching: find.byType(TextField)),
       findsOneWidget,
     );
+  });
+
+  // The sources are read from the composed header right after the first
+  // frame. No further frame is pumped, so the test never depends on when the
+  // test HTTP client fails an image request.
+  Future<List<String>> headerAvatarUrls(
+    WidgetTester t, {
+    String? picture,
+  }) async {
+    final tr = FakeTransport(routes());
+    final controller = ReadWorkspaceController(bridge: tr, clock: () => now);
+    addTearDown(controller.dispose);
+    await controller.refresh();
+    await t.pumpWidget(
+      MaterialApp(
+        theme: otpandaTheme(),
+        home: ProductShell(
+          controller: controller,
+          profileEmail: 'person@example.com',
+          profilePicture: picture,
+          onCopyAssigned: (_) async {},
+          onCopyPrivate: (_) async {},
+          clock: () => now,
+          onSignedOut: () {},
+        ),
+      ),
+    );
+    final avatar = find.byType(ProfileAvatar);
+    expect(avatar, findsOneWidget);
+    return [
+      for (final i in t.widgetList<Image>(
+        find.descendant(of: avatar, matching: find.byType(Image)),
+      ))
+        (i.image as NetworkImage).url,
+    ];
+  }
+
+  testWidgets('home header avatar falls back to Gravatar like Settings', (
+    t,
+  ) async {
+    expect(await headerAvatarUrls(t), [gravatarUrl('person@example.com')]);
+  });
+
+  testWidgets('home header avatar tries the Google picture first', (t) async {
+    const g = 'https://lh3.googleusercontent.com/a/example=s96-c';
+    expect(await headerAvatarUrls(t, picture: g), [g]);
   });
 }
