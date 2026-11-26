@@ -67,6 +67,7 @@ class NativeSessionBridge
         RecoveryBridge,
         PasskeyLabelBridge,
         GoogleConnectBridge,
+        GoogleLinkBridge,
         RealtimeBridge {
   /// Set once after construction (the driver needs this bridge's transport).
   NativeAssignmentDriver? assignment;
@@ -335,6 +336,18 @@ class NativeSessionBridge
   Future<String> connectGoogle() async => _connect?.connect() ?? 'unavailable';
   @override
   String takeGoogleLinkResult() => _connect?.takeResult() ?? '';
+
+  /// Disconnect uses the same recovery step-up as web: kind google-unlink, no
+  /// target, one fresh passkey assertion bound to that change. Only with the
+  /// settings switch (same as every other settings action). A success can
+  /// invalidate Google-authenticated sessions, including this one: the next
+  /// call then gets a 401, the renew is refused (invalid_grant) and the
+  /// controller goes to signInRequired with the key kept.
+  @override
+  bool get googleDisconnectAvailable => recoveryAvailable;
+  @override
+  Future<void> disconnectGoogle() async =>
+      _m.recoveryChange(const RecoveryChange(RecoveryKind.googleUnlink));
 
   /// Local-verification approval is not available on any client.
   @override

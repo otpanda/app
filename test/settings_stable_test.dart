@@ -20,6 +20,25 @@ class RefusingBridge extends LinkBridge {
   Future<void> disconnectGoogle() async => throw const RecoveryRefused();
 }
 
+class UnknownUnlinkBridge extends LinkBridge {
+  int refreshes = 0;
+  @override
+  Future<void> disconnectGoogle() async {
+    throw StateError('synthetic response lost');
+  }
+
+  @override
+  Future<SessionResponse> read(String path) async {
+    if (path == '/v1/manage/account') refreshes++;
+    return super.read(path);
+  }
+}
+
+class DisabledUnlinkBridge extends LinkBridge {
+  @override
+  bool get googleDisconnectAvailable => false;
+}
+
 class NoPasskeyBridge extends LinkBridge {
   @override
   Future<SessionResponse> read(String path) async =>
@@ -126,6 +145,36 @@ void main() {
     );
     await t.pumpAndSettle();
     expect(find.textContaining('Google was not disconnected'), findsOneWidget);
+  });
+
+  testWidgets(
+    'unknown unlink result refreshes account and never assumes failure',
+    (t) async {
+      final b = UnknownUnlinkBridge()
+        ..status = 'restored'
+        ..clockNow = 100000;
+      await pump(t, b, navigation: 'settings/account-security');
+      final before = b.refreshes;
+      await t.tap(find.text('Disconnect'));
+      await t.pumpAndSettle();
+      await t.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Disconnect'),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(b.refreshes, greaterThan(before));
+      expect(find.textContaining('could not confirm'), findsOneWidget);
+      expect(find.textContaining('Google was not disconnected'), findsNothing);
+    },
+  );
+  testWidgets('false disconnect capability hides the action', (t) async {
+    final b = DisabledUnlinkBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings/account-security');
+    expect(find.text('Disconnect'), findsNothing);
   });
 
   testWidgets('Disconnect is disabled with no passkeys and never calls out', (
