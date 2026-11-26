@@ -25,6 +25,7 @@ jobs:
           cache: true
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
+      - run: python3 tool/check_supported_native.py
       - run: python3 tool/test_service_catalog.py
       - run: node --test test/assignment*.mjs test/session_bootstrap_test.cjs test/realtime*.cjs
       - run: flutter analyze
@@ -45,6 +46,7 @@ jobs:
           cache: true
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
+      - run: python3 tool/check_supported_native.py
       - name: Build web app and extension package
         shell: bash
         run: |
@@ -88,6 +90,7 @@ jobs:
           cache: true
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
+      - run: python3 tool/check_supported_native.py
       - name: Configure persistent release signing
         shell: bash
         run: |
@@ -189,16 +192,13 @@ jobs:
         with:
           name: release-android
           path: candidate
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-android
-          run-id: 45843716589
-          github-token: ${{ github.token }}
-          path: original-alpha6
-      - name: Download broken alpha7 for repair-upgrade coverage
+      - name: Download immutable pinned upgrade fixtures
         run: |
-          mkdir -p repair-out
-          curl -fLsS https://github.com/otpanda/app/releases/download/v0.1.0-alpha.7/otpanda-android-google-v0.1.0-alpha.7.apk -o broken-alpha7.apk
+          mkdir -p repair-out original-alpha6
+          base=https://github.com/otpanda/app/releases/download/qualification-fixtures-2026-11-26
+          curl -fLsS "$base/original-alpha6-google.apk" -o original-alpha6/otpanda-android-google-native-candidate.apk
+          curl -fLsS "$base/original-alpha6-fdroid.apk" -o original-alpha6/otpanda-android-fdroid-native-candidate.apk
+          curl -fLsS "$base/broken-alpha7-google.apk" -o broken-alpha7.apk
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -229,14 +229,6 @@ jobs:
           pattern: release-*
           path: dist
           merge-multiple: true
-      - name: Preserve immutable historical upgrade fixtures
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download 45843716589 --repo "${{ github.repository }}" --name release-android --dir historical
-          cp historical/otpanda-android-google-native-candidate.apk dist/upgrade-fixture-original-alpha6-google.apk
-          cp historical/otpanda-android-fdroid-native-candidate.apk dist/upgrade-fixture-original-alpha6-fdroid.apk
-          printf '%s\n' '8f150b01fcf3e17acb98584fbe36df1eafa85c1d1cdb375b551e3a602006d228  dist/upgrade-fixture-original-alpha6-google.apk' 'cacc2ec1339e9727f11fa7d2c2bce3134de8c0cda33a4208e11d46a6a61939c4  dist/upgrade-fixture-original-alpha6-fdroid.apk' | sha256sum -c -
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Create GitHub release

@@ -15,11 +15,12 @@ sign_in(){
   adb shell rm -f /sdcard/release.xml
   if adb shell uiautomator dump /sdcard/release.xml && adb pull /sdcard/release.xml repair-out/current.xml;then
    if grep -q 'Sign-in on this device is not ready' repair-out/current.xml;then break;fi
-   if grep -q 'Continue with Google' repair-out/current.xml;then ready=true;break;fi
+   if grep -q 'Sign in with a passkey' repair-out/current.xml && grep -q 'Create account with a passkey' repair-out/current.xml;then ready=true;break;fi
   fi
  done
  adb exec-out screencap -p > "repair-out/$name-signin.png"
  test -f repair-out/current.xml && cp repair-out/current.xml "repair-out/$name-signin.xml"
+ if grep -Eq 'Sign-in on this device is not ready|Open OTPanda in your browser|This development build cannot sign in' repair-out/current.xml;then return 1;fi
  test "$ready" = true
 }
 # Negative control must reject the exact disabled alpha7, not stale UI.

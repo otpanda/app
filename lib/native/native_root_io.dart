@@ -20,10 +20,6 @@ import 'native_session.dart';
 /// Native sign-in, entry editing and settings are supported product behavior.
 /// They do not depend on opt-in build flags. Device enrollment/step-up remains
 /// separately gated until its independent qualification is complete.
-/// Needs the API's /v1/manage/entry/domains routes deployed.
-const bool nativeEntryDomainsEnabled = bool.fromEnvironment(
-  'NATIVE_ENTRY_DOMAINS_ENABLED',
-);
 const String apiOrigin = String.fromEnvironment(
   'OTPANDA_API_ORIGIN',
   defaultValue: 'https://otpanda-api.abrahammurciano.workers.dev',
@@ -186,7 +182,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
                 assignmentEnabled: nativeAuthEnabled,
                 // Own switch: needs the server's native entry routes.
                 entryEditEnabled: true,
-                entryDomainsEnabled: nativeEntryDomainsEnabled,
+                entryDomainsEnabled: true,
               );
               // Only with NATIVE_AUTH_ENABLED: the way into phone sign-in.
               if (!nativeAuthEnabled) return page;
