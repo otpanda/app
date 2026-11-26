@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../main.dart' show otpandaTheme;
+import '../branding.dart';
 
 /// Native authentication adapters are Android-only. Other installed targets
 /// use the supported browser app, rather than calling Android channels.
@@ -17,11 +18,7 @@ class NativePlatformBrowserApp extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Image.asset(
-                'assets/brand-v7/otty-circle-192.png',
-                width: 72,
-                height: 72,
-              ),
+              Image.memory(ottyImage, width: 72, height: 72),
               const SizedBox(height: 24),
               const Text(
                 'OTPanda',
