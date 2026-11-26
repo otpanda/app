@@ -47,6 +47,7 @@ class BrowserAccountPage extends StatefulWidget {
   final bool loginEnabled;
   final bool assignmentEnabled;
   final bool entryEditEnabled;
+  final bool entryDomainsEnabled;
   final bool accountOnly;
   final bool workspaceEnabled;
   final int Function()? clock;
@@ -66,6 +67,7 @@ class BrowserAccountPage extends StatefulWidget {
     this.loginEnabled = false,
     this.assignmentEnabled = false,
     this.entryEditEnabled = false,
+    this.entryDomainsEnabled = false,
     this.accountOnly = false,
     this.workspaceEnabled = false,
     this.clock,
@@ -1572,6 +1574,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
             : cachedProfile?.picture,
         assignmentEnabled: widget.assignmentEnabled,
         entryEditEnabled: widget.entryEditEnabled,
+        entryDomainsEnabled: widget.entryDomainsEnabled,
         controller: workspace,
         initialTab: productTab,
         onTabChanged: (tab) {

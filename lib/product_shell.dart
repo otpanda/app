@@ -39,6 +39,7 @@ class ProductShell extends StatefulWidget {
   /// Offer "Edit" on owned entries. Off until the rename/account routes are
   /// mounted and verified for the real account.
   final bool entryEditEnabled;
+  final bool entryDomainsEnabled;
   final int initialTab;
   final ValueChanged<int>? onTabChanged;
 
@@ -57,6 +58,7 @@ class ProductShell extends StatefulWidget {
     this.profilePicture,
     this.assignmentEnabled = false,
     this.entryEditEnabled = false,
+    this.entryDomainsEnabled = false,
     this.initialTab = 0,
     this.onTabChanged,
     this.pageReload = platform.pageReload,
@@ -68,6 +70,10 @@ class ProductShell extends StatefulWidget {
 enum _Phase { loading, loaded, cleared, failed, rateLimited, signedOut }
 
 class _ProductShellState extends State<ProductShell> {
+  bool get _canAddTotp =>
+      widget.controller.bridge is TotpManagementBridge &&
+      (widget.controller.bridge is! TotpCreationCapability ||
+          (widget.controller.bridge as TotpCreationCapability).canAddTotp);
   static const names = ['Codes', 'Sources', 'Unassigned', 'Entries'];
   static const icons = [
     Icons.password,
@@ -724,7 +730,7 @@ class _ProductShellState extends State<ProductShell> {
                 label: const Text('Reload'),
               ),
           ],
-          if (widget.controller.bridge is TotpManagementBridge)
+          if (_canAddTotp)
             const SizedBox(height: 80),
         ],
       );
@@ -732,7 +738,7 @@ class _ProductShellState extends State<ProductShell> {
           ? list
           : PullToRefresh(onRefresh: pull, child: list);
       return Scaffold(
-        floatingActionButton: widget.controller.bridge is TotpManagementBridge
+        floatingActionButton: _canAddTotp
             ? FloatingActionButton.extended(
                 tooltip: 'Add authenticator',
                 backgroundColor: green,

@@ -77,7 +77,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
@@ -107,11 +107,16 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           # Android versionName can carry the prerelease suffix, so alphas are identifiable.
-          flutter build apk --release --build-name "$version" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$version"
-          apk=build/app/outputs/flutter-apk/app-release.apk
-          bash .github/scripts/verify-apk-signature.sh "$apk"
           mkdir -p dist
-          cp "$apk" "dist/otpanda-android-${GITHUB_REF_NAME}.apk"
+          keytool -exportcert -keystore "$RUNNER_TEMP/release.jks" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" > "$RUNNER_TEMP/expected-cert.der"
+          EXPECTED_CERT_SHA256=$(sha256sum "$RUNNER_TEMP/expected-cert.der" | cut -d ' ' -f1)
+          export EXPECTED_CERT_SHA256
+          for flavor in fdroid google; do
+            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$version"
+            apk="build/app/outputs/flutter-apk/app-$flavor-release.apk"
+            bash .github/scripts/verify-apk-signature.sh "$apk"
+            cp "$apk" "dist/otpanda-android-$flavor-${GITHUB_REF_NAME}.apk"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: release-android

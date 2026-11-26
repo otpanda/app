@@ -90,3 +90,25 @@ abstract interface class EntryManagementBridge {
 abstract interface class EntryDeleteBridge {
   Future<void> deleteEntry(String entryId);
 }
+
+/// Optional: a bridge whose client can only sometimes create TOTP entries
+/// (for example no passkey provider on this device). Shells hide the add
+/// action instead of showing a dead button. Absent means always available.
+abstract interface class TotpCreationCapability {
+  bool get canAddTotp;
+}
+
+/// Private extra websites per entry, for the signed-in viewer only. A shared
+/// recipient edits their own list, never the owner's. Replace semantics: read
+/// first, send the whole list. Both throw when not confirmed and never retry.
+abstract interface class EntryDomainsBridge {
+  /// entryId -> exact HTTPS hosts. An entry with none is absent or empty.
+  Future<Map<String, List<String>>> readEntryDomains();
+
+  /// Replaces this viewer's list for one entry. Returns the normalized list
+  /// that was sent.
+  Future<List<String>> replaceEntryDomains(
+    String entryId,
+    List<String> domains,
+  );
+}

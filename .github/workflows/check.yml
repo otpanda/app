@@ -67,11 +67,11 @@ jobs:
           cache: true
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
-      - run: flutter build apk --debug --target-platform android-arm64
+      - run: flutter build apk --debug --flavor fdroid --target-platform android-arm64
       - uses: actions/upload-artifact@v4
         with:
           name: development-only-android-arm64-debug
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: build/app/outputs/flutter-apk/app-fdroid-debug.apk
           retention-days: 7
   android-release-signing:
     # Exercises the release signing patch with a throwaway key. No secrets are used,
@@ -104,8 +104,14 @@ jobs:
           RELEASE_STORE_FILE="$RUNNER_TEMP/throwaway.jks" RELEASE_STORE_PASSWORD=throwaway-pass \
           RELEASE_KEY_ALIAS=throwaway RELEASE_KEY_PASSWORD=throwaway-pass \
             python3 .github/scripts/android-release-signing.py
-          flutter build apk --release --target-platform android-arm64
-          bash .github/scripts/verify-apk-signature.sh build/app/outputs/flutter-apk/app-release.apk
+          flutter build apk --release --flavor fdroid --target-platform android-arm64
+          flutter build apk --release --flavor google --target-platform android-arm64
+          export THROWAWAY_STORE_PASSWORD=throwaway-pass
+          keytool -exportcert -keystore "$RUNNER_TEMP/throwaway.jks" -storepass:env THROWAWAY_STORE_PASSWORD -alias throwaway > "$RUNNER_TEMP/expected-cert.der"
+          EXPECTED_CERT_SHA256=$(sha256sum "$RUNNER_TEMP/expected-cert.der" | cut -d ' ' -f1)
+          export EXPECTED_CERT_SHA256
+          bash .github/scripts/verify-apk-signature.sh build/app/outputs/flutter-apk/app-fdroid-release.apk
+          bash .github/scripts/verify-apk-signature.sh build/app/outputs/flutter-apk/app-google-release.apk
   deploy-preview:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [web, android-debug]
