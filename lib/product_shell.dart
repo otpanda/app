@@ -161,6 +161,25 @@ class _ProductShellState extends State<ProductShell>
     unawaited(_copyHintStore.markCopied().catchError((Object _) {}));
   }
 
+  bool get hasCopyableCard {
+    final now = widget.clock();
+    final c = widget.controller;
+    final private = c.store.visibleUnassigned(now).any(c.canCopyPrivate);
+    if (tab == 2) return private;
+    if (tab != 0) return false;
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty && private) return true;
+    final codes = {
+      for (final code in c.store.visibleCodes(now)) code.entryId: code,
+    };
+    return c.store.entries.any((e) {
+      if (!'${e.service} ${e.account}'.toLowerCase().contains(q)) return false;
+      if (e.totp) return batch?.tileCurrent(e.id)?.copyable ?? false;
+      final code = codes[e.id];
+      return code != null && c.canCopyAssigned(code);
+    });
+  }
+
   Widget copyTutorial() => Container(
     key: const Key('copy-tutorial-banner'),
     margin: const EdgeInsets.only(bottom: 16),
@@ -191,16 +210,6 @@ class _ProductShellState extends State<ProductShell>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'START HERE',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.2,
-                  color: green,
-                ),
-              ),
-              SizedBox(height: 4),
               Text(
                 'Tap a card to copy',
                 style: TextStyle(
@@ -1139,7 +1148,8 @@ class _ProductShellState extends State<ProductShell>
           if (!desktop &&
               _copyHint &&
               (tab == 0 || tab == 2) &&
-              phase == _Phase.loaded)
+              phase == _Phase.loaded &&
+              hasCopyableCard)
             copyTutorial(),
           body(),
           const SizedBox(height: 20),

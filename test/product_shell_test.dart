@@ -267,7 +267,26 @@ void main() {
     t,
   ) async {
     final pref = TestCopyHint();
-    final tr = FakeTransport(routes(entries: [], codes: []));
+    final tr = FakeTransport(
+      routes(
+        entries: [
+          {
+            'entry_id': 'e',
+            'service_name': 'Acme',
+            'account_name': 'me',
+            'capabilities': {'manage': true},
+          },
+        ],
+        codes: [
+          {
+            'entryId': 'e',
+            'code': '123456',
+            'receivedAt': now - 1000,
+            'expiresAt': now + 60000,
+          },
+        ],
+      ),
+    );
     await pump(t, tr, copyHintStore: pref);
     expect(find.byKey(const Key('copy-tutorial-banner')), findsOneWidget);
     await t.tap(find.byKey(const Key('dismiss-copy-tutorial')));
@@ -278,6 +297,59 @@ void main() {
     await pump(t, tr, copyHintStore: pref);
     expect(find.byKey(const Key('copy-tutorial-banner')), findsNothing);
   });
+
+  testWidgets(
+    'no tutorial for empty or placeholder, appears when copyable code arrives',
+    (t) async {
+      final pref = TestCopyHint();
+      final tr = FakeTransport(routes(entries: [], codes: []));
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.byKey(const Key('copy-tutorial-banner')), findsNothing);
+      expect(pref.seen, false);
+      tr.routes.addAll(
+        routes(
+          entries: [
+            {
+              'entry_id': 'e',
+              'service_name': 'Acme',
+              'account_name': 'me',
+              'capabilities': {'manage': true},
+            },
+          ],
+          codes: [],
+        ),
+      );
+      await t.pumpWidget(const SizedBox());
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.byKey(const Key('copy-tutorial-banner')), findsNothing);
+      expect(pref.seen, false);
+      tr.routes.addAll(
+        routes(
+          entries: [
+            {
+              'entry_id': 'e',
+              'service_name': 'Acme',
+              'account_name': 'me',
+              'capabilities': {'manage': true},
+            },
+          ],
+          codes: [
+            {
+              'entryId': 'e',
+              'code': '123456',
+              'receivedAt': now - 1000,
+              'expiresAt': now + 60000,
+            },
+          ],
+        ),
+      );
+      await t.pumpWidget(const SizedBox());
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.byKey(const Key('copy-tutorial-banner')), findsOneWidget);
+      expect(find.text('START HERE'), findsNothing);
+      expect(pref.seen, false);
+    },
+  );
 
   testWidgets(
     'wide copy button and whole tile both copy, mobile alone has hint',
@@ -321,6 +393,17 @@ void main() {
           matchesGoldenFile('goldens/copy-tutorial-narrow.png'),
         );
       }
+      t.platformDispatcher.textScaleFactorTestValue = 1.6;
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/copy-tutorial-large-text.png'),
+        );
+      }
+      t.platformDispatcher.clearTextScaleFactorTestValue();
+      await t.pumpAndSettle();
       t.view.physicalSize = const Size(1200, 900);
       await t.pumpAndSettle();
       expect(find.byIcon(Icons.copy_outlined), findsOneWidget);
