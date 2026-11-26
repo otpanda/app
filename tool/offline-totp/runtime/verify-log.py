@@ -3,7 +3,7 @@
 import re, sys
 PHASES = ["env", "secure-default", "seam-provision", "seam-restart", "seam-loss", "seam-orphan", "size", "cleanup"]
 MIN_OKS = {"env": 0, "secure-default": 2, "seam-provision": 4, "seam-restart": 4, "seam-loss": 4, "seam-orphan": 3, "size": 0, "cleanup": 1}
-BAD = re.compile(r"FIXTURE api=\d+ FAIL|FATAL|Aborted|Exception|Traceback|\bsignal \d+|Segmentation|not found|inaccessible", re.I)
+BAD = re.compile(r"FIXTURE api=\d+ FAIL|FATAL|Aborted|INSTRUMENTATION_FAILED|Process crashed|Exception|Traceback|\bsignal \d+|Segmentation|not found|inaccessible", re.I)
 def verify(text, api):
     errs = []
     if not text.strip(): return ["empty log"]

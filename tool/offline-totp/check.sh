@@ -20,13 +20,14 @@ echo 'val x = LocalSeedCustody(v, s, true)' > "$tmp/lib/Wiring.kt"
 if bash "$root/release-guard.sh" "$tmp" >/dev/null 2>&1; then echo 'FAIL positional-constructor self-test did not trip' >&2; exit 1; fi
 rm -rf "$tmp"; echo 'PASS release guard self-test trips on named and positional production use'
 python3 "$root/runtime/verify-log-test.py"
+python3 "$root/runtime/extract-instrument-test.py"
 
 # Android adapters compile against the platform jar when one is provided; compiling is not device behavior.
 if [ -n "${ANDROID_JAR:-}" ]; then
   compile "$ANDROID_JAR" "$out/android" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt"
   printf '%s\n' 'PASS inactive Android seed vault and record store compile; Keystore, hardware level, uninstall and backup behavior remain unverified'
-  compile "$ANDROID_JAR" "$out/fixture" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt" "$root/runtime/RuntimeFixture.kt"
-  printf '%s\n' 'PASS emulator fixture source compiles (UNRUN: executes only in the manual emulator workflow)'
+  compile "$ANDROID_JAR" "$out/fixture" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt" "$root/runtime/RuntimeFixture.kt" "$root/runtime/FixtureRunner.kt"
+  printf '%s\n' 'PASS fixture APK sources (instrumentation) compile (UNRUN: executes only in the manual emulator workflow)'
   # Also compile against API 30 (minimum supported) when provided, to catch newer-API use such as readNBytes (API 33) or KeyInfo.securityLevel (API 31).
   if [ -n "${ANDROID_JAR_API30:-}" ]; then
     compile "$ANDROID_JAR_API30" "$out/android30" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt"
