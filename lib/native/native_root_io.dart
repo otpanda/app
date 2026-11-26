@@ -8,6 +8,7 @@ import 'android_adapters.dart';
 import 'native_assignment.dart';
 import 'native_bridge.dart';
 import 'native_app.dart';
+import 'native_navigation.dart';
 import 'native_auth.dart';
 import 'native_device_proof.dart';
 import 'native_device_startup.dart';
@@ -60,7 +61,6 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   late final NativeSessionController controller;
   late final NativeSessionBridge bridge;
   final passkeys = AndroidPasskeySource();
-  String route = 'codes';
   bool ready = false;
   late final NativeStartupRecovery startup;
   late final NativeDevicesService devices;
@@ -185,12 +185,12 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
           googleAvailable: widget.google.available,
           version: const String.fromEnvironment('APP_VERSION'),
           authBridge: bridge,
-          signedInBuilder: (context) => StatefulBuilder(
-            builder: (context, set) {
+          signedInBuilder: (context) => NativeNavigation(
+            builder: (context, route, navigate) {
               final page = BrowserAccountPage(
                 bridge: bridge,
                 navigation: route,
-                onNavigate: (r) => set(() => route = r),
+                onNavigate: navigate,
                 accountOnly: true,
                 signOutEnabled: true,
                 workspaceEnabled: true,
