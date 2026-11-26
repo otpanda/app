@@ -17,8 +17,7 @@ typedef UrlLauncher = Future<bool> Function(Uri url);
 Future<bool> launchInSystemBrowser(Uri url) =>
     launchUrl(url, mode: LaunchMode.externalApplication);
 
-/// Shown by non-web builds until native sign-in exists. It offers one real
-/// action, opening the web app, and no sign-in or authenticator controls.
+/// Browser-only target fallback. Supported native builds never select this.
 class NativeBrowserFallbackApp extends StatelessWidget {
   final UrlLauncher launcher;
   const NativeBrowserFallbackApp({
@@ -87,9 +86,7 @@ class _FallbackState extends State<NativeBrowserFallbackPage> {
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  'This development build cannot sign in, use passkeys or show '
-                  'verification codes yet. Your account works in the browser, '
-                  'so open OTPanda there for now.',
+                  'This target uses the browser app. Sign in and view your codes there.',
                   style: TextStyle(color: muted, fontSize: 15, height: 1.4),
                 ),
                 const SizedBox(height: 20),
