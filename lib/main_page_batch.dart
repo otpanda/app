@@ -61,15 +61,51 @@ class MainPageBatchController extends ChangeNotifier {
   bool needsEntry(String id) =>
       (!store.omitted.containsKey(id) || store.omissionRetryDue(id)) &&
       !store.hasCoverage(id);
+
+  /// Warm-up attempts per entry and period (key: id/periodStart), so one
+  /// entry, or a long-period one, never spends another entry's quota, and a
+  /// new period or generation starts at zero.
+  final _warmAttempts = <String, int>{};
+  static const _warmHorizonMs = 15000;
+  String? _warmKey(String id) {
+    final c = store.current(id);
+    return c == null ? null : '$id/${c.periodStartMs}';
+  }
+
+  /// Within the final fifteen seconds, current-only coverage gets a bounded
+  /// early renewal attempt so a next code can already be held at the boundary.
+  /// At most two warm attempts per entry/period, with global request spacing.
+  bool _wantsWarm(String id) {
+    if (!store.hasCoverage(id) || store.hasNextCode(id)) return false;
+    final c = store.current(id);
+    if (c == null || c.remainingMs > _warmHorizonMs) return false;
+    return (_warmAttempts['$id/${c.periodStartMs}'] ?? 0) < 2;
+  }
+
+  /// Ms until a held, current-only entry comes inside the warm-up horizon.
+  int _msToWarmHorizon() {
+    var best = 1 << 30;
+    for (final id in _ids) {
+      if (!store.hasCoverage(id) || store.hasNextCode(id)) continue;
+      final c = store.current(id);
+      if (c == null) continue;
+      final w = c.remainingMs - _warmHorizonMs;
+      if (w > 0 && w < best) best = w;
+    }
+    return best;
+  }
+
   bool needsRenewal(String id) =>
       needsEntry(id) ||
-      (store.hasCoverage(id) && store.entryCoverageRemainingMs(id) <= 15000);
+      (store.hasCoverage(id) &&
+          (store.entryCoverageRemainingMs(id) <= 15000 || _wantsWarm(id)));
 
   void select(List<String> ids) {
     final next = ids.toSet().toList();
     if (listEquals(next, _ids)) return;
     _ids = next;
     _successAt = 0;
+    _warmAttempts.clear();
     if (next.isNotEmpty) {
       refresh();
     } else {
@@ -80,6 +116,7 @@ class MainPageBatchController extends ChangeNotifier {
   void invalidate({bool notify = true}) {
     _generation++;
     _successAt = 0;
+    _warmAttempts.clear();
     _ids = [];
     store.clear();
     busy = false;
@@ -119,6 +156,13 @@ class MainPageBatchController extends ChangeNotifier {
     });
     final selected = targets.take(policy.maxEntries).toList();
     if (selected.isEmpty) return;
+    for (final id in selected) {
+      if (_wantsWarm(id)) {
+        final k = _warmKey(id);
+        if (k != null) _warmAttempts[k] = (_warmAttempts[k] ?? 0) + 1;
+      }
+    }
+    if (_warmAttempts.length > 128) _warmAttempts.clear();
     final generation = _generation;
     busy = true;
     _notify();
@@ -138,7 +182,13 @@ class MainPageBatchController extends ChangeNotifier {
       error = null;
       _retryAt = 0;
       _successAt =
-          _mono() + (store.coverageRemainingMs() - 1000).clamp(3000, 15000);
+          _mono() +
+          (_ids.any(_wantsWarm)
+              ? 3000
+              : ((store.coverageRemainingMs() - 1000).clamp(
+                  3000,
+                  15000,
+                )).clamp(3000, _msToWarmHorizon().clamp(3000, 15000)));
     } catch (e) {
       if (generation == _generation) {
         error = 'Generated codes are waiting for your connection.';
