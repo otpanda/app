@@ -12,6 +12,10 @@ if [ -n "$bad" ]; then printf 'FAIL release guard: software-key seam referenced 
 ctor=$(grep -rIlE --include='*.kt' --include='*.java' --include='*.dart' --exclude-dir=.git --exclude-dir=build -- 'LocalSeedCustody[[:space:]]*\(' "$root" \
   | grep -v -E '/tool/offline-totp/(SeedCustody\.kt|SeedCustodyTest\.kt|runtime/RuntimeFixture\.kt)$' || true)
 if [ -n "$ctor" ]; then printf 'FAIL release guard: LocalSeedCustody constructed outside allowed files:\n%s\n' "$ctor" >&2; exit 1; fi
+# NativeSeedCustodyCore and OwnerStateFileStore are likewise unwired until a reviewed host change adds an allowlist entry.
+v2=$(grep -rIlE --include='*.kt' --include='*.java' --include='*.dart' --exclude-dir=.git --exclude-dir=build -- '(NativeSeedCustodyCore|OwnerStateFileStore|NativeCustodyChannelHandler)[[:space:]]*\(' "$root" \
+  | grep -v -E '/tool/offline-totp/(NativeCustody\.kt|NativeCustodyChannel\.kt|NativeCustodyTest\.kt|OwnerStateFileStore\.kt|runtime/RuntimeFixtureV2\.kt)$' || true)
+if [ -n "$v2" ]; then printf 'FAIL release guard: native custody v2 constructed outside allowed files:\n%s\n' "$v2" >&2; exit 1; fi
 # The only constructor default must stay secure.
 grep -q "allowSoftwareKeysForTests: Boolean = false" "$root/tool/offline-totp/SeedCustody.kt" || { echo 'FAIL release guard: seam default is not false' >&2; exit 1; }
 echo 'PASS release guard: software-key seam only in custody definition, README and tests; default false'
