@@ -36,7 +36,7 @@ void main() {
   ) async {
     await pumpPage(t);
     expect(
-      find.text('Sign-in on this device is not ready yet'),
+      find.text('Open OTPanda in your browser'),
       findsOneWidget,
     );
     expect(find.text('Open OTPanda in browser'), findsOneWidget);

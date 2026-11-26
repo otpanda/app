@@ -114,7 +114,7 @@ jobs:
           for flavor in fdroid google; do
             # Preserve upgrade ordering above the dated alpha1-6 candidate codes.
             android_code=$((2026112600 + GITHUB_RUN_NUMBER))
-            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "$android_code" --dart-define=APP_VERSION="$version" --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
+            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "$android_code" --dart-define=APP_VERSION="$version"
             apk="build/app/outputs/flutter-apk/app-$flavor-release.apk"
             bash .github/scripts/verify-apk-signature.sh "$apk"
             cp "$apk" "dist/otpanda-android-$flavor-${GITHUB_REF_NAME}.apk"
@@ -241,7 +241,7 @@ jobs:
           flags=(--verify-tag --generate-notes --title "OTPanda ${GITHUB_REF_NAME}")
           case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" "${flags[@]}" dist/*
+            echo '::error::Release already exists. Use a new version; assets are immutable.'
+            exit 1
           fi
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" dist/*

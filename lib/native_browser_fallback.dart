@@ -77,7 +77,7 @@ class _FallbackState extends State<NativeBrowserFallbackPage> {
                 ),
                 const SizedBox(height: 20),
                 const Text(
-                  'Sign-in on this device is not ready yet',
+                  'Open OTPanda in your browser',
                   style: TextStyle(
                     color: ink,
                     fontFamily: 'BricolageGrotesque',
