@@ -6,8 +6,11 @@ for source in original-alpha6/otpanda-android-google-native-candidate.apk broken
  adb uninstall app.otpanda || true
  adb install "$source" 2>&1 | tee "repair-out/$name-initial.txt"
  adb shell dumpsys package app.otpanda > "repair-out/$name-before.txt"
+ before=$(adb shell dumpsys package app.otpanda | grep 'firstInstallTime=' | head -1)
  adb install -r "$apk" 2>&1 | tee "repair-out/$name-upgrade.txt"
  adb shell dumpsys package app.otpanda > "repair-out/$name-after.txt"
+ after=$(adb shell dumpsys package app.otpanda | grep 'firstInstallTime=' | head -1)
+ test "$before" = "$after"
  adb shell am start -n app.otpanda/.MainActivity
  for i in $(seq 1 20);do
   sleep 2
