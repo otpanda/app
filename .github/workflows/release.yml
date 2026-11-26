@@ -229,6 +229,14 @@ jobs:
           pattern: release-*
           path: dist
           merge-multiple: true
+      - name: Preserve immutable historical upgrade fixtures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 45843716589 --repo "${{ github.repository }}" --name release-android --dir historical
+          cp historical/otpanda-android-google-native-candidate.apk dist/upgrade-fixture-original-alpha6-google.apk
+          cp historical/otpanda-android-fdroid-native-candidate.apk dist/upgrade-fixture-original-alpha6-fdroid.apk
+          printf '%s\n' '8f150b01fcf3e17acb98584fbe36df1eafa85c1d1cdb375b551e3a602006d228  dist/upgrade-fixture-original-alpha6-google.apk' 'cacc2ec1339e9727f11fa7d2c2bce3134de8c0cda33a4208e11d46a6a61939c4  dist/upgrade-fixture-original-alpha6-fdroid.apk' | sha256sum -c -
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Create GitHub release

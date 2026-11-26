@@ -3,6 +3,7 @@ set -euo pipefail
 adb root
 adb wait-for-device
 mkdir -p repair-out
+printf '%s\n' '8f150b01fcf3e17acb98584fbe36df1eafa85c1d1cdb375b551e3a602006d228  original-alpha6/otpanda-android-google-native-candidate.apk' 'cacc2ec1339e9727f11fa7d2c2bce3134de8c0cda33a4208e11d46a6a61939c4  original-alpha6/otpanda-android-fdroid-native-candidate.apk' '2b13c054117ecbe54d87e08d759ebb8f01534c3a8ecde50444034e5bc8aad771  broken-alpha7.apk' | sha256sum -c - | tee repair-out/pinned-fixtures.txt
 sign_in(){
  local name="$1"
  adb shell am force-stop app.otpanda
@@ -41,6 +42,10 @@ for flavor in google fdroid;do
   adb install -r "$apk" 2>&1 | tee "repair-out/$name-upgrade.txt"
   grep -q '^Success' "repair-out/$name-upgrade.txt"
   adb shell dumpsys package app.otpanda > "repair-out/$name-after.txt"
+  old_code=$(sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' "repair-out/$name-before.txt" | head -1)
+  new_code=$(sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' "repair-out/$name-after.txt" | head -1)
+  test "$new_code" -gt "$old_code"
+  test "$new_code" -gt 2026112605
   after=$(adb shell dumpsys package app.otpanda | grep 'firstInstallTime=' | head -1)
   test "$before" = "$after"
   adb shell cat /data/user/0/app.otpanda/files/upgrade-proof | tee "repair-out/$name-preserved-data.txt"
