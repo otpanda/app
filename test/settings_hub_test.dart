@@ -369,7 +369,7 @@ void main() {
     await t.tap(find.text('Account & security'));
     await t.pumpAndSettle();
     final first = overviews();
-    expect(first, greaterThanOrEqualTo(1));
+    expect(first, 1);
     await t.tap(find.byTooltip('Back to settings'));
     await t.pumpAndSettle();
     // The hub itself needs no overview read.

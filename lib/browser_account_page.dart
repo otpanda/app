@@ -542,13 +542,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   /// The account page just appeared without an overview (its header came from
   /// the cache): fetch it once.
   Future<void> ensureOverview() async {
+    // Restoration may have fetched for this exact appearance before the
+    // page mounted. Consume that attempt once, including a failed attempt.
+    // Never carry it into a later appearance or use a time-based throttle.
+    if (overviewPreparedForAppearance) {
+      overviewPreparedForAppearance = false;
+      return;
+    }
     if (overview != null && status == 'restored' && mounted) {
-      // Restoration may have fetched for this exact appearance before the
-      // page mounted. Consume that read once, never a time-based throttle.
-      if (overviewPreparedForAppearance) {
-        overviewPreparedForAppearance = false;
-        return;
-      }
       // Already held but possibly old: the Account page shows security
       // status, so read it again without the loading bar.
       if (overviewInFlightRevision == revision) return;
