@@ -26,6 +26,8 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
     private class Bad : Exception()
     private fun Map<*, *>.str(k: String) = (this[k] as? String) ?: throw Bad()
     private fun Map<*, *>.long(k: String): Long = when (val v = this[k]) { is Long -> v; is Int -> v.toLong(); else -> throw Bad() }
+    private fun Map<*, *>.int(k: String): Int { val v = long(k); if (v < Int.MIN_VALUE || v > Int.MAX_VALUE) throw Bad(); return v.toInt() }
+    private fun Map<*, *>.exact(vararg keys: String) { if (this.keys != keys.toSet()) throw Bad() }
     private fun Map<*, *>.alg(): TotpCalculator.Algorithm = TotpCalculator.Algorithm.entries.firstOrNull { it.name.lowercase() == this["algorithm"] } ?: throw Bad()
     private fun Map<*, *>.bytes(k: String) = (this[k] as? ByteArray) ?: throw Bad()
     private fun Map<*, *>.map(k: String): Map<*, *> = (this[k] as? Map<*, *>) ?: throw Bad()
@@ -39,8 +41,16 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
         return try {
             val a = arguments as? Map<*, *> ?: if (method == "capability" || method == "purgePending" || method == "sweepOrphans") emptyMap<Any, Any>() else throw Bad()
             when (method) {
+                "capability", "purgePending", "sweepOrphans" -> a.exact()
+                "provision" -> a.exact("owner", "entry", "seedVersion", "algorithm", "digits", "periodSeconds", "seed", "epoch")
+                "generate" -> a.exact("owner", "entry", "seedVersion", "unixSeconds")
+                "delete" -> a.exact("owner", "entry", "seedVersion")
+                "clearOwner", "enableOwner" -> a.exact("owner", "epoch")
+                "reconcile" -> { a.exact("owner", "snapshot"); a.map("snapshot").exact("epoch", "revision", "complete", "versions", "tombstones") }
+            }
+            when (method) {
                 "capability" -> core.capability().let { ChannelReply.Ok(mapOf("protection" to it.protection.name, "reason" to it.reason)) }
-                "provision" -> { core.provision(a.str("owner"), a.str("entry"), a.long("seedVersion"), a.alg(), a.long("digits").toInt(), a.long("periodSeconds").toInt(), a.bytes("seed"), a.long("epoch")); ChannelReply.Ok(null) }
+                "provision" -> { core.provision(a.str("owner"), a.str("entry"), a.long("seedVersion"), a.alg(), a.int("digits"), a.int("periodSeconds"), a.bytes("seed"), a.long("epoch")); ChannelReply.Ok(null) }
                 "generate" -> ChannelReply.Ok(core.generate(a.str("owner"), a.str("entry"), a.long("seedVersion"), a.long("unixSeconds")))
                 "delete" -> { core.delete(a.str("owner"), a.str("entry"), a.long("seedVersion")); ChannelReply.Ok(null) }
                 "clearOwner" -> ChannelReply.Ok(mapOf("denied" to true, "purged" to core.clearOwner(a.str("owner"), a.long("epoch")).purged))
@@ -56,6 +66,7 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
                 else -> ChannelReply.NotImplemented
             }
         } catch (e: CustodyFailure) { ChannelReply.Err(e.error.name) }
-        catch (_: Bad) { seed?.fill(0); ChannelReply.Err(CustodyError.INVALID_INPUT.name) }
+        catch (_: Bad) { ChannelReply.Err(CustodyError.INVALID_INPUT.name) }
+        finally { seed?.fill(0) }
     }
 }
