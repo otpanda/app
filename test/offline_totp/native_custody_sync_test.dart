@@ -90,6 +90,101 @@ void main() {
       );
     },
   );
+  test(
+    'owner switch reads destination opt-out and enable stays unready',
+    () async {
+      final fake = FakeSeedCustody();
+      await fake.clearOwner('other', epoch: 0);
+      final sync = await NativeCustodySync.open(
+        custody: fake,
+        ownerId: 'o',
+        deviceId: 'd',
+      );
+      await sync.switchOwner(ownerId: 'other', deviceId: 'd2');
+      expect((await sync.readOwnerState()).enabled, false);
+      await expectLater(
+        sync.issue(
+          ownerId: 'other',
+          deviceId: 'd2',
+          entryId: 'e',
+          seedVersion: 1,
+        ),
+        throwsA(
+          isA<GuardException>().having(
+            (e) => e.error,
+            'error',
+            GuardError.disabled,
+          ),
+        ),
+      );
+      await sync.enable(1);
+      await expectLater(
+        sync.issue(
+          ownerId: 'other',
+          deviceId: 'd2',
+          entryId: 'e',
+          seedVersion: 1,
+        ),
+        throwsA(
+          isA<GuardException>().having(
+            (e) => e.error,
+            'error',
+            GuardError.notReady,
+          ),
+        ),
+      );
+      await expectLater(
+        sync.reconcile(
+          const GuardSnapshot(
+            ownerId: 'other',
+            deviceId: 'd2',
+            epoch: 2,
+            revision: 1,
+            complete: true,
+            versions: {'e': 1},
+          ),
+        ),
+        throwsA(
+          isA<GuardException>().having(
+            (e) => e.error,
+            'error',
+            GuardError.epochMismatch,
+          ),
+        ),
+      );
+      expect((await sync.readOwnerState()).epoch, 1);
+    },
+  );
+  test('a durable state divergence invalidates active authorization', () async {
+    final fake = FakeSeedCustody();
+    final sync = await NativeCustodySync.open(
+      custody: fake,
+      ownerId: 'o',
+      deviceId: 'd',
+    );
+    await sync.reconcile(
+      const GuardSnapshot(
+        ownerId: 'o',
+        deviceId: 'd',
+        epoch: 0,
+        revision: 1,
+        complete: true,
+        versions: {'e': 1},
+      ),
+    );
+    await fake.clearOwner('o', epoch: 0);
+    expect((await sync.readOwnerState()).enabled, false);
+    await expectLater(
+      sync.issue(ownerId: 'o', deviceId: 'd', entryId: 'e', seedVersion: 1),
+      throwsA(
+        isA<GuardException>().having(
+          (e) => e.error,
+          'error',
+          GuardError.disabled,
+        ),
+      ),
+    );
+  });
   const snapshot = GuardSnapshot(
     ownerId: 'o',
     deviceId: 'd',

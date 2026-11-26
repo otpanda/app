@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 import 'native_seed_custody.dart';
@@ -29,9 +31,15 @@ final class AndroidSeedCustody implements NativeSeedCustody {
 
   Never _invalid() => throw const CustodyException(CustodyError.unavailable);
 
+  /// A timed-out mutation may still complete natively. Callers must keep
+  /// authorization invalidated and re-read durable truth before continuing.
   Future<Object?> _call(String method, [Map<String, Object?>? args]) async {
     try {
-      return await _channel.invokeMethod<Object?>(method, args);
+      return await _channel
+          .invokeMethod<Object?>(method, args)
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw const CustodyException(CustodyError.unavailable);
     } on PlatformException catch (e) {
       throw CustodyException(_errors[e.code] ?? CustodyError.unavailable);
     } on MissingPluginException {

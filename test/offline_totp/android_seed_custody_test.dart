@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/offline_totp/android_seed_custody.dart';
@@ -13,6 +15,29 @@ void main() {
     custody = AndroidSeedCustody(channel: channel);
   });
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+  testWidgets('channel timeout is unavailable, never a fresh owner default', (
+    t,
+  ) async {
+    final pending = Completer<Object?>();
+    messenger.setMockMethodCallHandler(channel, (c) => pending.future);
+    Object? failure;
+    final request = custody.readOwnerState('owner').catchError((Object e) {
+      failure = e;
+      return const CustodyOwnerState(epoch: 99, enabled: false);
+    });
+    await t.pump(const Duration(seconds: 16));
+    await request;
+    expect(
+      failure,
+      isA<CustodyException>().having(
+        (e) => e.error,
+        'error',
+        CustodyError.unavailable,
+      ),
+    );
+    pending.complete({'epoch': 0, 'enabled': true});
+    await t.pump();
+  });
   test('owner state is strict, read-only metadata', () async {
     messenger.setMockMethodCallHandler(channel, (c) async {
       expect(c.method, 'readOwnerState');

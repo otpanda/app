@@ -36,7 +36,7 @@ object SeedCustodyHost {
                             NativeSeedCustodyCore(AndroidSeedVault(), OwnerStateFileStore(app))
                         ).also { handler = it }
                         h.handle(call.method, call.arguments)
-                    } catch (_: Exception) {
+                    } catch (_: Throwable) {
                         (call.arguments as? Map<*, *>)?.get("seed").let { (it as? ByteArray)?.fill(0) }
                         ChannelReply.Err("UNAVAILABLE")
                     }

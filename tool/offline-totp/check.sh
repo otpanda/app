@@ -22,6 +22,13 @@ rm -rf "$tmp/lib"; mkdir "$tmp/lib"
 echo 'val x = LocalSeedCustody(v, s, true)' > "$tmp/lib/Wiring.kt"
 if bash "$root/release-guard.sh" "$tmp" >/dev/null 2>&1; then echo 'FAIL positional-constructor self-test did not trip' >&2; exit 1; fi
 rm -rf "$tmp"; echo 'PASS release guard self-test trips on named and positional production use'
+# Unregistered-host guard negative control.
+mkdir -p "$tmp/lib" "$tmp/tool/offline-totp"
+cp "$root/SeedCustody.kt" "$tmp/tool/offline-totp/"
+bash "$root/release-guard.sh" "$tmp"
+echo 'SeedCustodyHost.register(context, messenger)' > "$tmp/lib/UnexpectedHost.kt"
+if bash "$root/release-guard.sh" "$tmp" >/dev/null 2>&1; then echo 'FAIL host-reference self-test did not trip' >&2; exit 1; fi
+rm -rf "$tmp"
 python3 "$root/runtime/verify-log-test.py"
 python3 "$root/runtime/extract-instrument-test.py"
 

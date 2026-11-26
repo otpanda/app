@@ -40,8 +40,18 @@ final class NativeCustodySync {
   }
 
   /// Shares the transition queue; the answer itself grants no seed access.
-  Future<CustodyOwnerState> readOwnerState() =>
-      _serial(() => _custody.readOwnerState(_owner));
+  Future<CustodyOwnerState> readOwnerState() => _serial(() async {
+    try {
+      final state = await _custody.readOwnerState(_owner);
+      if (state.epoch != _guard.epoch || state.enabled != _guard.enabled) {
+        _guard.disable();
+      }
+      return state;
+    } catch (_) {
+      _guard.disable();
+      rethrow;
+    }
+  });
 
   final NativeSeedCustody _custody;
   final NativeSeedSyncGuard _guard;
@@ -127,6 +137,11 @@ final class NativeCustodySync {
         seed: seed,
         epoch: epoch,
       );
+    } catch (_) {
+      // A native timeout may finish later. Do not issue another ticket until
+      // durable truth and a fresh authenticated snapshot have been reconciled.
+      _guard.restart();
+      rethrow;
     } finally {
       seed.fillRange(0, seed.length, 0);
     }
@@ -139,6 +154,7 @@ final class NativeCustodySync {
 
   /// Caller supplies the current durable epoch after clear, never a server epoch.
   Future<void> enable(int localEpoch) => _serial(() async {
+    _guard.disable();
     await _custody.enableOwner(_owner, epoch: localEpoch);
     _guard.enable(localEpoch);
   });
@@ -146,12 +162,17 @@ final class NativeCustodySync {
   Future<void> switchOwner({
     required String ownerId,
     required String deviceId,
-    required int localEpoch,
   }) => _serial(() async {
     // Invalidate old tickets even when durable cleanup fails.
     _guard.disable();
     await _custody.clearOwner(_owner, epoch: _guard.epoch);
-    _guard.switchOwner(ownerId: ownerId, deviceId: deviceId, epoch: localEpoch);
+    final state = await _custody.readOwnerState(ownerId);
+    _guard.switchOwner(
+      ownerId: ownerId,
+      deviceId: deviceId,
+      epoch: state.epoch,
+    );
+    if (!state.enabled) _guard.disable();
     _owner = ownerId;
   });
 }
