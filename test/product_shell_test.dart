@@ -250,16 +250,104 @@ void main() {
         ),
       );
       await pump(t, tr, copyHintStore: pref);
-      expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+      expect(find.text('Tap a card to copy'), findsOneWidget);
       await t.tap(find.text('Acme'));
       await t.pump();
       expect(find.text('Copied'), findsOneWidget);
-      expect(find.text('Tap a code card to copy it.'), findsNothing);
+      expect(find.text('Tap a card to copy'), findsNothing);
       expect(pref.seen, true);
       await t.pumpWidget(const SizedBox());
       await t.pump();
       await pump(t, tr, copyHintStore: pref);
-      expect(find.text('Tap a code card to copy it.'), findsNothing);
+      expect(find.text('Tap a card to copy'), findsNothing);
+    },
+  );
+
+  testWidgets('tutorial can be dismissed and stays dismissed on this device', (
+    t,
+  ) async {
+    final pref = TestCopyHint();
+    final tr = FakeTransport(
+      routes(
+        entries: [
+          {
+            'entry_id': 'e',
+            'service_name': 'Acme',
+            'account_name': 'me',
+            'capabilities': {'manage': true},
+          },
+        ],
+        codes: [
+          {
+            'entryId': 'e',
+            'code': '123456',
+            'receivedAt': now - 1000,
+            'expiresAt': now + 60000,
+          },
+        ],
+      ),
+    );
+    await pump(t, tr, copyHintStore: pref);
+    expect(find.byKey(const Key('copy-tutorial-banner')), findsOneWidget);
+    await t.tap(find.byKey(const Key('dismiss-copy-tutorial')));
+    await t.pump();
+    expect(find.byKey(const Key('copy-tutorial-banner')), findsNothing);
+    expect(pref.seen, true);
+    await t.pumpWidget(const SizedBox());
+    await pump(t, tr, copyHintStore: pref);
+    expect(find.byKey(const Key('copy-tutorial-banner')), findsNothing);
+  });
+
+  testWidgets(
+    'no tutorial for empty or placeholder, appears when copyable code arrives',
+    (t) async {
+      final pref = TestCopyHint();
+      final tr = FakeTransport(routes(entries: [], codes: []));
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.byKey(const Key('copy-tutorial-banner')), findsNothing);
+      expect(pref.seen, false);
+      tr.routes.addAll(
+        routes(
+          entries: [
+            {
+              'entry_id': 'e',
+              'service_name': 'Acme',
+              'account_name': 'me',
+              'capabilities': {'manage': true},
+            },
+          ],
+          codes: [],
+        ),
+      );
+      await t.pumpWidget(const SizedBox());
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.byKey(const Key('copy-tutorial-banner')), findsNothing);
+      expect(pref.seen, false);
+      tr.routes.addAll(
+        routes(
+          entries: [
+            {
+              'entry_id': 'e',
+              'service_name': 'Acme',
+              'account_name': 'me',
+              'capabilities': {'manage': true},
+            },
+          ],
+          codes: [
+            {
+              'entryId': 'e',
+              'code': '123456',
+              'receivedAt': now - 1000,
+              'expiresAt': now + 60000,
+            },
+          ],
+        ),
+      );
+      await t.pumpWidget(const SizedBox());
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.byKey(const Key('copy-tutorial-banner')), findsOneWidget);
+      expect(find.text('START HERE'), findsNothing);
+      expect(pref.seen, false);
     },
   );
 
@@ -289,17 +377,37 @@ void main() {
       );
       await pump(t, tr, copyHintStore: pref);
       expect(find.byIcon(Icons.copy_outlined), findsNothing);
-      expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+      expect(find.text('Tap a card to copy'), findsOneWidget);
       if (Platform.isLinux) {
         await expectLater(
           find.byType(ProductShell),
           matchesGoldenFile('goldens/responsive-copy-mobile.png'),
         );
       }
+      t.view.physicalSize = const Size(320, 740);
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/copy-tutorial-narrow.png'),
+        );
+      }
+      t.platformDispatcher.textScaleFactorTestValue = 1.6;
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/copy-tutorial-large-text.png'),
+        );
+      }
+      t.platformDispatcher.clearTextScaleFactorTestValue();
+      await t.pumpAndSettle();
       t.view.physicalSize = const Size(1200, 900);
       await t.pumpAndSettle();
       expect(find.byIcon(Icons.copy_outlined), findsOneWidget);
-      expect(find.text('Tap a code card to copy it.'), findsNothing);
+      expect(find.text('Tap a card to copy'), findsNothing);
       if (Platform.isLinux) {
         await expectLater(
           find.byType(ProductShell),
@@ -317,10 +425,10 @@ void main() {
       t.view.physicalSize = const Size(390, 844);
       await t.pumpAndSettle();
       expect(find.byIcon(Icons.copy_outlined), findsNothing);
-      expect(find.text('Tap a code card to copy it.'), findsNothing);
+      expect(find.text('Tap a card to copy'), findsNothing);
       await t.pumpWidget(const SizedBox());
       await pump(t, tr, copyHintStore: TestCopyHint());
-      expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+      expect(find.text('Tap a card to copy'), findsOneWidget);
     },
   );
   testWidgets(
