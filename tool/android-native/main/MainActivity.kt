@@ -20,6 +20,11 @@ class MainActivity : FlutterActivity() {
     private val prefs get() = getSharedPreferences("otpanda_native", Context.MODE_PRIVATE)
     private val aliases = arrayOf("otpanda_renewal_a", "otpanda_renewal_b")
 
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        AppLockHost.protect(this)
+        super.onCreate(savedInstanceState)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val ch = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.otpanda/native")
@@ -48,6 +53,7 @@ class MainActivity : FlutterActivity() {
                 result.error("keystore", e.javaClass.simpleName, null)
             }
         }
+        AppLockHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
         GoogleFlavor.register(this, flutterEngine.dartExecutor.binaryMessenger)
         PasskeyHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
         DeviceProofHost.register(this, flutterEngine.dartExecutor.binaryMessenger)

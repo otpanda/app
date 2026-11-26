@@ -55,6 +55,7 @@ class BrowserAccountPage extends StatefulWidget {
   final bool accountOnly;
   final bool workspaceEnabled;
   final int Function()? clock;
+  final Widget? localSecuritySetting;
 
   /// Route id chosen from outside (the router). Null keeps the legacy
   /// behavior of restoring the saved view. One of the allow-listed ids:
@@ -76,6 +77,7 @@ class BrowserAccountPage extends StatefulWidget {
     this.accountOnly = false,
     this.workspaceEnabled = false,
     this.clock,
+    this.localSecuritySetting,
     this.navigation,
     this.onNavigate,
   });
@@ -1805,7 +1807,15 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       },
                       child: passkeysOpen
                           ? passkeysPage()
-                          : accountSecurityPage(),
+                          : widget.localSecuritySetting == null
+                          ? accountSecurityPage()
+                          : Column(
+                              children: [
+                                if (widget.localSecuritySetting != null)
+                                  widget.localSecuritySetting!,
+                                accountSecurityPage(),
+                              ],
+                            ),
                     ),
                     SettingsCategory.devices: devicesPage(),
                     SettingsCategory.organization: organizationReady

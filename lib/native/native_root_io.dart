@@ -8,6 +8,7 @@ import 'android_adapters.dart';
 import 'native_assignment.dart';
 import 'native_bridge.dart';
 import 'native_app.dart';
+import 'native_app_lock.dart';
 import 'native_navigation.dart';
 import 'native_auth.dart';
 import 'native_device_proof.dart';
@@ -62,6 +63,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   late final NativeSessionBridge bridge;
   final passkeys = AndroidPasskeySource();
   bool ready = false;
+  final localLock = LocalLockController(ChannelLocalLock());
   final navigationHistory = NativeNavigationHistory();
   late final NativeStartupRecovery startup;
   late final NativeDevicesService devices;
@@ -178,12 +180,15 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     devices.dispose();
     bridge.disposeRealtime();
     navigationHistory.dispose();
+    localLock.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => ready
       ? NativeApp(
+          appWrapper: (context, child) =>
+              NativeAppLock(controller: localLock, child: child),
           controller: controller,
           googleAvailable: widget.google.available,
           version: const String.fromEnvironment('APP_VERSION'),
@@ -193,6 +198,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
             builder: (context, route, navigate) {
               final page = BrowserAccountPage(
                 bridge: bridge,
+                localSecuritySetting: LocalLockSetting(controller: localLock),
                 navigation: route,
                 onNavigate: navigate,
                 accountOnly: true,

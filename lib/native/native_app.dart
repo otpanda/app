@@ -19,7 +19,9 @@ class NativeApp extends StatelessWidget {
     this.version = '',
     this.signedInBuilder,
     this.authBridge,
+    this.appWrapper,
   });
+  final Widget Function(BuildContext, Widget)? appWrapper;
   final NativeSessionController controller;
   final bool googleAvailable;
   final String version;
@@ -36,6 +38,7 @@ class NativeApp extends StatelessWidget {
     title: 'OTPanda',
     debugShowCheckedModeBanner: false,
     theme: otpandaTheme(),
+    builder: (context, child) => appWrapper?.call(context, child!) ?? child!,
     home: NativeSessionPage(
       controller: controller,
       googleAvailable: googleAvailable,
