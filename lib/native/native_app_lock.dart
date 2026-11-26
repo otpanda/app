@@ -1,13 +1,25 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
+import 'dart:convert';
+import 'dart:math';
+
+import 'native_local_lock_recovery.dart';
+
 abstract interface class LocalLockPlatform {
   Future<bool> enabled();
   Future<bool> verify();
   Future<void> setEnabled(bool value);
 }
 
-class ChannelLocalLock implements LocalLockPlatform {
+abstract interface class PasskeyDisablePlatform {
+  Future<void> disableAfterPasskey();
+}
+
+class ChannelLocalLock implements LocalLockPlatform, PasskeyDisablePlatform {
+  @override
+  Future<void> disableAfterPasskey() =>
+      channel.invokeMethod('disableAfterPasskey');
   static const channel = MethodChannel('app.otpanda/app-lock');
   @override
   Future<bool> enabled() async =>
@@ -23,6 +35,57 @@ class ChannelLocalLock implements LocalLockPlatform {
 class LocalLockController extends ChangeNotifier {
   LocalLockController(this.platform);
   final LocalLockPlatform platform;
+  NativeLocalLockRecovery? recovery;
+  String lockGeneration = base64UrlEncode(
+    List<int>.generate(32, (_) => Random.secure().nextInt(256)),
+  ).replaceAll('=', '');
+  void _rotate() {
+    lockGeneration = base64UrlEncode(
+      List<int>.generate(32, (_) => Random.secure().nextInt(256)),
+    ).replaceAll('=', '');
+  }
+
+  Future<void> recover({required bool disable}) async {
+    if (busy || !enabled || !locked || recovery == null) return;
+    busy = true;
+    error = null;
+    _emit();
+    final generation = lockGeneration;
+    try {
+      final ok = await recovery!.verify(
+        disable ? 'local-lock-disable' : 'local-unlock-once',
+        generation,
+      );
+      if (_disposed || generation != lockGeneration || !ok) return;
+      if (disable) {
+        final p = platform;
+        if (p is! PasskeyDisablePlatform) throw StateError('Unavailable');
+        await (p as PasskeyDisablePlatform).disableAfterPasskey();
+        if (_disposed || generation != lockGeneration) return;
+        enabled = false;
+      }
+      if (foreground) {
+        locked = false;
+      } else {
+        _verifiedAwaitingResume = true;
+        _verifiedAt = _elapsed.elapsedMilliseconds;
+      }
+      _rotate();
+    } catch (_) {
+      error = 'Passkey verification did not complete. App lock remains on.';
+    } finally {
+      busy = false;
+      _emit();
+    }
+  }
+
+  void sessionChanged() {
+    _rotate();
+    _verifiedAwaitingResume = false;
+    if (enabled) locked = true;
+    _emit();
+  }
+
   bool ready = false, enabled = false, locked = true, busy = false;
   String? error;
   bool foreground = true;
@@ -67,6 +130,7 @@ class LocalLockController extends ChangeNotifier {
     _verifiedAwaitingResume = false;
     if (enabled && !locked) {
       locked = true;
+      _rotate();
       _emit();
     }
   }
@@ -110,6 +174,7 @@ class LocalLockController extends ChangeNotifier {
         _verifiedAwaitingResume = enabled && !foreground;
         _verifiedAt = _elapsed.elapsedMilliseconds;
         error = null;
+        _rotate();
       }
     } catch (_) {
       error = 'Device lock was not changed. A secure screen lock is required.';
@@ -178,6 +243,28 @@ class _NativeAppLockState extends State<NativeAppLock>
                         const Icon(Icons.lock_outline, size: 44),
                         const SizedBox(height: 16),
                         const Text('OTPanda is locked'),
+                        const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text(
+                            'If your secure screen lock was removed or device unlock is unavailable, verify a passkey to unlock once or turn app lock off.',
+                          ),
+                        ),
+                        if (c.recovery?.passkeys.available ?? false) ...[
+                          TextButton(
+                            onPressed: c.busy
+                                ? null
+                                : () => c.recover(disable: false),
+                            child: const Text('Unlock once with a passkey'),
+                          ),
+                          TextButton(
+                            onPressed: c.busy
+                                ? null
+                                : () => c.recover(disable: true),
+                            child: const Text(
+                              'Turn off app lock with a passkey',
+                            ),
+                          ),
+                        ],
                         if (c.error != null) Text(c.error!),
                         const SizedBox(height: 16),
                         FilledButton(

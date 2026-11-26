@@ -9,6 +9,8 @@ import 'native_assignment.dart';
 import 'native_bridge.dart';
 import 'native_app.dart';
 import 'native_app_lock.dart';
+import 'native_local_lock_recovery.dart';
+import 'native_local_lock_session.dart';
 import 'native_navigation.dart';
 import 'native_auth.dart';
 import 'native_device_proof.dart';
@@ -125,6 +127,11 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       settingsEnabled: nativeSettingsEnabled,
       realtimeConnector: androidRealtimeConnector(apiOrigin),
     );
+    localLock.recovery = NativeLocalLockRecovery(
+      post: bridge.localLockPost,
+      passkeys: passkeys,
+      deviceId: () => controller.session?.deviceId,
+    );
     bridge.assignment = NativeAssignmentDriver(
       post: bridge.assignmentPost,
       source: proof,
@@ -151,7 +158,16 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
 
   // Off unless NATIVE_AUTH_ENABLED. Per session (see NativeStartupRecovery):
   // sign-out or another session clears and discards; offline changes nothing.
+  final _lockSession = NativeLocalLockSessionBoundary();
   void _maybeRecover() {
+    if (_lockSession.update(
+      controller.session?.deviceId,
+      signedOut:
+          controller.phase == NativeSessionPhase.signedOut ||
+          controller.phase == NativeSessionPhase.signInRequired,
+    )) {
+      localLock.sessionChanged();
+    }
     // Only a real sign-out or sign-in-required clears state and the retry
     // floor. unknown (starting) and offline are transient: nothing changes.
     switch (controller.phase) {

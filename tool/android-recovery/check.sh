@@ -11,3 +11,6 @@ java -cp "$out/classes:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.recover
 java -cp "$out/classes:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.recovery.EnrollmentRecordTestKt
 compile "$ANDROID_JAR" "$root/DeviceProof.kt" "$root/DeviceProofError.kt" "$root/NoBackupPendingStore.kt" "$root/DurableDeviceKey.kt" "$root/ActivityProofOperation.kt" "$root/EnrollmentRecord.kt" "$root/NoBackupEnrollmentStore.kt"
 printf '%s\n' 'PASS inactive Android primitive compiles; OS/Keystore lifecycle behavior remains unverified'
+# Native-owned local-lock recovery finish (proposal, inactive): JVM logic and transport tests with fakes. Not OS credential UI or device evidence.
+compile '' "$root/LocalLockRecovery.kt" "$root/HttpsLockApi.kt" "$root/LocalLockRecoveryTest.kt"
+java -cp "$out/classes:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.recovery.LocalLockRecoveryTestKt
