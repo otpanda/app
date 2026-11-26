@@ -8,7 +8,14 @@ work=$(mktemp -d)
 java -cp "$KOTLIN_LIB/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect \
   -classpath "$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar:$ANDROID_JAR" -d "$work/classes" \
   "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt" "$root/runtime/RuntimeFixture.kt"
-"$d8" --lib "$ANDROID_JAR" --output "$work/fx.zip" "$work/classes" "$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar"
+python3 - "$work/classes" "$work/classes.jar" <<'PYZIP'
+import pathlib, sys, zipfile
+root = pathlib.Path(sys.argv[1])
+with zipfile.ZipFile(sys.argv[2], 'w') as archive:
+    for path in root.rglob('*.class'):
+        archive.write(path, path.relative_to(root))
+PYZIP
+"$d8" --lib "$ANDROID_JAR" --output "$work/fx.zip" "$work/classes.jar" "$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar"
 adb push "$work/fx.zip" /data/local/tmp/otpanda-fx.zip >/dev/null
 adb shell rm -rf /data/local/tmp/otpanda-fixture; adb shell mkdir -p /data/local/tmp/otpanda-fixture
 # Pass/fail comes ONLY from verify-log.py (non-empty log, one END marker per phase, minimum oks, result markers, expected API, no crash markers).
