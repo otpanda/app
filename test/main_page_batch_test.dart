@@ -763,8 +763,9 @@ void main() {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
         (call) async {
-          if (call.method == 'Clipboard.setData')
+          if (call.method == 'Clipboard.setData') {
             throw PlatformException(code: 'denied');
+          }
           return null;
         },
       );
@@ -1352,8 +1353,9 @@ void main() {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
         (call) async {
-          if (call.method == 'Clipboard.setData')
+          if (call.method == 'Clipboard.setData') {
             invalidCopy = (call.arguments as Map)['text'] as String;
+          }
           return null;
         },
       );
