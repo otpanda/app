@@ -1404,6 +1404,106 @@ void main() {
   );
 
   testWidgets(
+    'boundary timer rearms across two early transitions without one-second polling',
+    (tester) async {
+      if (Platform.isLinux && !_fontsLoaded) {
+        for (final family in ['Figtree', 'BricolageGrotesque']) {
+          final loader = FontLoader(family);
+          for (final weight
+              in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+            final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                ),
+              ),
+            );
+          }
+          await loader.load();
+        }
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File(
+                  '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
+              ),
+            ),
+          );
+        await icons.load();
+        _fontsLoaded = true;
+      }
+      final base = tester.binding.clock.now();
+      int clock() => tester.binding.clock.now().difference(base).inMilliseconds;
+      final bridge = TimerCodesBridge({
+        '/v1/manage/session': SessionResponse(
+          200,
+          jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+        ),
+        '/v1/manage/entries': SessionResponse(
+          200,
+          jsonEncode({
+            'entries': [
+              {
+                'entry_id': 'a',
+                'label': 'Test',
+                'service_id': 'custom-totp',
+                'capabilities': {'manage': true},
+                'account_name': 'me',
+                'totp': true,
+              },
+            ],
+          }),
+        ),
+        '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+        '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+        '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+      });
+      final controller = ReadWorkspaceController(
+        bridge: bridge,
+        clock: () => 45000,
+      );
+      await controller.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: controller,
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+            clock: () => 45000,
+            onSignedOut: () {},
+            batchClock: clock,
+            batchPolicy: const BatchPolicy(
+              maxEntries: 1,
+              maxTotalCodes: 32,
+              minPeriodSeconds: 20,
+              maxPeriodSeconds: 86400,
+              maxWindowSeconds: 600,
+              minRemainingMs: 1000,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('1111111'), findsOneWidget);
+      // Advance to the first early switch then a second period. The timer
+      // callback must notify/re-arm even though no new batch is fetched.
+      await tester.pump(const Duration(milliseconds: 12875));
+      expect(find.text('2222222'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 30000));
+      expect(find.text('3333333'), findsOneWidget);
+      expect(bridge.batches, 1);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
     'brief stale fallback is grey updating, inert, and clears after two seconds',
     (tester) async {
       if (Platform.isLinux && !_fontsLoaded) {
@@ -1586,6 +1686,41 @@ class BriefStaleBridge extends BatchBridge {
               'digits': 7,
               'validFrom': 30,
               'codes': ['0000001'],
+            },
+        ],
+        'omitted': [],
+      }),
+    );
+  }
+}
+
+class TimerCodesBridge extends BatchBridge {
+  TimerCodesBridge(super.routes);
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    batches++;
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 45075,
+        'coverageUntil': 600000,
+        'totalCodes': 20 * ids.length,
+        'entries': [
+          for (final id in ids)
+            {
+              'entryId': id,
+              'period': 30,
+              'digits': 7,
+              'validFrom': 30,
+              'codes': [
+                '1111111',
+                '2222222',
+                '3333333',
+                ...List.filled(17, '4444444'),
+              ],
             },
         ],
         'omitted': [],
