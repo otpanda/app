@@ -1877,12 +1877,23 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         entryEditEnabled: widget.entryEditEnabled,
         entryDomainsEnabled: widget.entryDomainsEnabled,
         controller: workspace,
-        batchPolicy: const bool.fromEnvironment('OTPANDA_BATCH_ENABLED')
+        batchPolicy:
+            const bool.fromEnvironment(
+              'OTPANDA_BATCH_ENABLED',
+              defaultValue: true,
+            )
             ? const BatchPolicy(
-                maxEntries: int.fromEnvironment('OTPANDA_BATCH_ENTRY_CAP'),
-                maxTotalCodes: int.fromEnvironment('OTPANDA_BATCH_CODE_BUDGET'),
+                maxEntries: int.fromEnvironment(
+                  'OTPANDA_BATCH_ENTRY_CAP',
+                  defaultValue: 3,
+                ),
+                maxTotalCodes: int.fromEnvironment(
+                  'OTPANDA_BATCH_CODE_BUDGET',
+                  defaultValue: 100,
+                ),
                 minPeriodSeconds: int.fromEnvironment(
                   'OTPANDA_BATCH_MIN_PERIOD',
+                  defaultValue: 20,
                 ),
                 maxPeriodSeconds: 86400,
                 maxWindowSeconds: 600,
@@ -1919,7 +1930,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 semanticLabel: 'OTPanda',
               ),
               const SizedBox(width: 10),
-              const Text('OTPanda'),
+              const Flexible(
+                child: Text('OTPanda', overflow: TextOverflow.ellipsis),
+              ),
             ],
           ),
         ),
@@ -1958,7 +1971,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 semanticLabel: 'OTPanda',
               ),
               const SizedBox(width: 10),
-              const Text('OTPanda'),
+              const Flexible(
+                child: Text('OTPanda', overflow: TextOverflow.ellipsis),
+              ),
             ],
           ),
           actions: [

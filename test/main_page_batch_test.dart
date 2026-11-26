@@ -80,6 +80,55 @@ class HorizonBridge extends FakeTransport implements TotpBatchBridge {
   }
 }
 
+class FallbackBridge extends BatchBridge implements TotpManagementBridge {
+  FallbackBridge(super.routes);
+  int singles = 0;
+  @override
+  Future<SessionResponse> read(String path) async =>
+      path == '/v1/manage/session'
+      ? SessionResponse(
+          200,
+          jsonEncode({
+            'ownerId': 'owner',
+            'expiresAt': DateTime.now().millisecondsSinceEpoch + 60000,
+          }),
+        )
+      : super.read(path);
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    batches++;
+    return const SessionResponse(503, '{}');
+  }
+
+  @override
+  Future<String> addTotp(
+    String label,
+    String account,
+    String secret, {
+    String? catalogId,
+  }) async => 'a';
+  @override
+  Future<SessionResponse> totpCode(String id) async {
+    singles++;
+    final now = DateTime.now().millisecondsSinceEpoch,
+        start = now ~/ 30000 * 30;
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'entryId': id,
+        'code': '123456',
+        'period': 30,
+        'validFrom': start,
+        'validUntil': start + 30,
+        'serverNow': now,
+      }),
+    );
+  }
+}
+
 class UnavailableBridge extends FakeTransport implements TotpBatchBridge {
   UnavailableBridge(super.routes);
   int batches = 0;
@@ -388,32 +437,34 @@ void main() {
   testWidgets(
     'main page automatically requests a batch and shows padded generated code with copy control',
     (tester) async {
-      for (final family in ['Figtree', 'BricolageGrotesque']) {
-        final loader = FontLoader(family);
-        for (final weight
-            in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
-          final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
-          loader.addFont(
+      if (Platform.isLinux) {
+        for (final family in ['Figtree', 'BricolageGrotesque']) {
+          final loader = FontLoader(family);
+          for (final weight
+              in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+            final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                ),
+              ),
+            );
+          }
+          await loader.load();
+        }
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(
             Future.value(
               ByteData.sublistView(
-                File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                File(
+                  '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
               ),
             ),
           );
-        }
-        await loader.load();
+        await icons.load();
       }
-      final icons = FontLoader('MaterialIcons')
-        ..addFont(
-          Future.value(
-            ByteData.sublistView(
-              File(
-                '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-              ).readAsBytesSync(),
-            ),
-          ),
-        );
-      await icons.load();
       final bridge = BatchBridge({
         '/v1/manage/session': SessionResponse(
           200,
@@ -468,10 +519,12 @@ void main() {
       expect(bridge.batches, 1);
       expect(find.text('0000001'), findsOneWidget);
       expect(find.byTooltip('Copy code'), findsOneWidget);
-      await expectLater(
-        find.byType(ProductShell),
-        matchesGoldenFile('goldens/mainpage-batch.png'),
-      );
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/mainpage-batch.png'),
+        );
+      }
       String? copied;
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
@@ -498,35 +551,102 @@ void main() {
       controller.dispose();
     },
   );
+  testWidgets('batch 503 keeps previous entry tap single-code flow usable', (
+    tester,
+  ) async {
+    final bridge = FallbackBridge({
+      '/v1/manage/session': SessionResponse(
+        200,
+        jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+      ),
+      '/v1/manage/entries': SessionResponse(
+        200,
+        jsonEncode({
+          'entries': [
+            {
+              'entry_id': 'a',
+              'label': 'Test',
+              'service_id': 'custom-totp',
+              'capabilities': {'manage': true},
+              'account_name': 'me',
+              'totp': true,
+            },
+          ],
+        }),
+      ),
+      '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+      '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+      '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+    });
+    final controller = ReadWorkspaceController(
+      bridge: bridge,
+      clock: () => 45000,
+    );
+    await controller.refresh();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: otpandaTheme(),
+        home: ProductShell(
+          controller: controller,
+          onCopyAssigned: (_) async {},
+          onCopyPrivate: (_) async {},
+          clock: () => 45000,
+          onSignedOut: () {},
+          batchPolicy: const BatchPolicy(
+            maxEntries: 1,
+            maxTotalCodes: 32,
+            minPeriodSeconds: 20,
+            maxPeriodSeconds: 86400,
+            maxWindowSeconds: 600,
+            minRemainingMs: 1000,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(bridge.batches, 1);
+    expect(find.text('0000001'), findsNothing);
+    await tester.tap(find.text('Test'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(bridge.singles, 1);
+    expect(find.text('123456'), findsWidgets);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    controller.dispose();
+  });
   testWidgets(
     'viewport batching advances beyond first cap and scrolls to later entries without duplicate keys',
     (tester) async {
-      for (final family in ['Figtree', 'BricolageGrotesque']) {
-        final loader = FontLoader(family);
-        for (final weight
-            in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
-          final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
-          loader.addFont(
+      if (Platform.isLinux) {
+        for (final family in ['Figtree', 'BricolageGrotesque']) {
+          final loader = FontLoader(family);
+          for (final weight
+              in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+            final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                ),
+              ),
+            );
+          }
+          await loader.load();
+        }
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(
             Future.value(
               ByteData.sublistView(
-                File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                File(
+                  '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
               ),
             ),
           );
-        }
-        await loader.load();
+        await icons.load();
       }
-      final icons = FontLoader('MaterialIcons')
-        ..addFont(
-          Future.value(
-            ByteData.sublistView(
-              File(
-                '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-              ).readAsBytesSync(),
-            ),
-          ),
-        );
-      await icons.load();
       final bridge = BatchBridge({
         '/v1/manage/session': SessionResponse(
           200,

@@ -3,6 +3,9 @@ set -euo pipefail
 mkdir -p back-out
 adb install -r build/app/outputs/flutter-apk/app-fdroid-debug.apk
 adb shell am force-stop com.google.android.apps.nexuslauncher || true
+adb shell screenrecord --time-limit 35 /sdcard/otpanda-startup.mp4 &
+record_pid=$!
+sleep 1
 adb shell am start -n app.otpanda/.MainActivity
 for wait_try in $(seq 1 30);do
  sleep 2
@@ -11,6 +14,8 @@ for wait_try in $(seq 1 30);do
  adb pull /sdcard/ready.xml back-out/ready.xml || true
  if grep -q 'Account &amp; security' back-out/ready.xml;then break;fi
 done
+wait "$record_pid" || true
+adb pull /sdcard/otpanda-startup.mp4 back-out/startup.mp4
 adb logcat -d > back-out/startup-logcat.txt
 shot(){ adb exec-out screencap -p > "back-out/$1.png";adb shell uiautomator dump /sdcard/back.xml;adb pull /sdcard/back.xml "back-out/$1.xml"; }
 shot codes
