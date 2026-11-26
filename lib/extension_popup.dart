@@ -310,10 +310,11 @@ class _ExtensionPopupViewState extends State<ExtensionPopupView> {
       appBar: AppBar(
         title: title,
         actions: [
-          TextButton(
-            onPressed: () => showExtensionAutofill(context),
-            child: const Text('Autofill'),
-          ),
+          if (extensionAutofillAvailable)
+            TextButton(
+              onPressed: () => showExtensionAutofill(context),
+              child: const Text('Autofill'),
+            ),
           TextButton(onPressed: signOut, child: const Text('Sign out')),
         ],
       ),

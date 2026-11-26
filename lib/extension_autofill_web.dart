@@ -3,6 +3,10 @@ import 'dart:js_interop';
 
 import 'package:material_ui/material_ui.dart';
 
+@JS('OTPandaAutofill')
+external JSAny? get _autofill;
+bool get extensionAutofillAvailable => _autofill.isDefinedAndNotNull;
+
 @JS('OTPandaAutofill.status')
 external JSPromise<JSAny?> _status();
 @JS('OTPandaAutofill.request')
