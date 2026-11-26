@@ -52,6 +52,10 @@
   let route;const routeListeners=new Set();
   const persistentRoute=r=>validRoute(r)&&!r.startsWith('recovery')&&r!=='demo';
   try{const r=sessionStorage.getItem(ROUTE_KEY);if(persistentRoute(r))route=r;}catch{}
+  // One-time, neutral Gmail return marker set by the API callback redirect (?gmail=connected|refused). It carries no account,
+  // mailbox or reason. It is stripped from the URL immediately, kept in memory only, and read once by takeGmailResult.
+  let gmailResult='';
+  {const m=/^\?gmail=(connected|refused)$/.exec(location.search);if(m&&location.hash==='#/sources'){gmailResult=m[1];try{history.replaceState(null,'',location.pathname+location.hash);}catch{}}}
   const routeHash=location.hash.startsWith('#/');
   if(routeHash)route=validRoute(location.hash.slice(2))?location.hash.slice(2):'codes';
   const saveRoute=()=>{try{if(persistentRoute(route))sessionStorage.setItem(ROUTE_KEY,route);else sessionStorage.removeItem(ROUTE_KEY);}catch{}};
@@ -522,6 +526,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       }
       await post('verify',value);if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({...g.saved,created:Date.now()}));googlePending=undefined;location.assign(API+'/auth/google/continue/complete#'+new URLSearchParams({token:g.token}));
     },
+    takeGmailResult:async()=>{const r=gmailResult;gmailResult='';return r;},
     gmailSourceStatus:async()=>{
       if(!await maintainSession(true))return {status:401,body:'{}'};
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)return {status:401,body:'{}'};

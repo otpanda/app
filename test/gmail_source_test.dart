@@ -30,6 +30,14 @@ class Bridge implements GmailSourceBridge {
     );
   }
 
+  String returned = '';
+  @override
+  Future<String> takeGmailResult() async {
+    final r = returned;
+    returned = '';
+    return r;
+  }
+
   @override
   Future<void> connectGmail() async {
     connects++;
@@ -362,4 +370,98 @@ void main() {
       expect(() => GmailDisconnectResult.fromJson('[]'), throwsFormatException);
     },
   );
+
+  Widget card(Bridge b, {bool source = false}) => MaterialApp(
+    home: Scaffold(
+      body: GmailSourceConnect(bridge: b, hasGmailSource: source),
+    ),
+  );
+  const connectedText = 'Gmail connected.';
+  testWidgets(
+    'connected marker shows success only with ready status and a listed Gmail source',
+    (t) async {
+      final b = Bridge()
+        ..ready = true
+        ..returned = 'connected';
+      await t.pumpWidget(card(b, source: true));
+      await t.pumpAndSettle();
+      expect(find.text(connectedText), findsOneWidget);
+      expect(b.checks, greaterThan(0));
+      expect(b.returned, '');
+    },
+  );
+  testWidgets('spoofed connected marker with not-ready status shows nothing', (
+    t,
+  ) async {
+    final b = Bridge()
+      ..ready = false
+      ..returned = 'connected';
+    await t.pumpWidget(card(b, source: true));
+    await t.pumpAndSettle();
+    expect(find.text(connectedText), findsNothing);
+    expect(find.text('Email collection is not available yet.'), findsOneWidget);
+  });
+  testWidgets('spoofed connected marker with no Gmail source shows nothing', (
+    t,
+  ) async {
+    final b = Bridge()
+      ..ready = true
+      ..returned = 'connected';
+    await t.pumpWidget(card(b));
+    await t.pumpAndSettle();
+    expect(find.text(connectedText), findsNothing);
+    expect(find.text('Connect Gmail'), findsOneWidget);
+  });
+  testWidgets(
+    'claim waits for the source list, then is cleared when the source disappears',
+    (t) async {
+      final b = Bridge()
+        ..ready = true
+        ..returned = 'connected';
+      await t.pumpWidget(card(b));
+      await t.pumpAndSettle();
+      expect(find.text(connectedText), findsNothing);
+      await t.pumpWidget(card(b, source: true));
+      await t.pumpAndSettle();
+      expect(find.text(connectedText), findsOneWidget);
+      await t.pumpWidget(card(b));
+      await t.pumpAndSettle();
+      expect(find.text(connectedText), findsNothing);
+      await t.pumpWidget(card(b, source: true));
+      await t.pumpAndSettle();
+      expect(find.text(connectedText), findsNothing);
+    },
+  );
+  testWidgets('refused return shows one neutral message with no reason', (
+    t,
+  ) async {
+    final b = Bridge()
+      ..ready = true
+      ..returned = 'refused';
+    await t.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: GmailSourceConnect(bridge: b)),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(
+      find.text('Gmail was not connected. Try again when you are ready.'),
+      findsOneWidget,
+    );
+    expect(find.text(connectedText), findsNothing);
+    expect(find.textContaining('test@example.test'), findsNothing);
+    expect(find.textContaining('dev_mailbox_refused'), findsNothing);
+  });
+  testWidgets('no return marker leaves the default card unchanged', (t) async {
+    final b = Bridge()..ready = true;
+    await t.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: GmailSourceConnect(bridge: b)),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(find.text(connectedText), findsNothing);
+    expect(find.textContaining('was not connected'), findsNothing);
+    expect(find.text('Connect Gmail'), findsOneWidget);
+  });
 }

@@ -84,6 +84,7 @@ extension type _Session(JSObject _) implements JSObject {
   external void logout();
   external JSPromise<_ReadResponse> gmailSourceStatus();
   external JSPromise<JSAny?> connectGmail();
+  external JSPromise<JSString> takeGmailResult();
   external JSPromise<JSString> disconnectGmail(JSString sourceId);
   external JSPromise<JSString> addTotp(
     JSString label,
@@ -160,6 +161,10 @@ class _Browser
   Future<void> connectGmail() async {
     await _session.connectGmail().toDart;
   }
+
+  @override
+  Future<String> takeGmailResult() async =>
+      (await _session.takeGmailResult().toDart).toDart;
 
   @override
   Future<GmailDisconnectResult> disconnectGmail(String id) async =>

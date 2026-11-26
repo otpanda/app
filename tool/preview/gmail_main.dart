@@ -17,6 +17,8 @@ class Fake implements GmailSourceBridge {
   Future<SessionResponse> gmailSourceStatus() async =>
       SessionResponse(200, jsonEncode(status));
   @override
+  Future<String> takeGmailResult() async => '';
+  @override
   Future<void> connectGmail() async {}
   @override
   Future<GmailDisconnectResult> disconnectGmail(String id) async => result;
