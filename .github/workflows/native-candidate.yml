@@ -36,7 +36,7 @@ jobs:
       - run: bash tool/bootstrap.sh
       - name: Focused native regression checks
         run: |
-          flutter test test/native/native_app_test.dart test/native/android_adapters_test.dart test/native/native_shared_page_test.dart test/native/native_root_switches_test.dart test/native/native_settings_wiring_test.dart
+          flutter test test/profile_cache_test.dart test/settings_hub_test.dart test/settings_stable_test.dart test/native/native_app_test.dart test/native/android_adapters_test.dart test/native/native_shared_page_test.dart test/native/native_root_switches_test.dart test/native/native_settings_wiring_test.dart
           flutter analyze lib/native/native_bridge.dart lib/native/native_root_io.dart lib/native/android_adapters.dart lib/browser_account_page.dart
       - name: Configure persistent release signing
         shell: bash
