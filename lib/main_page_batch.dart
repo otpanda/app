@@ -66,6 +66,7 @@ class MainPageBatchController extends ChangeNotifier {
   /// entry, or a long-period one, never spends another entry's quota, and a
   /// new period or generation starts at zero.
   final _warmAttempts = <String, int>{};
+  final _futureFallback = <String>{};
   static const _warmHorizonMs = 15000;
   String? _warmKey(String id) {
     final c = store.current(id);
@@ -133,6 +134,7 @@ class MainPageBatchController extends ChangeNotifier {
     _generation++;
     _successAt = 0;
     _warmAttempts.clear();
+    _futureFallback.clear();
     _ids = [];
     _authorized = {};
     store.clear();
@@ -181,13 +183,17 @@ class MainPageBatchController extends ChangeNotifier {
     }
     if (_warmAttempts.length > 128) _warmAttempts.clear();
     final generation = _generation;
+    var attemptedFuture = false;
     busy = true;
     _notify();
     try {
       _lastRequest = _mono();
-      final from = bridge is FutureTotpBatchBridge
+      final from =
+          bridge is FutureTotpBatchBridge &&
+              !selected.any(_futureFallback.contains)
           ? store.futureStartSeconds(selected.toSet())
           : 0;
+      attemptedFuture = from > 0;
       final request = store.begin(selected.toSet(), fromSeconds: from);
       final response = from > 0
           ? await (bridge as FutureTotpBatchBridge).totpBatchFrom(
@@ -205,6 +211,7 @@ class MainPageBatchController extends ChangeNotifier {
         throw const FormatException();
       }
       store.accept(request, jsonDecode(response.body), policy: policy);
+      _futureFallback.removeAll(selected);
       error = null;
       _retryAt = 0;
       _successAt =
@@ -217,10 +224,12 @@ class MainPageBatchController extends ChangeNotifier {
                 )).clamp(3000, _msToWarmHorizon().clamp(3000, 15000)));
     } catch (e) {
       if (generation == _generation) {
+        if (attemptedFuture) _futureFallback.addAll(selected);
         error = 'Generated codes are waiting for your connection.';
         _retryAt =
             _mono() +
-            (e is FormatException && e.message == 'Expired on arrival'
+            (attemptedFuture ||
+                    e is FormatException && e.message == 'Expired on arrival'
                 ? 3000
                 : 15000);
       }

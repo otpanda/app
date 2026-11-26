@@ -369,8 +369,10 @@ final class BatchCodeStore {
 
   /// Applies a response. Returns false and changes nothing when the request
   /// is stale: cleared since it began, or older than a response already
-  /// accepted. Throws [FormatException] (and clears everything) for an
-  /// invalid response or a broken clock. Entries not in the request keep their
+  /// accepted. Throws [FormatException] on an invalid response. Invalid
+  /// current requests clear the store; rejected future extensions preserve the
+  /// prior cache, whose clock is still checked before every use.
+  /// Entries not in the request keep their
   /// still-valid codes; requested entries are replaced; omitted ones are
   /// removed.
   bool accept(
@@ -419,9 +421,7 @@ final class BatchCodeStore {
               a.digits != e.digits ||
               e.validFrom > oldEnd ||
               e.validFrom * 1000 > old.coverageUntil ||
-              e.validFrom < a.validFrom ||
-              lo > old.hiOffset ||
-              old.loOffset > hi) {
+              e.validFrom < a.validFrom) {
             throw const FormatException(
               'Future batch cannot join held coverage',
             );
@@ -445,8 +445,8 @@ final class BatchCodeStore {
               a.validFrom,
               List.unmodifiable(codes),
             ),
-            lo > old.loOffset ? lo : old.loOffset,
-            hi < old.hiOffset ? hi : old.hiOffset,
+            lo < old.loOffset ? lo : old.loOffset,
+            hi > old.hiOffset ? hi : old.hiOffset,
             batch.coverageUntil!,
           );
         } else if (request.fromSeconds > 0 && old == null) {

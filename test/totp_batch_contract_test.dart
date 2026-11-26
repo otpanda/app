@@ -507,6 +507,75 @@ void main() {
       expect(store.futureStartSeconds({'a', 'unknown'}), 0);
     });
 
+    test('future repeated mixed periods trims memory and accepts disjoint bounds conservatively', () {
+      tick = 0;
+      final ids = {'a': (20, 6), 'b': (30, 7), 'c': (60, 8)};
+      Map<String, dynamic> stableBody(int n, {int offset = 0}) {
+        final b = body(ids, now: n + offset * 1000, window: 60);
+        b['serverNow'] = n;
+        for (final e in b['entries'] as List) {
+          e['codes'] = [
+            for (var i = 0; i < (e['codes'] as List).length; i++)
+              code(
+                e['entryId'],
+                (e['validFrom'] as int) ~/ (e['period'] as int) + i,
+                e['digits'],
+              ),
+          ];
+        }
+        return b;
+      }
+
+      store.accept(
+        begin(ids.keys.toSet()),
+        stableBody(serverNow),
+        policy: policy,
+      );
+      for (var k = 1; k <= 12; k++) {
+        tick = k * 20000;
+        final n =
+            serverNow +
+            tick +
+            1; // honest disjoint one-ms server offset after initial zero RTT
+        final offset = store.futureStartSeconds(ids.keys.toSet());
+        expect(offset, greaterThan(0));
+        store.accept(
+          store.begin(ids.keys.toSet(), fromSeconds: offset),
+          stableBody(n, offset: offset),
+          policy: policy,
+        );
+        for (final id in ids.keys) {
+          expect(store.current(id), isNotNull);
+          expect(store.expectedDigits(id), ids[id]!.$2);
+        }
+      }
+      expect(store.coverageRemainingMs(), lessThanOrEqualTo(121000));
+    });
+    test('future offset stops at conservative coverage not raw tail', () {
+      final b = body({'a': (60, 6)}, window: 5);
+      store.accept(begin({'a'}), b, policy: policy);
+      expect(store.futureStartSeconds({'a'}), lessThanOrEqualTo(5));
+      expect(store.entryCoverageRemainingMs('a'), lessThanOrEqualTo(5000));
+    });
+    test('conflicting future overlap keeps held code and wider clock bounds never tighten', () {
+      store.accept(
+        begin({'a'}),
+        body({'a': (30, 6)}, window: 60),
+        policy: policy,
+      );
+      final prior = store.current('a')!;
+      final r = store.begin({'a'}, fromSeconds: 1);
+      final next = body({'a': (30, 6)}, now: serverNow + 1000);
+      next['serverNow'] = serverNow;
+      final e = (next['entries'] as List).single as Map<String, dynamic>;
+      e['codes'] = ['999999', ...(e['codes'] as List).skip(1)];
+      expect(
+        () => store.accept(r, next, policy: policy),
+        throwsFormatException,
+      );
+      expect(store.current('a')!.value, prior.value);
+      expect(store.current('a')!.remainingMs, prior.remainingMs);
+    });
     test(
       'zero latency: shows the exact code and switches at the period boundary',
       () {

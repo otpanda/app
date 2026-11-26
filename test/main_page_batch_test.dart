@@ -485,6 +485,38 @@ void main() {
       c.dispose();
     },
   );
+  test('failed future response retries current before held expiry', () async {
+    var t = 0;
+    final bridge = FutureWarmBridge(() => t)..failFuture = true;
+    final c = MainPageBatchController(
+      bridge: bridge,
+      policy: const BatchPolicy(
+        maxEntries: 1,
+        maxTotalCodes: 32,
+        minPeriodSeconds: 20,
+        maxPeriodSeconds: 86400,
+        maxWindowSeconds: 600,
+        minRemainingMs: 1,
+      ),
+      active: () => true,
+      wallMilliseconds: () => 1000000 + t,
+      monotonicMilliseconds: () => t,
+    );
+    c.select(['a']);
+    await Future<void>.delayed(Duration.zero);
+    t = 3000;
+    c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.offsets, [12]);
+    expect(c.tileCurrent('a')?.value, '1111111');
+    t = 6000;
+    c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.offsets, [12]);
+    expect(bridge.currentCalls, 2);
+    expect(c.tileCurrent('a')?.value, '1111111');
+    c.dispose();
+  });
   test(
     'sleep divergence clears held codes and stale copy, background clears',
     () async {
@@ -2160,28 +2192,34 @@ class FutureWarmBridge extends BatchBridge implements FutureTotpBatchBridge {
   FutureWarmBridge(this.time) : super({});
   final int Function() time;
   final offsets = <int>[];
+  bool failFuture = false;
+  int currentCalls = 0;
   @override
   Future<SessionResponse> totpBatch(
     List<String> ids, {
     required int windowSeconds,
-  }) async => SessionResponse(
-    200,
-    jsonEncode({
-      'serverNow': 45000 + time(),
-      'coverageUntil': 60000,
-      'totalCodes': 1,
-      'entries': [
-        {
-          'entryId': 'a',
-          'period': 30,
-          'digits': 7,
-          'validFrom': 30,
-          'codes': ['1111111'],
-        },
-      ],
-      'omitted': [],
-    }),
-  );
+  }) async {
+    currentCalls++;
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 45000 + time(),
+        'coverageUntil': 60000,
+        'totalCodes': 1,
+        'entries': [
+          {
+            'entryId': 'a',
+            'period': 30,
+            'digits': 7,
+            'validFrom': 30,
+            'codes': ['1111111'],
+          },
+        ],
+        'omitted': [],
+      }),
+    );
+  }
+
   @override
   Future<SessionResponse> totpBatchFrom(
     List<String> ids, {
@@ -2189,6 +2227,7 @@ class FutureWarmBridge extends BatchBridge implements FutureTotpBatchBridge {
     required int fromSeconds,
   }) async {
     offsets.add(fromSeconds);
+    if (failFuture) return const SessionResponse(200, '{}');
     return SessionResponse(
       200,
       jsonEncode({
