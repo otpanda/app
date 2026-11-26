@@ -571,6 +571,13 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)return {status:401,body:'{}'};
       const result=await boundedRead(API+'/v1/manage/totp-code?'+new URLSearchParams({entry:entryId}),{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},4096);if(attempt!==generation)return {status:401,body:'{}'};return {status:result.response.status,body:result.body};
     },
+    totpCodes:async entryIds=>{
+      if(!Array.isArray(entryIds)||entryIds.length<1||entryIds.length>5||new Set(entryIds).size!==entryIds.length||entryIds.some(id=>typeof id!=='string'||!id||id.length>256))throw Error('Entries required');
+      if(!await maintainSession(true))return {status:401,body:'{}'};
+      const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)return {status:401,body:'{}'};
+      const query=new URLSearchParams();for(const id of entryIds)query.append('entry',id);
+      const result=await boundedRead(API+'/v1/manage/totp-codes?'+query,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},16384);if(attempt!==generation)return {status:401,body:'{}'};return {status:result.response.status,body:result.body};
+    },
     profileRead:(ownerId,sessionId)=>{
       try{
         if(profileRevoked||status!=='restored'||localStorage.getItem('otpanda-session-present')!=='yes'||typeof ownerId!=='string'||!/^[0-9a-f]{64}$/.test(sessionId))return '';

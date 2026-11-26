@@ -11,6 +11,7 @@ import 'service_directory.dart';
 import 'service_logo.dart';
 import 'qr_camera.dart';
 import 'session_contract.dart';
+import 'totp_batch.dart';
 import 'totp_read_contract.dart';
 
 class _TotpTransport implements SessionTransport {
@@ -29,10 +30,15 @@ class _TotpTransport implements SessionTransport {
 class TotpEntryDialog extends StatefulWidget {
   final BrowserSessionBridge bridge;
   final String entryId;
+
+  /// Shared in-memory batch of upcoming codes. Without it, or when the batch
+  /// has nothing usable for this entry, one code at a time is requested.
+  final TotpBatchStore? batch;
   const TotpEntryDialog({
     super.key,
     required this.bridge,
     required this.entryId,
+    this.batch,
   });
   @override
   State<TotpEntryDialog> createState() => _TotpEntryDialogState();
@@ -81,7 +87,7 @@ class _TotpEntryDialogState extends State<TotpEntryDialog>
     WidgetsBinding.instance.addPostFrameCallback((_) => load());
     timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || paused) return;
-      if (store.remainingSeconds() == 0 &&
+      if (_current() == null &&
           DateTime.now().millisecondsSinceEpoch >= retryAt) {
         load();
       }
@@ -89,11 +95,29 @@ class _TotpEntryDialogState extends State<TotpEntryDialog>
     });
   }
 
+  /// A batch code that is current now wins; otherwise the single-code store.
+  ({String value, int left})? _current() {
+    final b = widget.batch?.codeFor(widget.entryId);
+    if (b != null) return (value: b.value, left: b.secondsLeft);
+    final c = store.visible();
+    return c == null ? null : (value: c.value, left: store.remainingSeconds());
+  }
+
   Future<void> load() async {
     if (loading || paused) return;
     loading = true;
     try {
-      await store.load(widget.entryId);
+      final batch = widget.batch;
+      if (batch != null && !batch.omitted(widget.entryId)) {
+        // A failed batch never blocks the dialog: only an authorization
+        // failure surfaces, anything else falls back to one code.
+        try {
+          await batch.ensure([widget.entryId]);
+        } on ClientFailure catch (e) {
+          if (e.status == 401 || e.status == 403) rethrow;
+        }
+      }
+      if (_current() == null) await store.load(widget.entryId);
       error = '';
     } catch (_) {
       error = 'Waiting for your connection. Retrying automatically.';
@@ -106,7 +130,7 @@ class _TotpEntryDialogState extends State<TotpEntryDialog>
 
   @override
   Widget build(BuildContext context) {
-    final code = store.visible(), left = store.remainingSeconds();
+    final code = _current(), left = code?.left ?? 0;
     return AlertDialog(
       title: const Text('Authenticator code'),
       content: SizedBox(
@@ -134,7 +158,7 @@ class _TotpEntryDialogState extends State<TotpEntryDialog>
               onPressed: code == null
                   ? null
                   : () async {
-                      final current = store.visible();
+                      final current = _current();
                       if (current != null) {
                         await Clipboard.setData(
                           ClipboardData(text: current.value),
