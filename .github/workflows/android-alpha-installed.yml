@@ -20,7 +20,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: release-android
-          run-id: 45838000020
+          run-id: 45843716589
           github-token: ${{ github.token }}
           path: candidate
       - name: Enable KVM
@@ -38,6 +38,7 @@ jobs:
           script: |
             export PATH="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1):$PATH"
             bash tool/android-applink-lifecycle.sh candidate/otpanda-android-fdroid-native-candidate.apk applink-out
+            bash tool/android-launcher-proof.sh candidate/otpanda-android-fdroid-native-candidate.apk launcher-out
             bash tool/android-google-provider-check.sh candidate/otpanda-android-google-native-candidate.apk google-provider-out
       - uses: actions/upload-artifact@v4
         if: always()
@@ -46,4 +47,5 @@ jobs:
           path: |
             applink-out
             google-provider-out
+            launcher-out
           retention-days: 7
