@@ -109,7 +109,8 @@ class MainPageBatchController extends ChangeNotifier {
       }
       store.accept(request, jsonDecode(response.body), policy: policy);
       error = null;
-      _retryAt = _mono() + 15000;
+      _retryAt =
+          _mono() + (store.coverageRemainingMs() - 1000).clamp(1000, 15000);
     } catch (_) {
       if (generation == _generation) {
         error = 'Generated codes are waiting for your connection.';

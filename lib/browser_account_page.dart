@@ -1885,7 +1885,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 ),
                 maxPeriodSeconds: 86400,
                 maxWindowSeconds: 600,
-                minRemainingMs: 1000,
+                minRemainingMs: 1,
               )
             : null,
         initialTab: productTab,
