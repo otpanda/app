@@ -64,6 +64,15 @@ abstract interface class RealtimeBridge {
   void Function() realtimeSubscribe(void Function(String reason) listener);
 }
 
+/// Content-free nudges for the waiting browser. The listener gets 'open',
+/// 'changed' or 'closed' and must only re-read the pending status through
+/// [AuthEntryBridge.protectionContinue]('check'); the nudge carries no data and
+/// grants nothing. Returns a stop function. Separate from [AuthEntryBridge] so
+/// existing implementations are unaffected.
+abstract interface class ProtectionWatchBridge {
+  void Function() protectionWatch(void Function(String reason) listener);
+}
+
 /// New TOTP creation never exposes stored seed material.
 abstract interface class TotpManagementBridge {
   /// [catalogId] is the optional catalogue association chosen in the picker.
