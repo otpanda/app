@@ -32,6 +32,7 @@ jobs:
           retention-days: 30
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
+      - run: python3 tool/check_supported_native.py
       - run: python3 tool/test_service_catalog.py
       - run: node --test test/assignment*.mjs test/session_bootstrap_test.cjs test/realtime*.cjs
       - run: flutter analyze
@@ -67,6 +68,7 @@ jobs:
           cache: true
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
+      - run: python3 tool/check_supported_native.py
       - run: flutter build apk --debug --flavor fdroid --target-platform android-arm64
       - uses: actions/upload-artifact@v4
         with:
@@ -94,6 +96,7 @@ jobs:
           cache: true
       - run: flutter --disable-analytics
       - run: bash tool/bootstrap.sh
+      - run: python3 tool/check_supported_native.py
       - name: Sign a release APK with a throwaway key
         shell: bash
         run: |

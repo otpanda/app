@@ -98,7 +98,7 @@ void _lifecycle(WidgetTester t, List<AppLifecycleState> seq) {
 
 // Mounts the REAL root (buildNativeRoot, the widget main.dart runs on Android),
 // not BrowserAccountPage directly. Needs, at build time:
-//   --dart-define=NATIVE_SIGNIN=true --dart-define=OTPANDA_API_ORIGIN=$HARNESS
+//   --dart-define=OTPANDA_API_ORIGIN=$HARNESS
 // (tool/android-native-root.sh sets both). The test enrolls a synthetic device
 // with the real AndroidKeystore and the real native-channel store; the root
 // then restores it. Run on a clean emulator only: it deletes the Keystore alias.
@@ -136,7 +136,6 @@ void main() {
         _harness,
         reason: 'root must be built with OTPANDA_API_ORIGIN=the harness',
       );
-      expect(const bool.fromEnvironment('NATIVE_SIGNIN'), isTrue);
       expect((await _h('GET', '/__harness/health'))['ok'], isTrue);
       await _h('POST', '/__harness/seed');
       final ks = AndroidKeystoreAdapter();
