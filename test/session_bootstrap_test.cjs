@@ -695,3 +695,61 @@ test('logout and explicit clear remove both pending handoff intents',async()=>{f
 test('a new native or extension launch clears the opposite old tab intent',async()=>{for(const [hash,old] of [[launchHash,XKEY],[XHASH,NKEY]]){const sv=new Map([[old,'stale']]);const e=env({hash,sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;assert.equal(sv.has(old),false);}});
 
 test('signed-out chooser clear retains the intended handoff for another login method',async()=>{const sv=new Map([[XKEY,JSON.stringify({challenge:NC,state:NS,redirect:'chrome',created:NOW})]]);const e=env({sessionValues:sv,lib:true});await e.context.OTPandaSession.ready;e.context.OTPandaSession.clear();assert.equal(e.context.OTPandaSession.extensionIntent(),'chrome');});
+
+test('protectionContinue: single flight, transient failures return retry, 403 throws, repeated checks after approval stay approved',async()=>{
+ const p={token,pendingId:'match-request',expiresAt:NOW+600000},e=flowEnv('protection',p);await e.context.OTPandaSession.ready;
+ let calls=0,release,mode='approved';e.context.fetch=async()=>{calls++;if(mode==='net')throw new TypeError('offline');if(mode==='429')return{ok:false,status:429,text:async()=>'{}'};if(mode==='403')return{ok:false,status:403,text:async()=>'{}'};await new Promise(r=>release=r);return{ok:true,text:async()=>JSON.stringify({status:mode})};};
+ mode='net';assert.equal(await e.context.OTPandaSession.protectionContinue('check'),'retry');mode='429';assert.equal(await e.context.OTPandaSession.protectionContinue('check'),'retry');
+ mode='approved';calls=0;const a=e.context.OTPandaSession.protectionContinue('check'),b=e.context.OTPandaSession.protectionContinue('check');await new Promise(r=>setImmediate(r));assert.equal(calls,1,'second check shares the in-flight read');release();assert.equal(await a,'approved');assert.equal(await b,'approved');
+ assert.equal(e.context.location.assigned,'https://otpanda-api.abrahammurciano.workers.dev/auth/google/protection/complete#token='+token);
+ const first=e.context.location.assigned;e.context.location.assigned=undefined;assert.equal(await e.context.OTPandaSession.protectionContinue('check'),'approved');assert.equal(e.context.location.assigned,undefined,'no second navigation');assert.equal(calls,1);
+ const f=flowEnv('protection',p);await f.context.OTPandaSession.ready;f.context.fetch=async()=>({ok:false,status:403,text:async()=>'{}'});await assert.rejects(()=>f.context.OTPandaSession.protectionContinue('check'),/Start sign-in again/);
+});
+
+test('protection completion: navigation is repeated if the page is still here after 45s, never within 45s, and nothing consumes twice client-side',async()=>{
+ const p={token,pendingId:'match-request',expiresAt:NOW+600000},e=flowEnv('protection',p);await e.context.OTPandaSession.ready;
+ e.context.fetch=async()=>({ok:true,status:200,text:async()=>'{"status":"approved"}'});
+ const D=e.context.Date,realNow=D.now;let t=realNow();D.now=()=>t;
+ try{
+  assert.equal(await e.context.OTPandaSession.protectionContinue('check'),'approved');const url=e.context.location.assigned;assert.ok(url);
+  e.context.location.assigned=undefined;assert.equal(await e.context.OTPandaSession.protectionContinue('check'),'approved');assert.equal(e.context.location.assigned,undefined);
+  t+=11000;assert.equal(await e.context.OTPandaSession.protectionContinue('check'),'approved');assert.equal(e.context.location.assigned,undefined);t+=35000;assert.equal(await e.context.OTPandaSession.protectionContinue('check'),'approved');assert.equal(e.context.location.assigned,url,'one repeat after45s');e.context.location.assigned=undefined;t+=46000;assert.equal(await e.context.OTPandaSession.protectionContinue('check'),'approved');assert.equal(e.context.location.assigned,undefined,'no third navigation');
+  assert.equal(e.context.OTPandaSession.pendingLabel(),p.pendingId.slice(0,6).toUpperCase(),'pending kept until the page actually leaves');
+ }finally{D.now=realNow;}
+});
+
+test('slow protection completion consumed status403 remains quiet after recent navigation',async()=>{const p={token,pendingId:'match-request',expiresAt:NOW+600000},e=flowEnv('protection',p);await e.context.OTPandaSession.ready;e.context.fetch=async()=>({ok:true,status:200,text:async()=>'\{"status":"approved"\}'});let t=NOW;e.context.Date.now=()=>t;await e.context.OTPandaSession.protectionContinue('check');e.context.fetch=async()=>({ok:false,status:403,text:async()=>'{}'});t+=46000;assert.equal(await e.context.OTPandaSession.protectionContinue('check'),'approved');});
+
+
+test('poll-only waiting: immediate visible catchup, automatic approval, no socket, transient backoff and terminal cleanup',async()=>{
+ const p={token,pendingId:'match-request',expiresAt:NOW+600000},e=flowEnv('protection',p);await e.context.OTPandaSession.ready;
+ const timers=[];e.context.setTimeout=(f,ms)=>{timers.push({f,ms});return timers.length;};e.context.clearTimeout=()=>{};
+ e.context.WebSocket=function(){assert.fail('web-only release must not create sockets');};
+ let mode='waiting',reads=0;e.context.fetch=async(url,o)=>{reads++;assert.equal(url,'https://otpanda-api.abrahammurciano.workers.dev/auth/google/protection/status');assert.equal(o.credentials,'omit');assert.equal(o.headers['X-OTPanda-Pending'],token);return {ok:mode!=='429'&&mode!=='403',status:mode==='429'?429:mode==='403'?403:200,text:async()=>JSON.stringify({status:mode})};};
+ const seen=[],stop=e.context.OTPandaSession.protectionWatch(r=>seen.push(r));await new Promise(r=>setImmediate(r));assert.equal(reads,1);
+ const next=()=>timers.at(-1);assert.ok(next().ms>=24000&&next().ms<=36000);
+ for(let i=0;i<30;i++){const t=next();timers.length=0;await t.f();assert.ok(next());}assert.equal(reads,31);
+ mode='429';let t=next();timers.length=0;await t.f();assert.ok(next().ms>=48000&&next().ms<=72000);
+ mode='approved';t=next();timers.length=0;await t.f();assert.deepEqual(seen,['changed']);const before=reads;await next().f();assert.equal(reads,before);assert.deepEqual(seen,['changed','changed']);stop();
+ const f=flowEnv('protection',p);await f.context.OTPandaSession.ready;const closed=[];f.context.fetch=async()=>({status:403,ok:false,text:async()=>'{}'});f.context.OTPandaSession.protectionWatch(x=>closed.push(x));await new Promise(r=>setImmediate(r));assert.deepEqual(closed,['closed']);
+});
+
+test('poll-only waiting: hidden skips, visibility coalesces, clear and expiry stop reads',async()=>{
+ const p={token,pendingId:'match-request',expiresAt:NOW+600000},e=flowEnv('protection',p);await e.context.OTPandaSession.ready;
+ const timers=[],listeners=[];e.context.setTimeout=(f,ms)=>{timers.push({f,ms});return timers.length;};e.context.clearTimeout=()=>{};
+ const doc={hidden:true,addEventListener:(n,f)=>listeners.push(f),removeEventListener(){}};e.context.document=doc;
+ let reads=0;e.context.fetch=async()=>{reads++;return{ok:true,status:200,text:async()=>' {"status":"waiting"} '};};
+ e.context.OTPandaSession.protectionWatch(()=>{});await new Promise(r=>setImmediate(r));assert.equal(reads,0);
+ doc.hidden=false;for(let i=0;i<80;i++)listeners[0]();await new Promise(r=>setImmediate(r));assert.equal(reads,1);
+ const poll=timers.filter(t=>t.ms>=24000&&t.ms<=36000).at(-1);e.context.OTPandaSession.clear();await poll.f();assert.equal(reads,1);
+ const f=flowEnv('protection',p);await f.context.OTPandaSession.ready;const t=[],seen=[];f.context.setTimeout=(fn,ms)=>{t.push({fn,ms});return t.length;};f.context.clearTimeout=()=>{};f.context.fetch=async()=>({ok:true,status:200,text:async()=>' {"status":"waiting"} '});f.context.OTPandaSession.protectionWatch(r=>seen.push(r));await new Promise(r=>setImmediate(r));t.find(x=>x.ms===600000).fn();assert.deepEqual(seen,['closed']);
+});
+
+
+test('poll-only approved retry survives hidden to visible without another status read',async()=>{
+ const p={token,pendingId:'match-request',expiresAt:NOW+600000},e=flowEnv('protection',p);await e.context.OTPandaSession.ready;
+ const timers=[],listeners=[],doc={hidden:false,addEventListener:(n,f)=>listeners.push(f),removeEventListener(){}};e.context.document=doc;e.context.setTimeout=(f,ms)=>{timers.push({f,ms});return timers.length;};e.context.clearTimeout=()=>{};
+ let reads=0;e.context.fetch=async()=>{reads++;return {ok:true,status:200,text:async()=>' {"status":"approved"} '};};const seen=[];e.context.OTPandaSession.protectionWatch(x=>seen.push(x));await new Promise(r=>setImmediate(r));assert.deepEqual(seen,['changed']);assert.equal(reads,1);
+ doc.hidden=true;listeners[0]();await timers.at(-1).f();const before=timers.length;
+ doc.hidden=false;listeners[0]();assert.equal(reads,1);assert.ok(timers.length>before);assert.ok(seen.length>=2);const n=seen.length;await timers.at(-1).f();assert.equal(seen.length,n+1);assert.equal(reads,1);
+});

@@ -47,6 +47,33 @@ class _AuthEntryState extends State<AuthEntry> {
     super.dispose();
   }
 
+  // A nudge that arrives while a request is running is not dropped: it queues
+  // exactly one more status read for when the widget is idle again.
+  bool recheck = false;
+  void nudge(String reason) {
+    if (!mounted) return;
+    if (widget.busy) {
+      recheck = true;
+      return;
+    }
+    recheck = false;
+    widget.run(() async {
+      // Same status read and completion as the manual button. 'waiting' and
+      // 'retry' (a transient failure) change nothing; a definitive refusal or
+      // expiry throws and is shown by run.
+      await (widget.bridge as AuthEntryBridge).protectionContinue('check');
+    });
+  }
+
+  @override
+  void didUpdateWidget(AuthEntry old) {
+    super.didUpdateWidget(old);
+    if (old.busy && !widget.busy && recheck) {
+      recheck = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) => nudge('queued'));
+    }
+  }
+
   bool get code => ['email-code', 'code-invalid'].contains(widget.status);
   Future<void> submit() async {
     final address = email.text.trim();
@@ -357,6 +384,12 @@ class _AuthEntryState extends State<AuthEntry> {
               Text(
                 'Match code: ${(widget.bridge as AuthEntryBridge).pendingLabel}',
               ),
+              if (widget.bridge is ProtectionWatchBridge)
+                _ProtectionWatcher(
+                  key: const ValueKey('pending-protection-watch'),
+                  bridge: widget.bridge as ProtectionWatchBridge,
+                  onNudge: nudge,
+                ),
               const SizedBox(height: 12),
               FilledButton(
                 onPressed: widget.busy
@@ -374,6 +407,11 @@ class _AuthEntryState extends State<AuthEntry> {
                     : () => widget.run(() async {
                         final result = await (widget.bridge as AuthEntryBridge)
                             .protectionContinue('check');
+                        if (result == 'retry' && mounted) {
+                          setState(
+                            () => error = 'Could not check just now. Try again in a moment.',
+                          );
+                        }
                         if (result == 'waiting' && mounted) {
                           setState(
                             () => error = 'Waiting for approval. Open Security on your other signed-in device, then check again.',
@@ -471,4 +509,36 @@ class _AuthEntryState extends State<AuthEntry> {
       ),
     );
   }
+}
+
+/// Listens for content-free nudges while a sign-in waits for approval. It only
+/// asks the parent to re-read status; the manual button stays as the fallback.
+class _ProtectionWatcher extends StatefulWidget {
+  const _ProtectionWatcher({
+    super.key,
+    required this.bridge,
+    required this.onNudge,
+  });
+  final ProtectionWatchBridge bridge;
+  final void Function(String reason) onNudge;
+  @override
+  State<_ProtectionWatcher> createState() => _ProtectionWatcherState();
+}
+
+class _ProtectionWatcherState extends State<_ProtectionWatcher> {
+  void Function()? stop;
+  @override
+  void initState() {
+    super.initState();
+    stop = widget.bridge.protectionWatch(widget.onNudge);
+  }
+
+  @override
+  void dispose() {
+    stop?.call();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }

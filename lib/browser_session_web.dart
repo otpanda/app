@@ -50,6 +50,7 @@ extension type _Session(JSObject _) implements JSObject {
   external void setView(JSNumber view);
   external JSString email();
   external JSString pendingLabel();
+  external JSFunction protectionWatch(JSFunction listener);
   external JSPromise<JSString> protectionContinue(JSString action);
   external JSPromise<JSString> security(
     JSString action,
@@ -115,6 +116,7 @@ class _Browser
         SessionViewBridge,
         SessionContinuityBridge,
         RealtimeBridge,
+        ProtectionWatchBridge,
         AssignmentBridge,
         EntryManagementBridge,
         AuthEntryBridge,
@@ -326,6 +328,19 @@ class _Browser
   @override
   Future<void> googleStart(bool remember) async {
     await _session.googleStart(remember.toJS).toDart;
+  }
+
+  @override
+  void Function() protectionWatch(void Function(String reason) listener) {
+    try {
+      final stop = _session.protectionWatch(
+        ((JSString reason) => listener(reason.toDart)).toJS,
+      );
+      return () => stop.callAsFunction();
+    } catch (_) {
+      // Older bootstrap without the watcher: the manual button still works.
+      return () {};
+    }
   }
 
   @override

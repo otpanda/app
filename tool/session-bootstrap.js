@@ -28,11 +28,11 @@
   const forgetView=()=>{view=0;try{sessionStorage.removeItem(VIEW_KEY);}catch{}};
   let signingKey, renewal, renewing, restoring, serverOffset=0, renewalRetryAt=0;
   const serverNow=()=>Date.now()+serverOffset;
-  let linkResult, access, expires = 0, status = 'idle', generation = 0, loginPending, entryEmail='',enrollment,googlePending,protectionPending;
+  let linkResult, access, expires = 0, status = 'idle', generation = 0, loginPending, entryEmail='',enrollment,googlePending,protectionPending,protectionDone,protectionFlight;
   const encode = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
   const random = () => encode(crypto.getRandomValues(new Uint8Array(32)));
-  let realtime;
-  const clear = () => { realtime?.suspend();assignment?.clear();generation++; renewalRetryAt=0;signingKey=undefined;renewal=undefined;renewing=undefined;restoring=undefined;access = undefined; expires = 0; loginPending=undefined;enrollment=undefined;googlePending=undefined;protectionPending=undefined; };
+  let realtime;const watchers=new Set();
+  const clear = () => { for(const f of [...watchers])f();watchers.clear();realtime?.suspend();assignment?.clear();generation++; renewalRetryAt=0;signingKey=undefined;renewal=undefined;renewing=undefined;restoring=undefined;access = undefined; expires = 0; loginPending=undefined;enrollment=undefined;googlePending=undefined;protectionPending=undefined; };
   // Bound bytes as they arrive. A post-buffer string length check is too late.
   const readBounded = async (response, limit) => {
     const advertised=response.headers?.get('content-length');
@@ -478,11 +478,73 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       if(!ok)throw Error('Not confirmed');return 'ok';
     },
     pendingLabel:()=>protectionPending?.pendingId.slice(0,6).toUpperCase()??'',
+    // Waiting-browser automatic completion uses existing status/complete only.
+    // The bounded polling exception applies only while this pending sign-in is visible and live.
+    protectionWatch:listener=>{
+      if(typeof listener!=='function')throw Error('Listener required');
+      const p=protectionPending,attempt=generation;let expiry,stopped=false,approvedSeen=false;
+      if(!p)return()=>{};
+      const live=()=>!stopped&&attempt===generation&&protectionPending===p;
+      const emit=reason=>{if(live()){try{listener(reason);}catch{}}};
+      const MIN_GAP=10000;let polls=0,visibleReads=0,delay=30000,pollTimer,polling=false,lastRead=0,approvedDelay=5000;
+      const hidden=()=>globalThis.document?.hidden===true;
+      const schedule=()=>{
+        clearTimeout(pollTimer);if(!live()||hidden())return;
+        if(approvedSeen){pollTimer=setTimeout(()=>{emit('changed');approvedDelay=Math.min(30000,approvedDelay*2);schedule();},Math.round(approvedDelay*(0.8+0.4*Math.random())));return;}
+        pollTimer=setTimeout(()=>poll(false),Math.round(delay*(0.8+0.4*Math.random())));
+      };
+      const poll=async visible=>{
+        if(!live()||polling||hidden()||approvedSeen)return;
+        if(visible&&Date.now()-lastRead<MIN_GAP){schedule();return;}
+        polling=true;lastRead=Date.now();
+        try{
+          if(visible)visibleReads++;else polls++;
+          const r=await fetch(API+'/auth/google/protection/status',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json','X-OTPanda-Pending':p.token},body:'{}'});
+          if(!live())return;
+          if(r.status===403)return end();
+          if(!r.ok){delay=Math.min(120000,delay*2);return;}
+          const v=JSON.parse(await readBounded(r,16384));
+          if(v?.status==='approved'){approvedSeen=true;emit('changed');return;}
+          delay=30000;
+        }catch{delay=Math.min(120000,delay*2);}
+        finally{polling=false;schedule();}
+      };
+      const onVisible=()=>{if(hidden()||!live())return;if(approvedSeen){emit('changed');schedule();return;}poll(true);};
+      globalThis.document?.addEventListener?.('visibilitychange',onVisible);
+      const stop=()=>{watchers.delete(stop);stopped=true;clearTimeout(expiry);clearTimeout(pollTimer);globalThis.document?.removeEventListener?.('visibilitychange',onVisible);};
+      const end=()=>{emit('closed');stop();};
+      watchers.add(stop);expiry=setTimeout(end,Math.max(0,p.expiresAt-Date.now()));
+      poll(true);
+      stop.stats=()=>({scheduledReads:polls,visibilityReads:visibleReads});
+      return stop;
+    },
+    // Single flight per pending: a second 'check' while one is running shares its result (so a nudge during an in-flight read or completion can never start a
+    // second completion form or navigation); a passkey request waits for the running one first. After approval has started the one navigation, later
+    // checks for the same attempt just report 'approved'. Transient trouble (network, 429, 5xx) on a 'check' returns 'retry' and changes nothing; a definitive
+    // refusal (403 restart, expired, canceled, consumed) throws so the person sees it promptly.
     protectionContinue:async action=>{
-      const p=protectionPending,attempt=generation;if(!p||p.expiresAt<=Date.now()||!['passkey','check'].includes(action))throw Error('Start sign-in again.');
-      const post=async(path,value)=>{const r=await fetch(API+'/auth/google/protection/'+path,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json','X-OTPanda-Pending':p.token},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,16384));if(!r.ok||attempt!==generation)throw Error('Verification expired. Start sign-in again.');return v;};
-      if(action==='passkey'){const c=await post('begin',{}),response=await assertion(c);if(attempt!==generation)return;await post('verify',{token:c.token,response});}
-      const value=await post('status',{});if(value.status==='waiting')return 'waiting';if(value.status!=='approved')throw Error('Verification expired.');if(attempt!==generation)return 'cancelled';sessionStorage.setItem(KEY,JSON.stringify({...p.saved,created:Date.now()}));protectionPending=undefined;location.assign(API+'/auth/google/protection/complete#'+new URLSearchParams({token:p.token}));return 'approved';
+      if(!['passkey','check'].includes(action))throw Error('Start sign-in again.');
+      // Completion already started for this attempt: stay quiet while that navigation is fresh; if the page is somehow still here after 45s the
+      // check below re-reads status and navigates again. The complete GET only issues the CSRF cookie; the single-use consumption is the POST, so a repeated
+      // GET can never consume twice.
+      if(protectionDone?.attempt===generation&&action==='check'&&(Date.now()-protectionDone.at<45000||protectionDone.navigations>=2))return 'approved';
+      if(protectionFlight){if(action==='check')return protectionFlight;try{await protectionFlight;}catch{}}
+      const p=protectionPending,attempt=generation;if(!p||p.expiresAt<=Date.now())throw Error('Start sign-in again.');
+      const run=(async()=>{
+        const post=async(path,value)=>{const r=await fetch(API+'/auth/google/protection/'+path,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json','X-OTPanda-Pending':p.token},body:JSON.stringify(value)});if(attempt!==generation)throw Object.assign(Error('cancelled'),{cancelled:true});if(!r.ok)throw Object.assign(Error('Verification expired. Start sign-in again.'),{status:r.status});let v;try{v=JSON.parse(await readBounded(r,16384));}catch{throw Object.assign(Error('Could not check just now.'),{transient:true});}return v;};
+        try{
+          if(action==='passkey'){const c=await post('begin',{}),response=await assertion(c);if(attempt!==generation)return;await post('verify',{token:c.token,response});}
+          const value=await post('status',{});if(value.status==='waiting')return 'waiting';if(value.status!=='approved')throw Error('Verification expired.');if(attempt!==generation)return 'cancelled';sessionStorage.setItem(KEY,JSON.stringify({...p.saved,created:Date.now()}));protectionDone={attempt,at:Date.now(),navigations:(protectionDone?.attempt===attempt?protectionDone.navigations:0)+1};location.assign(API+'/auth/google/protection/complete#'+new URLSearchParams({token:p.token}));return 'approved';
+        }catch(e){
+          if(e?.cancelled)return 'cancelled';
+          if(action==='check'&&e?.status===403&&protectionDone?.attempt===attempt)return 'approved';
+          // 'check' only: definitive refusals (403, bad status above) throw; anything else is transient.
+          if(action==='check'&&(e?.transient||(e?.status===undefined&&e?.message!=='Verification expired.'&&e?.message!=='Verification expired. Start sign-in again.')||e?.status===429||e?.status>=500))return 'retry';
+          throw e;
+        }
+      })();
+      protectionFlight=run;
+      try{return await run;}finally{if(protectionFlight===run)protectionFlight=undefined;}
     },
     security:async(action,enabled=false,pendingId='')=>{
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token||!['status','toggle','approve','deny','request-change','approve-change','consume-change'].includes(action))throw Error('Sign in again.');
