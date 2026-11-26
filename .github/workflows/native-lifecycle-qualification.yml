@@ -27,7 +27,6 @@ jobs:
           flutter-version: '3.50.1'
           channel: stable
           cache: true
-      - uses: android-actions/setup-android@v3
       - run: cp tool/native-lifecycle-fixture/*.mjs api-fixture/tool/
       - run: bash tool/bootstrap.sh
       - run: flutter analyze
