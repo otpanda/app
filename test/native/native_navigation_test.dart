@@ -4,7 +4,7 @@ import 'package:otpanda_client/native/native_navigation.dart';
 
 void main() {
   test(
-    'history survives transient UI unmount and clears on actual signout',
+    'history controller retains pages until explicit session clear',
     () {
       final h = NativeNavigationHistory();
       h.navigate('settings');
