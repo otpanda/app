@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'main_page_batch.dart';
+import 'totp_batch_contract.dart';
+
 import 'browser_session_contract.dart';
 import 'assignment_dialog.dart';
 import 'entry_manage_dialog.dart';
@@ -25,6 +28,7 @@ import 'session_contract.dart';
 /// until their endpoints exist.
 class ProductShell extends StatefulWidget {
   final ReadWorkspaceController controller;
+  final BatchPolicy? batchPolicy;
   final Future<void> Function(ReceivedCode) onCopyAssigned;
   final Future<void> Function(UnassignedCode) onCopyPrivate;
   final int Function() clock;
@@ -49,6 +53,7 @@ class ProductShell extends StatefulWidget {
   const ProductShell({
     super.key,
     required this.controller,
+    this.batchPolicy,
     required this.onCopyAssigned,
     required this.onCopyPrivate,
     required this.clock,
@@ -69,7 +74,14 @@ class ProductShell extends StatefulWidget {
 
 enum _Phase { loading, loaded, cleared, failed, rateLimited, signedOut }
 
-class _ProductShellState extends State<ProductShell> {
+class _ProductShellState extends State<ProductShell>
+    with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    batch?.foreground(state == AppLifecycleState.resumed);
+    queueBatchSelection();
+  }
+
   bool get _canAddTotp =>
       widget.controller.bridge is TotpManagementBridge &&
       (widget.controller.bridge is! TotpCreationCapability ||
@@ -114,13 +126,82 @@ class _ProductShellState extends State<ProductShell> {
   static const freshForMs = 120000;
   Timer? freshTimer;
   bool hadFresh = false;
+  MainPageBatchController? batch;
+  final _batchKeys = <String, GlobalKey>{};
+  final _batchScroll = ScrollController();
+  bool _batchSelectionQueued = false;
+  void queueBatchSelection() {
+    if (_batchSelectionQueued) return;
+    _batchSelectionQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _batchSelectionQueued = false;
+      if (mounted) syncBatch();
+    });
+  }
+
+  int _batchRevision = -1;
+  void syncBatch() {
+    final b = batch;
+    if (b == null) return;
+    if (!widget.controller.signedIn ||
+        !widget.controller.hasLoaded ||
+        widget.controller.store.sessionExpired(widget.clock())) {
+      b.invalidate();
+      return;
+    }
+    if (_batchRevision != widget.controller.publishedRevision) {
+      _batchRevision = widget.controller.publishedRevision;
+      b.invalidate();
+    }
+    final validIds = widget.controller.store.entries.map((e) => e.id).toSet();
+    _batchKeys.removeWhere((id, _) => !validIds.contains(id));
+    final q = query.trim().toLowerCase();
+    final ids = [
+      for (final e in widget.controller.store.entries)
+        if (e.totp && ('${e.service} ${e.account}'.toLowerCase().contains(q)))
+          e.id,
+    ];
+    final height = MediaQuery.sizeOf(context).height;
+    double distance(String id) {
+      final r = _batchKeys[id]?.currentContext?.findRenderObject();
+      if (r is! RenderBox || !r.hasSize) return double.infinity;
+      final y = r.localToGlobal(Offset.zero).dy;
+      return y < 0
+          ? -y
+          : y > height
+          ? y - height
+          : 0;
+    }
+
+    ids.sort((a, b) => distance(a).compareTo(distance(b)));
+    final near = ids.where((id) => distance(id) < height).toList();
+    final candidates = near.isEmpty ? ids : near;
+    b.select(candidates);
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(changed);
+    _batchScroll.addListener(queueBatchSelection);
+    final policy = widget.batchPolicy, bridge = widget.controller.bridge;
+    if (policy != null && bridge is TotpBatchBridge) {
+      batch = MainPageBatchController(
+        bridge: bridge as TotpBatchBridge,
+        policy: policy,
+        active: () =>
+            widget.controller.signedIn &&
+            !widget.controller.suspended &&
+            !widget.controller.store.sessionExpired(widget.clock()),
+      )..addListener(changed);
+      queueBatchSelection();
+    }
     // Lets the highlight fade on its own without any refresh.
-    freshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (mounted && hadFresh) setState(() {});
+    freshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      queueBatchSelection();
+      batch?.tick();
+      if (mounted && (hadFresh || batch != null)) setState(() {});
     });
   }
 
@@ -134,14 +215,19 @@ class _ProductShellState extends State<ProductShell> {
   }
 
   void changed() {
+    queueBatchSelection();
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     freshTimer?.cancel();
+    _batchScroll.dispose();
+    batch?.removeListener(changed);
+    batch?.dispose();
     widget.controller.removeListener(changed);
     searchController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -411,6 +497,9 @@ class _ProductShellState extends State<ProductShell> {
               ),
             for (final e in rest)
               Padding(
+                key: e.totp
+                    ? _batchKeys.putIfAbsent(e.id, () => GlobalKey())
+                    : null,
                 padding: const EdgeInsets.only(bottom: 10),
                 child: InkWell(
                   onTap:
@@ -426,8 +515,10 @@ class _ProductShellState extends State<ProductShell> {
                   child: codeTile(
                     e.service,
                     e.account,
-                    null,
-                    null,
+                    e.totp ? batch?.current(e.id)?.value : null,
+                    e.totp && batch?.current(e.id) != null
+                        ? () => batch!.copy(e.id)
+                        : null,
                     true,
                     false,
                     null,
@@ -710,7 +801,9 @@ class _ProductShellState extends State<ProductShell> {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, size) {
       final desktop = size.maxWidth > 700;
+      queueBatchSelection();
       final list = ListView(
+        controller: _batchScroll,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.fromLTRB(
           desktop ? 0 : 12,

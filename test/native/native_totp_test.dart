@@ -136,6 +136,41 @@ void main() {
         now: () => now,
       );
 
+  test('batch uses exact repeated entry query, GET, no body and renewed native bearer', () async {
+    final c = await signedIn();
+    String? method, path, token, requestBody;
+    Map<String, String>? requestQuery;
+    final b = NativeSessionBridge(c, (
+      m,
+      p, {
+      body,
+      query,
+      required bearer,
+    }) async {
+      method = m;
+      path = p;
+      token = bearer;
+      requestBody = body;
+      requestQuery = query;
+      return const SessionResponse(200, '{}');
+    });
+    await b.totpBatch(['a/b', 'entry+two'], windowSeconds: 600);
+    expect(method, 'GET');
+    expect(token, 'tok');
+    expect(requestBody, null);
+    expect(requestQuery, null);
+    final u = Uri.parse(path!);
+    expect(u.path, '/v1/manage/totp-codes');
+    expect(u.queryParametersAll, {
+      'entry': ['a/b', 'entry+two'],
+      'window': ['600'],
+    });
+    expect(
+      () => b.totpBatch(['a', 'a'], windowSeconds: 600),
+      throwsArgumentError,
+    );
+  });
+
   setUp(() {
     calls = [];
     bodies = [];

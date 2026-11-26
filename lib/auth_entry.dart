@@ -1,3 +1,4 @@
+import 'branding.dart';
 import 'google_button.dart';
 
 import 'package:material_ui/material_ui.dart';
@@ -142,11 +143,19 @@ class _AuthEntryState extends State<AuthEntry> {
           shrinkWrap: true,
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
           children: [
-            const Icon(
-              Icons.shield_outlined,
-              size: 48,
-              color: Color(0xff0a7955),
+            Center(
+              child: Image.memory(
+                ottyImage,
+                width: 72,
+                height: 72,
+                semanticLabel: 'OTPanda',
+              ),
             ),
+            if (widget.message.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(widget.message),
+              ),
             const SizedBox(height: 24),
             Text(
               protected
@@ -548,11 +557,6 @@ class _AuthEntryState extends State<AuthEntry> {
               Padding(
                 padding: const EdgeInsets.only(top: 16),
                 child: Text(error!),
-              ),
-            if (widget.message.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: Text(widget.message),
               ),
           ],
         ),
