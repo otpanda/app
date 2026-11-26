@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import{mkdt
 test('isolated packager removes web session and rejects unsafe output without deleting source',async()=>{
  const temp=await mkdtemp(path.join(os.tmpdir(),'otpanda-package-test-'));try{
  await mkdir(path.join(temp,'tool/extension'),{recursive:true});await mkdir(path.join(temp,'build/web'),{recursive:true});await cp(new URL('./package.mjs',import.meta.url),path.join(temp,'tool/extension/package.mjs'));
- for(const icon of ['otty-favicon-v3-16.png','otty-favicon-v3-32.png'])await writeFile(path.join(temp,'build/web',icon),'synthetic');
+ for(const icon of ['otty-favicon-v7-16.png','otty-favicon-v7-32.png'])await writeFile(path.join(temp,'build/web',icon),'synthetic');
  const html='<html><head><base href="/app/"><link rel="manifest" href="manifest.json"></head><body><script src="realtime-client.js"></script><script src="session-bootstrap.js"></script><script src="flutter_bootstrap.js"></script></body></html>';
  await writeFile(path.join(temp,'build/web/index.html'),html);await writeFile(path.join(temp,'build/web/session-bootstrap.js'),'synthetic');await writeFile(path.join(temp,'build/web/realtime-client.js'),'synthetic');await writeFile(path.join(temp,'build/web/flutter_service_worker.js'),'synthetic');await writeFile(path.join(temp,'build/web/flutter_bootstrap.js'),'_flutter.loader.load({serviceWorkerSettings:{serviceWorkerVersion:"synthetic"}});');
  execFileSync(process.execPath,[path.join(temp,'tool/extension/package.mjs')]);const out=path.join(temp,'build/extension-preview'),manifest=JSON.parse(await readFile(path.join(out,'manifest.json'),'utf8'));
@@ -12,7 +12,7 @@ test('isolated packager removes web session and rejects unsafe output without de
  const script=path.join(temp,'tool/extension/package.mjs');const preserved=await readFile(path.join(out,'manifest.json'),'utf8');const fails=()=>{assert.notEqual(spawnSync(process.execPath,[script]).status,0);assert.equal(execFileSync('cat',[path.join(out,'manifest.json')],{encoding:'utf8'}),preserved)};
  await writeFile(path.join(temp,'build/web/index.html'),html.replace('src="session-bootstrap','defer src="session-bootstrap'));fails();await writeFile(path.join(temp,'build/web/index.html'),html);
  await writeFile(path.join(temp,'build/web/flutter_bootstrap.js'),'_flutter.loader.load /* changed */ ({serviceWorkerSettings:{}});');fails();await writeFile(path.join(temp,'build/web/flutter_bootstrap.js'),'_flutter.loader.load({});');
- await rm(path.join(temp,'build/web/otty-favicon-v3-16.png'));fails();await writeFile(path.join(temp,'build/web/otty-favicon-v3-16.png'),'synthetic');
+ await rm(path.join(temp,'build/web/otty-favicon-v7-16.png'));fails();await writeFile(path.join(temp,'build/web/otty-favicon-v7-16.png'),'synthetic');
  await symlink('/tmp',path.join(temp,'build/web/escape'));fails();await rm(path.join(temp,'build/web/escape'));
  await writeFile(path.join(temp,'build/web/index.html'),html.replace('src="flutter_bootstrap','defer src="flutter_bootstrap'));fails();await writeFile(path.join(temp,'build/web/index.html'),html);
  await writeFile(path.join(temp,'build/web/index.html'),html.replace('<base href="/app/">',"<base href='/app/'>"));fails();await writeFile(path.join(temp,'build/web/index.html'),html);

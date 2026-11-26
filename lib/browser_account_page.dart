@@ -1,3 +1,4 @@
+import 'branding.dart';
 import 'about_page.dart';
 import 'auth_entry.dart';
 import 'product_shell.dart';
@@ -1918,7 +1919,23 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
 
     if (['session-paused', 'restoring'].contains(status)) {
       return Scaffold(
-        appBar: AppBar(title: const Text('OTPanda')),
+        appBar: AppBar(
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.memory(
+                ottyImage,
+                width: 32,
+                height: 32,
+                semanticLabel: 'OTPanda',
+              ),
+              const SizedBox(width: 10),
+              const Flexible(
+                child: Text('OTPanda', overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
+        ),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -1944,7 +1961,21 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     if (widget.accountOnly && status != 'restored') {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('OTPanda'),
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.memory(
+                ottyImage,
+                width: 32,
+                height: 32,
+                semanticLabel: 'OTPanda',
+              ),
+              const SizedBox(width: 10),
+              const Flexible(
+                child: Text('OTPanda', overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
           actions: [
             TextButton(
               onPressed: widget.onNavigate == null
