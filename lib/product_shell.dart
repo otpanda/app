@@ -137,6 +137,7 @@ class _ProductShellState extends State<ProductShell>
   Timer? freshTimer;
   late CopyHintStore _copyHintStore;
   bool _copyHint = false;
+  bool _showCopyButton = false;
   bool _copiedThisRun = false;
   Timer? _copiedTimer;
   Timer? _boundaryTimer;
@@ -486,6 +487,20 @@ class _ProductShellState extends State<ProductShell>
                             ),
                           ),
                         ),
+                      ),
+                    ],
+                    if (_showCopyButton &&
+                        code != null &&
+                        onCopy != null &&
+                        copyId != null) ...[
+                      const SizedBox(width: 8),
+                      IconButton(
+                        key: ValueKey('copy-button-$copyId'),
+                        tooltip: early
+                            ? 'Copy next code to clipboard'
+                            : 'Copy code to clipboard',
+                        onPressed: () => copyTile(copyId, onCopy),
+                        icon: const Icon(Icons.copy_outlined, size: 20),
                       ),
                     ],
                     if (trailing != null) ...[
@@ -1030,6 +1045,7 @@ class _ProductShellState extends State<ProductShell>
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, size) {
       final desktop = size.maxWidth > 700;
+      _showCopyButton = desktop;
       queueBatchSelection();
       final list = ListView(
         controller: _batchScroll,
@@ -1041,7 +1057,10 @@ class _ProductShellState extends State<ProductShell>
           30,
         ),
         children: [
-          if (_copyHint && (tab == 0 || tab == 2) && phase == _Phase.loaded)
+          if (!desktop &&
+              _copyHint &&
+              (tab == 0 || tab == 2) &&
+              phase == _Phase.loaded)
             const Padding(
               padding: EdgeInsets.only(bottom: 10),
               child: Text(

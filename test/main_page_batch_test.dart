@@ -852,7 +852,7 @@ void main() {
           return null;
         },
       );
-      expect(find.byIcon(Icons.copy_outlined), findsNothing);
+      expect(find.byIcon(Icons.copy_outlined), findsOneWidget);
       final tileBefore = tester.getRect(find.byType(Card).last);
       // Tap the identity area, not the code or a former button.
       await tester.tap(find.text('Test'));
@@ -1847,9 +1847,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('0000001'), findsOneWidget);
-    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
     await tester.binding.setSurfaceSize(const Size(390, 844));
     await tester.pump();
+    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
     if (Platform.isLinux) {
       await expectLater(
         find.byType(ProductShell),
@@ -1954,9 +1954,9 @@ void main() {
     expect(find.text('-------'), findsOneWidget);
     expect(tester.getSize(find.text('-------')).width, width);
     expect(find.byTooltip('Copy code'), findsNothing);
-    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
     await tester.binding.setSurfaceSize(const Size(390, 844));
     await tester.pump();
+    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
     if (Platform.isLinux) {
       await expectLater(
         find.byType(ProductShell),
