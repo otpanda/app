@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'copy_hint.dart';
+
 import 'main_page_batch.dart';
 import 'totp_batch_contract.dart';
 
@@ -30,6 +32,7 @@ import 'session_contract.dart';
 class ProductShell extends StatefulWidget {
   final ReadWorkspaceController controller;
   final BatchPolicy? batchPolicy;
+  final CopyHintStore? copyHintStore;
 
   /// Test seam: replaces the batch controller's monotonic and wall clocks.
   @visibleForTesting
@@ -58,6 +61,7 @@ class ProductShell extends StatefulWidget {
   const ProductShell({
     super.key,
     required this.controller,
+    this.copyHintStore,
     this.batchPolicy,
     this.batchClock,
     required this.onCopyAssigned,
@@ -131,6 +135,9 @@ class _ProductShellState extends State<ProductShell>
   /// Codes that arrived this recently sit on top, highlighted.
   static const freshForMs = 120000;
   Timer? freshTimer;
+  late CopyHintStore _copyHintStore;
+  bool _copyHint = false;
+  bool _copiedThisRun = false;
   Timer? _copiedTimer;
   Timer? _boundaryTimer;
   void scheduleBoundaryRepaint() {
@@ -149,7 +156,16 @@ class _ProductShellState extends State<ProductShell>
     try {
       if (!await copy() || !mounted) return;
       _copiedTimer?.cancel();
-      setState(() => _copiedTile = id);
+      setState(() {
+        _copiedTile = id;
+        _copyHint = false;
+        _copiedThisRun = true;
+      });
+      unawaited(
+        _copyHintStore.markCopied().catchError((Object _) {
+          /* Session dismissal still holds if storage is unavailable. */
+        }),
+      );
       _copiedTimer = Timer(const Duration(milliseconds: 1400), () {
         if (mounted) setState(() => _copiedTile = null);
       });
@@ -220,6 +236,15 @@ class _ProductShellState extends State<ProductShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _copyHintStore = widget.copyHintStore ?? createCopyHintStore();
+    _copyHintStore
+        .copiedBefore()
+        .then((seen) {
+          if (mounted && !_copiedThisRun) setState(() => _copyHint = !seen);
+        })
+        .catchError((Object _) {
+          /* Preference unavailable: no repeated hint. */
+        });
     widget.controller.addListener(changed);
     _batchScroll.addListener(queueBatchSelection);
     final policy = widget.batchPolicy, bridge = widget.controller.bridge;
@@ -982,6 +1007,14 @@ class _ProductShellState extends State<ProductShell>
           30,
         ),
         children: [
+          if (_copyHint && (tab == 0 || tab == 2) && phase == _Phase.loaded)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: Text(
+                'Tap a code card to copy it.',
+                style: TextStyle(fontSize: 12, color: muted),
+              ),
+            ),
           body(),
           const SizedBox(height: 20),
           if (widget.controller.connectionLost) ...[

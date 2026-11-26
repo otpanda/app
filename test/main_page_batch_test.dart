@@ -14,7 +14,7 @@ import 'package:otpanda_client/read_workspace_controller.dart';
 import 'package:otpanda_client/main.dart';
 import 'package:material_ui/material_ui.dart';
 
-import 'product_shell_test.dart' show FakeTransport;
+import 'product_shell_test.dart' show FakeTransport, TestCopyHint;
 
 bool _fontsLoaded = false;
 
@@ -1614,6 +1614,105 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets('first-use hint has restrained mobile pixels', (tester) async {
+    if (Platform.isLinux && !_fontsLoaded) {
+      for (final family in ['Figtree', 'BricolageGrotesque']) {
+        final loader = FontLoader(family);
+        for (final weight
+            in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+          final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+          loader.addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+              ),
+            ),
+          );
+        }
+        await loader.load();
+      }
+      final icons = FontLoader('MaterialIcons')
+        ..addFont(
+          Future.value(
+            ByteData.sublistView(
+              File(
+                '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+              ).readAsBytesSync(),
+            ),
+          ),
+        );
+      await icons.load();
+      _fontsLoaded = true;
+    }
+    var t = 0;
+    final bridge = BriefStaleBridge({
+      '/v1/manage/session': SessionResponse(
+        200,
+        jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+      ),
+      '/v1/manage/entries': SessionResponse(
+        200,
+        jsonEncode({
+          'entries': [
+            {
+              'entry_id': 'a',
+              'label': 'Test',
+              'service_id': 'custom-totp',
+              'capabilities': {'manage': true},
+              'account_name': 'me',
+              'totp': true,
+            },
+          ],
+        }),
+      ),
+      '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+      '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+      '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+    });
+    final controller = ReadWorkspaceController(
+      bridge: bridge,
+      clock: () => 45000,
+    );
+    await controller.refresh();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: otpandaTheme(),
+        home: ProductShell(
+          controller: controller,
+          copyHintStore: TestCopyHint(),
+          onCopyAssigned: (_) async {},
+          onCopyPrivate: (_) async {},
+          clock: () => 45000,
+          onSignedOut: () {},
+          batchClock: () => t,
+          batchPolicy: const BatchPolicy(
+            maxEntries: 1,
+            maxTotalCodes: 32,
+            minPeriodSeconds: 20,
+            maxPeriodSeconds: 86400,
+            maxWindowSeconds: 600,
+            minRemainingMs: 1000,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('0000001'), findsOneWidget);
+    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    await tester.pump();
+    if (Platform.isLinux) {
+      await expectLater(
+        find.byType(ProductShell),
+        matchesGoldenFile('goldens/first-copy-hint-mobile.png'),
+      );
+    }
+    await tester.binding.setSurfaceSize(null);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
 
   test('long period entering its last 15 s on a current-only server: time-gated, at most 3 s spacing, and does not touch the normal entry budget', () async {
     var time = 0;

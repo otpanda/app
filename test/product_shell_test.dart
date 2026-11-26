@@ -1,4 +1,6 @@
 import 'package:flutter/services.dart';
+import 'package:otpanda_client/copy_hint.dart';
+
 import 'dart:convert';
 import 'dart:async';
 
@@ -118,6 +120,7 @@ Future<void> pump(
   ValueChanged<int>? onTabChanged,
   bool assignmentEnabled = false,
   bool entryEditEnabled = true,
+  CopyHintStore? copyHintStore,
 }) async {
   t.view.physicalSize = const Size(360, 800);
   t.view.devicePixelRatio = 1;
@@ -131,6 +134,7 @@ Future<void> pump(
       theme: otpandaTheme(),
       home: ProductShell(
         controller: controller,
+        copyHintStore: copyHintStore,
         initialTab: initialTab,
         assignmentEnabled: assignmentEnabled,
         entryEditEnabled: entryEditEnabled,
@@ -146,6 +150,44 @@ Future<void> pump(
 }
 
 void main() {
+  testWidgets(
+    'first-use copy hint disappears only after success and stays gone',
+    (t) async {
+      final pref = TestCopyHint();
+      final tr = FakeTransport(
+        routes(
+          entries: [
+            {
+              'entry_id': 'e',
+              'service_name': 'Acme',
+              'account_name': 'me',
+              'capabilities': {'manage': true},
+            },
+          ],
+          codes: [
+            {
+              'entryId': 'e',
+              'code': '123456',
+              'receivedAt': now - 1000,
+              'expiresAt': now + 60000,
+            },
+          ],
+        ),
+      );
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+      await t.tap(find.text('Acme'));
+      await t.pump();
+      expect(find.text('Copied'), findsOneWidget);
+      expect(find.text('Tap a code card to copy it.'), findsNothing);
+      expect(pref.seen, true);
+      await t.pumpWidget(const SizedBox());
+      await t.pump();
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.text('Tap a code card to copy it.'), findsNothing);
+    },
+  );
+
   testWidgets(
     'hint refresh failure retains visible code without transient warning',
     (t) async {
@@ -881,4 +923,14 @@ void main() {
     const g = 'https://lh3.googleusercontent.com/a/example=s96-c';
     expect(await headerAvatarUrls(t, picture: g), [g]);
   });
+}
+
+class TestCopyHint implements CopyHintStore {
+  bool seen = false;
+  @override
+  Future<bool> copiedBefore() async => seen;
+  @override
+  Future<void> markCopied() async {
+    seen = true;
+  }
 }
