@@ -1,6 +1,8 @@
+import 'branding.dart';
 import 'about_page.dart';
 import 'auth_entry.dart';
 import 'product_shell.dart';
+import 'totp_batch_contract.dart';
 import 'read_workspace_controller.dart';
 import 'main.dart' show ClientHome, ink, muted;
 
@@ -1875,6 +1877,29 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         entryEditEnabled: widget.entryEditEnabled,
         entryDomainsEnabled: widget.entryDomainsEnabled,
         controller: workspace,
+        batchPolicy:
+            const bool.fromEnvironment(
+              'OTPANDA_BATCH_ENABLED',
+              defaultValue: true,
+            )
+            ? const BatchPolicy(
+                maxEntries: int.fromEnvironment(
+                  'OTPANDA_BATCH_ENTRY_CAP',
+                  defaultValue: 3,
+                ),
+                maxTotalCodes: int.fromEnvironment(
+                  'OTPANDA_BATCH_CODE_BUDGET',
+                  defaultValue: 100,
+                ),
+                minPeriodSeconds: int.fromEnvironment(
+                  'OTPANDA_BATCH_MIN_PERIOD',
+                  defaultValue: 20,
+                ),
+                maxPeriodSeconds: 86400,
+                maxWindowSeconds: 600,
+                minRemainingMs: 1,
+              )
+            : null,
         initialTab: productTab,
         onTabChanged: (tab) {
           productTab = tab;
@@ -1894,7 +1919,23 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
 
     if (['session-paused', 'restoring'].contains(status)) {
       return Scaffold(
-        appBar: AppBar(title: const Text('OTPanda')),
+        appBar: AppBar(
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.memory(
+                ottyImage,
+                width: 32,
+                height: 32,
+                semanticLabel: 'OTPanda',
+              ),
+              const SizedBox(width: 10),
+              const Flexible(
+                child: Text('OTPanda', overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
+        ),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -1920,7 +1961,21 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     if (widget.accountOnly && status != 'restored') {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('OTPanda'),
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.memory(
+                ottyImage,
+                width: 32,
+                height: 32,
+                semanticLabel: 'OTPanda',
+              ),
+              const SizedBox(width: 10),
+              const Flexible(
+                child: Text('OTPanda', overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
           actions: [
             TextButton(
               onPressed: widget.onNavigate == null
