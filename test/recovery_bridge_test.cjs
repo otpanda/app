@@ -76,6 +76,23 @@ test('complete: refused begin, bad ceremony or cancelled passkey never finishes;
   const bad=setup({reply:p=>p.endsWith('/complete-begin')?{body:{grant:TOK,ceremony:{...regCeremony(),options:{...regCeremony().options,rp:{id:'evil.example',name:'OTPanda'}}}}}:{body:{status:'accepted'}}});await bad.bridge.sendCompletionCode('me@example.com');await assert.equal(await bad.bridge.complete('me@example.com','ABCDEFGH'),'refused');assert.equal(bad.calls.length,2);
 });
 test('cancelRequest posts only the id with the bearer',async()=>{const s=setup();await s.bridge.cancelRequest('rq1');assert.deepEqual(s.calls[0].body,{requestId:'rq1'});assert.equal(s.calls[0].opts.headers.Authorization,'Bearer '+ACCESS);await assert.equal(await s.bridge.cancelRequest(''),'refused');});
+const SKEW=[['device 1 s behind',121000,true],['device 30 s behind',150000,true],['device 30 s ahead',90000,true],['device 300 s behind',420000,true],['device 130 s ahead',-10000,false],['already expired',-1,false],['beyond tolerance',420500,false]];
+test('assertion challenge: clock skew tolerated up to TTL+300 s, prompt timeout capped at 120 s, otherwise fails closed',async()=>{
+  for(const [name,ahead,ok] of SKEW){
+    let timeout;const s=setup({get:async o=>{timeout=o.publicKey.timeout;return cred();},reply:p=>p.endsWith('/begin')?{body:{...ceremony(),expiresAt:Date.now()+ahead}}:{body:{revoked:'passkey'}}});
+    const r=await s.bridge.change('email-escape-off');
+    assert.equal(r,ok?'ok':'refused',name);assert.equal(s.calls.length,ok?2:1,name);
+    if(ok){assert.ok(timeout>0&&timeout<=120000,name);assert.ok(Math.abs(timeout-Math.min(120000,ahead))<=500,name+' timeout');}
+  }
+});
+test('registration challenge: same skew tolerance and 120 s prompt cap',async()=>{
+  for(const [name,ahead,ok] of SKEW){
+    let timeout;const s=setup({create:async o=>{timeout=o.publicKey.timeout;return reg();},reply:p=>p.endsWith('/complete-code')?{body:{status:'accepted'}}:p.endsWith('/complete-begin')?{body:{grant:TOK,ceremony:{...regCeremony(),expiresAt:Date.now()+ahead}}}:{body:{status:'completed',signIn:'with the new passkey'}}});
+    await s.bridge.sendCompletionCode('me@example.com');await s.bridge.complete('me@example.com','abcdefgh').catch(()=>{});
+    assert.equal(s.calls.some(c=>c.path.endsWith('/complete-finish')),ok,name);
+    if(ok)assert.ok(Math.abs(timeout-Math.min(120000,ahead))<=500,name+' timeout');
+  }
+});
 test('bootstrap hands the factory narrow capabilities and exposes only the frozen bridge',async()=>{
   const boot=fs.readFileSync('tool/session-bootstrap.js','utf8');let caps;
   const loc={origin:'https://otpanda.github.io',pathname:'/app/',search:'',hash:'',assign(){}};

@@ -155,34 +155,35 @@ void main() {
       // approval/status is a POST; the helper above returns {} for it, so use a
       // dedicated request that also serves the status rows.
       Future<SessionResponse> both(
-            String m,
-            String p, {
-            String? body,
-            Map<String, String>? query,
-            required String bearer,
-          }) async {
-            if (p == '/v1/manage/approval/status') {
-              return SessionResponse(
-                200,
-                jsonEncode({
-                  'ownerId': 'O',
-                  'generation': 1,
-                  'pending': [
-                    {
-                      'changeId': 'C1',
-                      'kind': 'passkey-add',
-                      'target': null,
-                      'requesterLabel': 'Firefox on Linux',
-                      'requesterKind': 'web',
-                      'requestedAt': _now - 60000,
-                      'expiresAt': _now + 540000,
-                    },
-                  ],
-                }),
-              );
-            }
-            return req(m, p, body: body, query: query, bearer: bearer);
-          }
+        String m,
+        String p, {
+        String? body,
+        Map<String, String>? query,
+        required String bearer,
+      }) async {
+        if (p == '/v1/manage/approval/status') {
+          return SessionResponse(
+            200,
+            jsonEncode({
+              'ownerId': 'O',
+              'generation': 1,
+              'pending': [
+                {
+                  'changeId': 'C1',
+                  'kind': 'passkey-add',
+                  'target': null,
+                  'requesterLabel': 'Firefox on Linux',
+                  'requesterKind': 'web',
+                  'requestedAt': _now - 60000,
+                  'expiresAt': _now + 540000,
+                },
+              ],
+            }),
+          );
+        }
+        return req(m, p, body: body, query: query, bearer: bearer);
+      }
+
       final v = _svc(src, both);
       await t.pumpWidget(_app(v));
       await t.pumpAndSettle();

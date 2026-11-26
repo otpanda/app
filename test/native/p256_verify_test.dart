@@ -7,14 +7,16 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../integration_test/p256_verify.dart';
 
 Uint8List hex(String s) => Uint8List.fromList([
-  for (var i = 0; i < s.length; i += 2) int.parse(s.substring(i, i + 2), radix: 16),
+  for (var i = 0; i < s.length; i += 2)
+    int.parse(s.substring(i, i + 2), radix: 16),
 ]);
 
 /// Positive and negative controls for the verifier the emulator test relies
 /// on. The vector was produced by OpenSSL, independent of Dart and Android.
 void main() {
-  final v = jsonDecode(File('test/native/p256_vector.json').readAsStringSync())
-      as Map<String, dynamic>;
+  final v = jsonDecode(
+    File('test/native/p256_vector.json').readAsStringSync(),
+  ) as Map<String, dynamic>;
   final point = hex(v['point'] as String);
   final msg = hex(v['message'] as String);
   final der = hex(v['der'] as String);

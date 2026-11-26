@@ -112,7 +112,13 @@ void main() {
     final c = await signedIn();
     final sent = <String>[];
     var res = const SessionResponse(200, '{"ok":true}');
-    final b = NativeSessionBridge(c, (m, p, {body, query, required bearer}) async {
+    final b = NativeSessionBridge(c, (
+      m,
+      p, {
+      body,
+      query,
+      required bearer,
+    }) async {
       sent.add('$m $p $body');
       return res;
     });
@@ -148,7 +154,6 @@ void main() {
     }
     expect(sent, isEmpty);
   });
-
 
   test(
     'describe: exact body, retry backoff, resend on label or session change',

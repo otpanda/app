@@ -60,9 +60,7 @@ final errors = <String>[];
 
 void main() {
   setUp(errors.clear);
-  testWidgets('busy indicator insertion keeps one pending watcher', (
-    t,
-  ) async {
+  testWidgets('busy indicator insertion keeps one pending watcher', (t) async {
     final b = WaitBridge(), busy = ValueNotifier<bool>(false);
     await t.pumpWidget(
       ValueListenableBuilder<bool>(

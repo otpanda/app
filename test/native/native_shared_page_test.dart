@@ -159,7 +159,7 @@ void main() {
       expect(find.text('Your codes'), findsNothing);
       expect(find.byType(TextField), findsOneWidget);
       expect(find.textContaining('Example Mail'), findsWidgets);
-      expect(find.textContaining('112 233'), findsWidgets);
+      expect(find.textContaining('112233'), findsWidgets);
       expect(calls, contains('GET /v1/manage/active-codes'));
       expect(calls.every((s) => s.startsWith('GET ')), isTrue);
       expect(find.byTooltip('Add authenticator'), findsNothing);

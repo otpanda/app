@@ -207,10 +207,24 @@ class MainPageBatchController extends ChangeNotifier {
   }
 
   BatchCode? current(String id) => _safe ? store.current(id) : null;
-  Future<void> copy(String id) async {
-    final code = current(id);
-    if (code == null) return;
+  int? expectedDigits(String id) => store.expectedDigits(id);
+  BatchCode? tileCurrent(String id) => _safe ? store.tileCurrent(id) : null;
+  bool awaitingBoundary(String id) => _safe && store.awaitingBoundary(id);
+  int? get nextBoundaryDelayMs {
+    if (!_safe) return null;
+    int? next;
+    for (final id in _ids) {
+      final delay = store.nextBoundaryDelayMs(id);
+      if (delay != null && (next == null || delay < next)) next = delay;
+    }
+    return next;
+  }
+
+  Future<bool> copy(String id) async {
+    final code = tileCurrent(id);
+    if (code == null || !code.copyable) return false;
     await Clipboard.setData(ClipboardData(text: code.value));
+    return true;
   }
 
   @override

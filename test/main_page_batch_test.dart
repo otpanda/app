@@ -14,7 +14,9 @@ import 'package:otpanda_client/read_workspace_controller.dart';
 import 'package:otpanda_client/main.dart';
 import 'package:material_ui/material_ui.dart';
 
-import 'product_shell_test.dart' show FakeTransport;
+import 'product_shell_test.dart' show FakeTransport, TestCopyHint;
+
+bool _fontsLoaded = false;
 
 class BatchBridge extends FakeTransport implements TotpBatchBridge {
   BatchBridge(super.routes);
@@ -629,7 +631,7 @@ void main() {
   testWidgets(
     'main page automatically requests a batch and shows padded generated code with copy control',
     (tester) async {
-      if (Platform.isLinux) {
+      if (Platform.isLinux && !_fontsLoaded) {
         for (final family in ['Figtree', 'BricolageGrotesque']) {
           final loader = FontLoader(family);
           for (final weight
@@ -656,6 +658,16 @@ void main() {
             ),
           );
         await icons.load();
+        final mono = FontLoader('CodeMono')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/CodeMono-Regular.ttf').readAsBytesSync(),
+              ),
+            ),
+          );
+        await mono.load();
+        _fontsLoaded = true;
       }
       final bridge = BatchBridge({
         '/v1/manage/session': SessionResponse(
@@ -691,6 +703,7 @@ void main() {
           theme: otpandaTheme(),
           home: ProductShell(
             controller: controller,
+            batchClock: () => 0,
             onCopyAssigned: (_) async {},
             onCopyPrivate: (_) async {},
             clock: () => 45000,
@@ -738,9 +751,38 @@ void main() {
           return null;
         },
       );
-      await tester.tap(find.byTooltip('Copy code'));
+      expect(find.byIcon(Icons.copy_outlined), findsNothing);
+      final tileBefore = tester.getRect(find.byType(Card).last);
+      // Tap the identity area, not the code or a former button.
+      await tester.tap(find.text('Test'));
       await tester.pump();
       expect(copied, '0000001');
+      expect(find.text('Copied'), findsOneWidget);
+      expect(tester.getRect(find.byType(Card).last), tileBefore);
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      await tester.pump();
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/tile-copied-mobile.png'),
+        );
+      }
+      await tester.binding.setSurfaceSize(null);
+      await tester.pump(const Duration(milliseconds: 1500));
+      expect(find.text('Copied'), findsNothing);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            throw PlatformException(code: 'denied');
+          }
+          return null;
+        },
+      );
+      await tester.tap(find.text('Test'));
+      await tester.pump();
+      expect(find.text('Copied'), findsNothing);
+      expect(find.text('Could not copy code.'), findsOneWidget);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -754,7 +796,7 @@ void main() {
       controller.dispose();
     },
   );
-  testWidgets('batch 503 keeps previous entry tap single-code flow usable', (
+  testWidgets('batch 503 leaves card inert and never opens a details dialog', (
     tester,
   ) async {
     final bridge = FallbackBridge({
@@ -813,8 +855,9 @@ void main() {
     await tester.tap(find.text('Test'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(bridge.singles, 1);
-    expect(find.text('123456'), findsWidgets);
+    expect(bridge.singles, 0);
+    expect(find.text('123456'), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
     controller.dispose();
@@ -822,7 +865,7 @@ void main() {
   testWidgets(
     'viewport batching advances beyond first cap and scrolls to later entries without duplicate keys',
     (tester) async {
-      if (Platform.isLinux) {
+      if (Platform.isLinux && !_fontsLoaded) {
         for (final family in ['Figtree', 'BricolageGrotesque']) {
           final loader = FontLoader(family);
           for (final weight
@@ -849,6 +892,16 @@ void main() {
             ),
           );
         await icons.load();
+        final mono = FontLoader('CodeMono')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/CodeMono-Regular.ttf').readAsBytesSync(),
+              ),
+            ),
+          );
+        await mono.load();
+        _fontsLoaded = true;
       }
       final bridge = BatchBridge({
         '/v1/manage/session': SessionResponse(
@@ -1222,6 +1275,597 @@ void main() {
       controller.dispose();
     },
   );
+  testWidgets(
+    'prepared next code replaces directly within approved two-second window',
+    (tester) async {
+      if (Platform.isLinux && !_fontsLoaded) {
+        for (final family in ['Figtree', 'BricolageGrotesque']) {
+          final loader = FontLoader(family);
+          for (final weight
+              in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+            final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                ),
+              ),
+            );
+          }
+          await loader.load();
+        }
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File(
+                  '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
+              ),
+            ),
+          );
+        await icons.load();
+        final mono = FontLoader('CodeMono')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/CodeMono-Regular.ttf').readAsBytesSync(),
+              ),
+            ),
+          );
+        await mono.load();
+        _fontsLoaded = true;
+      }
+      var t = 0;
+      final bridge = DelayedBatchBridge(() => t = 400, {
+        '/v1/manage/session': SessionResponse(
+          200,
+          jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+        ),
+        '/v1/manage/entries': SessionResponse(
+          200,
+          jsonEncode({
+            'entries': [
+              {
+                'entry_id': 'a',
+                'label': 'Test',
+                'service_id': 'custom-totp',
+                'capabilities': {'manage': true},
+                'account_name': 'me',
+                'totp': true,
+              },
+            ],
+          }),
+        ),
+        '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+        '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+        '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+      });
+      final controller = ReadWorkspaceController(
+        bridge: bridge,
+        clock: () => 45000,
+      );
+      await controller.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: controller,
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+            clock: () => 45000,
+            onSignedOut: () {},
+            batchClock: () => t,
+            batchPolicy: const BatchPolicy(
+              maxEntries: 1,
+              maxTotalCodes: 32,
+              minPeriodSeconds: 20,
+              maxPeriodSeconds: 86400,
+              maxWindowSeconds: 600,
+              minRemainingMs: 1000,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('0000001'), findsOneWidget);
+      final before = tester.getSize(find.byType(Card).last).height;
+      t = 15001;
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Renewing code...'), findsNothing);
+      expect(find.text('No active code'), findsNothing);
+      expect(find.text('0000001'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsNothing);
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      await tester.pump();
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/batch-next-early-mobile.png'),
+        );
+      }
+      await tester.binding.setSurfaceSize(null);
+      await tester.pump();
+      String? invalidCopy;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            invalidCopy = (call.arguments as Map)['text'] as String;
+          }
+          return null;
+        },
+      );
+      await tester.tap(find.text('Test'));
+      await tester.pump();
+      expect(invalidCopy, '0000001');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('Copied'), findsOneWidget);
+      expect(tester.getSize(find.byType(Card).last).height, before);
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/batch-direct-replacement.png'),
+        );
+      }
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Renewing code...'), findsNothing);
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/batch-direct-replacement-mobile.png'),
+        );
+      }
+      await tester.binding.setSurfaceSize(null);
+      await tester.pump(const Duration(milliseconds: 1500));
+      t = 15401;
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Renewing code...'), findsNothing);
+      expect(find.text('0000001'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
+    'boundary timer rearms across two early transitions without one-second polling',
+    (tester) async {
+      if (Platform.isLinux && !_fontsLoaded) {
+        for (final family in ['Figtree', 'BricolageGrotesque']) {
+          final loader = FontLoader(family);
+          for (final weight
+              in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+            final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                ),
+              ),
+            );
+          }
+          await loader.load();
+        }
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File(
+                  '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
+              ),
+            ),
+          );
+        await icons.load();
+        final mono = FontLoader('CodeMono')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/CodeMono-Regular.ttf').readAsBytesSync(),
+              ),
+            ),
+          );
+        await mono.load();
+        _fontsLoaded = true;
+      }
+      final base = tester.binding.clock.now();
+      int clock() => tester.binding.clock.now().difference(base).inMilliseconds;
+      final bridge = TimerCodesBridge({
+        '/v1/manage/session': SessionResponse(
+          200,
+          jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+        ),
+        '/v1/manage/entries': SessionResponse(
+          200,
+          jsonEncode({
+            'entries': [
+              {
+                'entry_id': 'a',
+                'label': 'Test',
+                'service_id': 'custom-totp',
+                'capabilities': {'manage': true},
+                'account_name': 'me',
+                'totp': true,
+              },
+            ],
+          }),
+        ),
+        '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+        '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+        '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+      });
+      final controller = ReadWorkspaceController(
+        bridge: bridge,
+        clock: () => 45000,
+      );
+      await controller.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: controller,
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+            clock: () => 45000,
+            onSignedOut: () {},
+            batchClock: clock,
+            batchPolicy: const BatchPolicy(
+              maxEntries: 1,
+              maxTotalCodes: 32,
+              minPeriodSeconds: 20,
+              maxPeriodSeconds: 86400,
+              maxWindowSeconds: 600,
+              minRemainingMs: 1000,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('1111111'), findsOneWidget);
+      // Advance to the first early switch then a second period. The timer
+      // callback must notify/re-arm even though no new batch is fetched.
+      await tester.pump(const Duration(milliseconds: 12875));
+      expect(find.text('2222222'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 30000));
+      expect(find.text('3333333'), findsOneWidget);
+      expect(bridge.batches, 1);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'brief stale fallback is grey updating, inert, and clears after two seconds',
+    (tester) async {
+      if (Platform.isLinux && !_fontsLoaded) {
+        for (final family in ['Figtree', 'BricolageGrotesque']) {
+          final loader = FontLoader(family);
+          for (final weight
+              in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+            final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                ),
+              ),
+            );
+          }
+          await loader.load();
+        }
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File(
+                  '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
+              ),
+            ),
+          );
+        await icons.load();
+        final mono = FontLoader('CodeMono')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/CodeMono-Regular.ttf').readAsBytesSync(),
+              ),
+            ),
+          );
+        await mono.load();
+        _fontsLoaded = true;
+      }
+      var t = 0;
+      final bridge = BriefStaleBridge({
+        '/v1/manage/session': SessionResponse(
+          200,
+          jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+        ),
+        '/v1/manage/entries': SessionResponse(
+          200,
+          jsonEncode({
+            'entries': [
+              {
+                'entry_id': 'a',
+                'label': 'Test',
+                'service_id': 'custom-totp',
+                'capabilities': {'manage': true},
+                'account_name': 'me',
+                'totp': true,
+              },
+            ],
+          }),
+        ),
+        '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+        '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+        '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+      });
+      final controller = ReadWorkspaceController(
+        bridge: bridge,
+        clock: () => 45000,
+      );
+      await controller.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: controller,
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+            clock: () => 45000,
+            onSignedOut: () {},
+            batchClock: () => t,
+            batchPolicy: const BatchPolicy(
+              maxEntries: 1,
+              maxTotalCodes: 32,
+              minPeriodSeconds: 20,
+              maxPeriodSeconds: 86400,
+              maxWindowSeconds: 600,
+              minRemainingMs: 1000,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('0000001'), findsOneWidget);
+      t = 15500;
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Updating'), findsOneWidget);
+      expect(find.text('0000001'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsNothing);
+      await tester.tap(find.text('Test'));
+      await tester.pump();
+      expect(find.text('Copied'), findsNothing);
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      await tester.pump();
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/batch-stale-updating-mobile.png'),
+        );
+      }
+      t = 18000;
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.text('0000001'), findsNothing);
+      expect(find.text('Updating'), findsNothing);
+      await tester.binding.setSurfaceSize(null);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+
+  testWidgets('first-use hint has restrained mobile pixels', (tester) async {
+    if (Platform.isLinux && !_fontsLoaded) {
+      for (final family in ['Figtree', 'BricolageGrotesque']) {
+        final loader = FontLoader(family);
+        for (final weight
+            in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+          final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+          loader.addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+              ),
+            ),
+          );
+        }
+        await loader.load();
+      }
+      final icons = FontLoader('MaterialIcons')
+        ..addFont(
+          Future.value(
+            ByteData.sublistView(
+              File(
+                '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+              ).readAsBytesSync(),
+            ),
+          ),
+        );
+      await icons.load();
+      _fontsLoaded = true;
+    }
+    var t = 0;
+    final bridge = BriefStaleBridge({
+      '/v1/manage/session': SessionResponse(
+        200,
+        jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+      ),
+      '/v1/manage/entries': SessionResponse(
+        200,
+        jsonEncode({
+          'entries': [
+            {
+              'entry_id': 'a',
+              'label': 'Test',
+              'service_id': 'custom-totp',
+              'capabilities': {'manage': true},
+              'account_name': 'me',
+              'totp': true,
+            },
+          ],
+        }),
+      ),
+      '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+      '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+      '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+    });
+    final controller = ReadWorkspaceController(
+      bridge: bridge,
+      clock: () => 45000,
+    );
+    await controller.refresh();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: otpandaTheme(),
+        home: ProductShell(
+          controller: controller,
+          copyHintStore: TestCopyHint(),
+          onCopyAssigned: (_) async {},
+          onCopyPrivate: (_) async {},
+          clock: () => 45000,
+          onSignedOut: () {},
+          batchClock: () => t,
+          batchPolicy: const BatchPolicy(
+            maxEntries: 1,
+            maxTotalCodes: 32,
+            minPeriodSeconds: 20,
+            maxPeriodSeconds: 86400,
+            maxWindowSeconds: 600,
+            minRemainingMs: 1000,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('0000001'), findsOneWidget);
+    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    await tester.pump();
+    if (Platform.isLinux) {
+      await expectLater(
+        find.byType(ProductShell),
+        matchesGoldenFile('goldens/first-copy-hint-mobile.png'),
+      );
+    }
+    await tester.binding.setSurfaceSize(null);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('missing code uses same-width monospace dash count', (
+    tester,
+  ) async {
+    if (Platform.isLinux && !_fontsLoaded) {
+      for (final family in ['Figtree', 'BricolageGrotesque']) {
+        final loader = FontLoader(family);
+        for (final weight
+            in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+          final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+          loader.addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+              ),
+            ),
+          );
+        }
+        await loader.load();
+      }
+      final icons = FontLoader('MaterialIcons')
+        ..addFont(
+          Future.value(
+            ByteData.sublistView(
+              File(
+                '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+              ).readAsBytesSync(),
+            ),
+          ),
+        );
+      await icons.load();
+      _fontsLoaded = true;
+    }
+    var t = 0;
+    final bridge = BriefStaleBridge({
+      '/v1/manage/session': SessionResponse(
+        200,
+        jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+      ),
+      '/v1/manage/entries': SessionResponse(
+        200,
+        jsonEncode({
+          'entries': [
+            {
+              'entry_id': 'a',
+              'label': 'Test',
+              'service_id': 'custom-totp',
+              'capabilities': {'manage': true},
+              'account_name': 'me',
+              'totp': true,
+            },
+          ],
+        }),
+      ),
+      '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+      '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+      '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+    });
+    final controller = ReadWorkspaceController(
+      bridge: bridge,
+      clock: () => 45000,
+    );
+    await controller.refresh();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: otpandaTheme(),
+        home: ProductShell(
+          controller: controller,
+          copyHintStore: TestCopyHint(),
+          onCopyAssigned: (_) async {},
+          onCopyPrivate: (_) async {},
+          clock: () => 45000,
+          onSignedOut: () {},
+          batchClock: () => t,
+          batchPolicy: const BatchPolicy(
+            maxEntries: 1,
+            maxTotalCodes: 32,
+            minPeriodSeconds: 20,
+            maxPeriodSeconds: 86400,
+            maxWindowSeconds: 600,
+            minRemainingMs: 1000,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('0000001'), findsOneWidget);
+    final width = tester.getSize(find.text('0000001')).width;
+    t = 18000;
+    await tester.pump(const Duration(seconds: 18));
+    expect(find.text('-------'), findsOneWidget);
+    expect(tester.getSize(find.text('-------')).width, width);
+    expect(find.byTooltip('Copy code'), findsNothing);
+    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    await tester.pump();
+    if (Platform.isLinux) {
+      await expectLater(
+        find.byType(ProductShell),
+        matchesGoldenFile('goldens/code-placeholder-mobile.png'),
+      );
+    }
+    await tester.binding.setSurfaceSize(null);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
 
   test('long period entering its last 15 s on a current-only server: time-gated, at most 3 s spacing, and does not touch the normal entry budget', () async {
     var time = 0;
@@ -1255,4 +1899,84 @@ void main() {
     }
     c.dispose();
   });
+}
+
+class DelayedBatchBridge extends BatchBridge {
+  DelayedBatchBridge(this.arrive, super.routes);
+  final void Function() arrive;
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    final response = await super.totpBatch(ids, windowSeconds: windowSeconds);
+    arrive();
+    return response;
+  }
+}
+
+class BriefStaleBridge extends BatchBridge {
+  BriefStaleBridge(super.routes);
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    if (batches > 0) return const SessionResponse(503, '{}');
+    batches++;
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 45000,
+        'coverageUntil': 60000,
+        'totalCodes': ids.length,
+        'entries': [
+          for (final id in ids)
+            {
+              'entryId': id,
+              'period': 30,
+              'digits': 7,
+              'validFrom': 30,
+              'codes': ['0000001'],
+            },
+        ],
+        'omitted': [],
+      }),
+    );
+  }
+}
+
+class TimerCodesBridge extends BatchBridge {
+  TimerCodesBridge(super.routes);
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    batches++;
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 45075,
+        'coverageUntil': 600000,
+        'totalCodes': 20 * ids.length,
+        'entries': [
+          for (final id in ids)
+            {
+              'entryId': id,
+              'period': 30,
+              'digits': 7,
+              'validFrom': 30,
+              'codes': [
+                '1111111',
+                '2222222',
+                '3333333',
+                ...List.filled(17, '4444444'),
+              ],
+            },
+        ],
+        'omitted': [],
+      }),
+    );
+  }
 }

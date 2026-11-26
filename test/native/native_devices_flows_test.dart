@@ -270,7 +270,12 @@ void main() {
   ) async {
     var spent = 0;
     final m = _mk(
-      s: const NativeSession('DEV', 'tok', 99999999, enrollGrant: 'otpda_grant'),
+      s: const NativeSession(
+        'DEV',
+        'tok',
+        99999999,
+        enrollGrant: 'otpda_grant',
+      ),
       spent: () => spent++,
     );
     await t.pumpWidget(_app(m.v));
