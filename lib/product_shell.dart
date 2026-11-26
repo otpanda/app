@@ -153,6 +153,8 @@ class _ProductShellState extends State<ProductShell>
       _batchRevision = widget.controller.publishedRevision;
       b.invalidate();
     }
+    final validIds = widget.controller.store.entries.map((e) => e.id).toSet();
+    _batchKeys.removeWhere((id, _) => !validIds.contains(id));
     final q = query.trim().toLowerCase();
     final ids = [
       for (final e in widget.controller.store.entries)

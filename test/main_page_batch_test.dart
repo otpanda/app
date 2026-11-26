@@ -45,6 +45,37 @@ class BatchBridge extends FakeTransport implements TotpBatchBridge {
   }
 }
 
+class CurrentOnlyBridge extends FakeTransport implements TotpBatchBridge {
+  CurrentOnlyBridge(super.routes);
+  int batches = 0;
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    batches++;
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 59600,
+        'coverageUntil': 60000,
+        'totalCodes': ids.length,
+        'entries': [
+          for (final id in ids)
+            {
+              'entryId': id,
+              'period': 30,
+              'digits': 7,
+              'validFrom': 30,
+              'codes': ['0000001'],
+            },
+        ],
+        'omitted': [],
+      }),
+    );
+  }
+}
+
 void main() {
   test(
     'sleep divergence clears held codes and stale copy, background clears',
@@ -76,6 +107,46 @@ void main() {
       c.dispose();
     },
   );
+
+  test('400ms current-only accepts, no per-tick loop, new selection and resume refetch without old success delay', () async {
+    var time = 0;
+    final bridge = CurrentOnlyBridge({});
+    final c = MainPageBatchController(
+      bridge: bridge,
+      policy: const BatchPolicy(
+        maxEntries: 1,
+        maxTotalCodes: 32,
+        minPeriodSeconds: 20,
+        maxPeriodSeconds: 86400,
+        maxWindowSeconds: 600,
+        minRemainingMs: 1,
+      ),
+      active: () => true,
+      wallMilliseconds: () => time,
+      monotonicMilliseconds: () => time,
+    );
+    c.select(['a']);
+    await Future<void>.delayed(Duration.zero);
+    expect(c.current('a')?.value, '0000001');
+    expect(bridge.batches, 1);
+    for (var i = 0; i < 10; i++) c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.batches, 1);
+    c.select(['b']);
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.batches, 2);
+    expect(c.current('b')?.value, '0000001');
+    c.foreground(false);
+    c.foreground(true);
+    c.select(['a']);
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.batches, 3);
+    time = 1000;
+    c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.batches, 4);
+    c.dispose();
+  });
 
   testWidgets(
     'main page automatically requests a batch and shows padded generated code with copy control',
@@ -160,15 +231,31 @@ void main() {
       expect(bridge.batches, 1);
       expect(find.text('0000001'), findsOneWidget);
       expect(find.byTooltip('Copy code'), findsOneWidget);
-      await expectLater(find.byType(ProductShell),matchesGoldenFile('goldens/mainpage-batch.png'));
-      String? copied;tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform,(call)async{if(call.method=='Clipboard.setData')copied=(call.arguments as Map)['text'] as String;return null;});
-      await tester.tap(find.byTooltip('Copy code'));await tester.pump();expect(copied,'0000001');
+      await expectLater(
+        find.byType(ProductShell),
+        matchesGoldenFile('goldens/mainpage-batch.png'),
+      );
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData')
+            copied = (call.arguments as Map)['text'] as String;
+          return null;
+        },
+      );
+      await tester.tap(find.byTooltip('Copy code'));
+      await tester.pump();
+      expect(copied, '0000001');
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);await tester.pump();expect(find.text('0000001'),findsNothing);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      expect(find.text('0000001'), findsNothing);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     },

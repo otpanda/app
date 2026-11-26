@@ -241,12 +241,12 @@ final class BatchRequest {
 }
 
 class _Held {
-  _Held(this.entry, this.loOffset, this.hiOffset);
+  _Held(this.entry, this.loOffset, this.hiOffset, this.coverageUntil);
   final BatchEntry entry;
 
   /// Server time at monotonic tick t is within [t + loOffset, t + hiOffset]:
   /// serverNow was stamped somewhere between sending and receiving.
-  final int loOffset, hiOffset;
+  final int loOffset, hiOffset, coverageUntil;
 }
 
 /// Memory-only store of batched codes with a conservative monotonic clock.
@@ -263,7 +263,6 @@ final class BatchCodeStore {
   final int Function() monotonicMilliseconds;
   int _generation = 0, _sequence = 0, _accepted = 0;
   int? _lastTick;
-  int? _coverage, _coverageHiOffset;
   final _held = <String, _Held>{};
 
   // The tick high-water survives clear on purpose: a restarted or broken clock
@@ -329,15 +328,9 @@ final class BatchCodeStore {
         _held.remove(id);
       }
       for (final e in batch.entries) {
-        _held[e.entryId] = _Held(e, lo, hi);
+        _held[e.entryId] = _Held(e, lo, hi, batch.coverageUntil!);
       }
       _accepted = request._sequence;
-      if (c != null) {
-        _coverage = c;
-        _coverageHiOffset = hi;
-      } else if (_held.isEmpty) {
-        _coverage = null;
-      }
       return true;
     } catch (_) {
       clear();
@@ -380,12 +373,21 @@ final class BatchCodeStore {
 
   /// Milliseconds of coverage left under the latest server clock, 0 when none.
   int coverageRemainingMs() {
-    final c = _coverage;
-    if (c == null) return 0;
+    if (_held.isEmpty) return 0;
     try {
       final t = _tick();
-      final r = c - (t + _coverageHiOffset!);
-      return r < 0 ? 0 : r;
+      int? minimum;
+      for (final h in _held.values) {
+        final tail =
+            (h.entry.validFrom + h.entry.codes.length * h.entry.period) * 1000;
+        final end = tail < h.coverageUntil ? tail : h.coverageUntil;
+        final remaining = end - (t + h.hiOffset);
+        // Expired retained entries must not force a loop for a newer selection.
+        if (remaining > 0 && (minimum == null || remaining < minimum)) {
+          minimum = remaining;
+        }
+      }
+      return minimum ?? 0;
     } catch (_) {
       clear();
       return 0;
@@ -403,6 +405,5 @@ final class BatchCodeStore {
   void clear() {
     _generation++;
     _held.clear();
-    _coverage = _coverageHiOffset = null;
   }
 }

@@ -52,7 +52,7 @@ class MainPageBatchController extends ChangeNotifier {
   late final BatchCodeStore store;
   List<String> _ids = [];
   bool busy = false, _disposed = false;
-  int _generation = 0, _retryAt = 0;
+  int _generation = 0, _retryAt = 0, _successAt = 0;
   String? error;
   void _notify() {
     if (!_disposed) notifyListeners();
@@ -62,6 +62,7 @@ class MainPageBatchController extends ChangeNotifier {
     final next = ids.take(policy.maxEntries).toList();
     if (listEquals(next, _ids)) return;
     _ids = next;
+    _successAt = 0;
     if (next.isNotEmpty) {
       refresh();
     } else {
@@ -71,6 +72,7 @@ class MainPageBatchController extends ChangeNotifier {
 
   void invalidate({bool notify = true}) {
     _generation++;
+    _retryAt = _successAt = 0;
     _ids = [];
     store.clear();
     busy = false;
@@ -83,14 +85,21 @@ class MainPageBatchController extends ChangeNotifier {
         _ids.isNotEmpty &&
         !busy &&
         _mono() >= _retryAt &&
-        store.needsRefresh(leadMs: 15000)) {
+        _mono() >= _successAt &&
+        (store.needsRefresh(leadMs: 15000) ||
+            _ids.any((id) => store.current(id) == null))) {
       refresh();
     }
     _notify();
   }
 
   Future<void> refresh() async {
-    if (!_safe || busy || _ids.isEmpty || _disposed || _mono() < _retryAt) {
+    if (!_safe ||
+        busy ||
+        _ids.isEmpty ||
+        _disposed ||
+        _mono() < _retryAt ||
+        _mono() < _successAt) {
       return;
     }
     final generation = _generation;
@@ -109,7 +118,8 @@ class MainPageBatchController extends ChangeNotifier {
       }
       store.accept(request, jsonDecode(response.body), policy: policy);
       error = null;
-      _retryAt =
+      _retryAt = 0;
+      _successAt =
           _mono() + (store.coverageRemainingMs() - 1000).clamp(1000, 15000);
     } catch (_) {
       if (generation == _generation) {
