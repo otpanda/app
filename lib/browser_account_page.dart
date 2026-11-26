@@ -210,6 +210,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   DateTime? overviewFetchedAt;
   int overviewInFlightRevision = -1;
   int accountPagesShown = 0;
+  bool overviewPreparedForAppearance = false;
   String? settingChange;
   bool securityOpen = false;
   final organization = OrganizationStore();
@@ -542,6 +543,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   /// the cache): fetch it once.
   Future<void> ensureOverview() async {
     if (overview != null && status == 'restored' && mounted) {
+      // Restoration may have fetched for this exact appearance before the
+      // page mounted. Consume that read once, never a time-based throttle.
+      if (overviewPreparedForAppearance) {
+        overviewPreparedForAppearance = false;
+        return;
+      }
       // Already held but possibly old: the Account page shows security
       // status, so read it again without the loading bar.
       if (overviewInFlightRevision == revision) return;
@@ -661,12 +668,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         (accountOpen || !widget.workspaceEnabled) &&
         settingsCategory != SettingsCategory.account;
     final skip =
-        categoryDoesNotNeedOverview ||
         !forceOverview &&
+        (categoryDoesNotNeedOverview ||
             accountPagesShown == 0 &&
-            (overview != null ||
-                cachedProfile?.isFresh(DateTime.now().millisecondsSinceEpoch) ==
-                    true);
+                (overview != null ||
+                    cachedProfile?.isFresh(
+                          DateTime.now().millisecondsSinceEpoch,
+                        ) ==
+                        true));
     if (!skip) {
       if (widget.workspaceEnabled && !accountOpen) {
         try {
@@ -676,6 +685,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         }
       } else {
         await fetchOverview(attempt);
+        if (mounted &&
+            attempt == revision &&
+            accountPagesShown == 0 &&
+            settingsCategory == SettingsCategory.account) {
+          overviewPreparedForAppearance = true;
+        }
       }
     }
     if (!skip) forceOverview = false;
@@ -930,6 +945,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   bool forceOverview = false;
 
   void resetIdentity() {
+    overviewPreparedForAppearance = false;
     cachedProfile = null;
     overview = null;
     sessionOwner = null;
