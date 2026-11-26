@@ -753,3 +753,10 @@ test('poll-only approved retry survives hidden to visible without another status
  doc.hidden=true;listeners[0]();await timers.at(-1).f();const before=timers.length;
  doc.hidden=false;listeners[0]();assert.equal(reads,1);assert.ok(timers.length>before);assert.ok(seen.length>=2);const n=seen.length;await timers.at(-1).f();assert.equal(seen.length,n+1);assert.equal(reads,1);
 });
+test('auth navigation UI latch waits, returns from BFCache, and times out without auth retries',async()=>{
+ const events={},e=env({events});await e.context.OTPandaSession.ready;
+ let fire,cleared=0;e.context.setTimeout=(f,ms)=>{assert.equal(ms,15000);fire=f;return 1;};e.context.clearTimeout=()=>cleared++;
+ let done=false;const pending=e.context.OTPandaSession.waitForAuthNavigation().then(()=>done=true);
+ await Promise.resolve();assert.equal(done,false);events.pageshow({persisted:false});await Promise.resolve();assert.equal(done,false);events.pageshow({persisted:true});await pending;assert.equal(done,true);assert.equal(cleared,1);
+ const failed=e.context.OTPandaSession.waitForAuthNavigation();fire();await assert.rejects(failed,/navigation did not finish/);assert.equal(e.calls,0);
+});

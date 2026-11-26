@@ -386,6 +386,14 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     view:()=>view,
     setView:value=>{if(!validView(value))throw Error('View identifier required');view=value;try{sessionStorage.setItem(VIEW_KEY,String(value));}catch{}},
     email:()=>entryEmail,
+    // UI-only latch after an explicit sign-in redirect request. No requests or retries.
+    waitForAuthNavigation:()=>new Promise((resolve,reject)=>{
+      let timer;
+      const cleanup=()=>{clearTimeout(timer);globalThis.removeEventListener?.('pageshow',returned);};
+      const returned=e=>{if(e.persisted){cleanup();resolve();}};
+      globalThis.addEventListener?.('pageshow',returned);
+      timer=setTimeout(()=>{cleanup();reject(Error('Sign-in navigation did not finish. Try again.'));},15000);
+    }),
     googleStart:async remember=>globalThis.OTPandaSession.start('google',remember),
     // Signed-in connect. Never clears the session or the restore hint. Returns
     // '' once it navigates to Google, otherwise a reason code to show.
