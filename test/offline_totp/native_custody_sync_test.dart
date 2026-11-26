@@ -227,6 +227,130 @@ void main() {
     complete: true,
     versions: {'e': 1},
   );
+  for (final switching in [false, true]) {
+    test(
+      'lifecycle purge rejects old network seed after ${switching ? "switch" : "purge"}',
+      () async {
+        final fake = FakeSeedCustody();
+        final sync = await NativeCustodySync.open(
+          custody: fake,
+          ownerId: 'o',
+          deviceId: 'd',
+        );
+        await sync.reconcile(snapshot);
+        final ticket = await sync.issue(
+          ownerId: 'o',
+          deviceId: 'd',
+          entryId: 'e',
+          seedVersion: 1,
+        );
+        if (switching) {
+          await sync.switchOwner(ownerId: 'other', deviceId: 'd2');
+        } else {
+          await sync.purge();
+        }
+        final seed = Uint8List.fromList(List.filled(20, 1));
+        await expectLater(
+          sync.accept(
+            ticket,
+            ownerId: 'o',
+            deviceId: 'd',
+            epoch: 0,
+            entryId: 'e',
+            seedVersion: 1,
+            algorithm: OtpAlgorithm.sha1,
+            digits: 6,
+            period: 30,
+            seed: seed,
+          ),
+          throwsA(isA<GuardException>()),
+        );
+        expect(seed, everyElement(0));
+        expect(fake.entries('o'), isEmpty);
+        expect((await fake.readOwnerState('o')).enabled, true);
+        final reopened = await NativeCustodySync.open(
+          custody: fake,
+          ownerId: 'o',
+          deviceId: 'd',
+        );
+        await expectLater(
+          reopened.issue(
+            ownerId: 'o',
+            deviceId: 'd',
+            entryId: 'e',
+            seedVersion: 1,
+          ),
+          throwsA(
+            isA<GuardException>().having(
+              (e) => e.error,
+              'error',
+              GuardError.notReady,
+            ),
+          ),
+        );
+      },
+    );
+  }
+  test(
+    'native ahead purge adopts effective epoch and stays disabled',
+    () async {
+      final fake = FakeSeedCustody();
+      final sync = await NativeCustodySync.open(
+        custody: fake,
+        ownerId: 'o',
+        deviceId: 'd',
+      );
+      await fake.purgeOwner('o', epoch: 0);
+      await fake.purgeOwner('o', epoch: 1);
+      expect((await sync.purge()).epoch, 2);
+      await expectLater(
+        sync.issue(ownerId: 'o', deviceId: 'd', entryId: 'e', seedVersion: 1),
+        throwsA(
+          isA<GuardException>().having(
+            (e) => e.error,
+            'error',
+            GuardError.disabled,
+          ),
+        ),
+      );
+      await sync.enable(2);
+      await expectLater(
+        sync.issue(ownerId: 'o', deviceId: 'd', entryId: 'e', seedVersion: 1),
+        throwsA(
+          isA<GuardException>().having(
+            (e) => e.error,
+            'error',
+            GuardError.notReady,
+          ),
+        ),
+      );
+    },
+  );
+  test('failed purge keeps owner and disabled guard', () async {
+    final fake = FakeSeedCustody();
+    final sync = await NativeCustodySync.open(
+      custody: fake,
+      ownerId: 'o',
+      deviceId: 'd',
+    );
+    fake.metadataDown = true;
+    await expectLater(
+      sync.switchOwner(ownerId: 'other', deviceId: 'd2'),
+      throwsA(isA<CustodyException>()),
+    );
+    fake.metadataDown = false;
+    await expectLater(
+      sync.issue(ownerId: 'o', deviceId: 'd', entryId: 'e', seedVersion: 1),
+      throwsA(
+        isA<GuardException>().having(
+          (e) => e.error,
+          'error',
+          GuardError.disabled,
+        ),
+      ),
+    );
+    expect((await sync.readOwnerState()).epoch, 0);
+  });
   test(
     'disable cannot interleave between guard consumption and custody provision',
     () async {

@@ -105,7 +105,7 @@ final class AndroidSeedCustody implements NativeSeedCustody {
     if (v['purged'] is! bool) _invalid();
     final effective = _number(
       v['epoch'],
-      min: epoch,
+      min: epoch + 1,
       max: custodyMaxSafeInt - 1,
     );
     return PurgeOwnerResult(purged: v['purged'] as bool, epoch: effective);
