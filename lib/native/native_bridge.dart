@@ -57,6 +57,7 @@ class NativeSessionBridge
         BrowserSessionBridge,
         SessionContinuityBridge,
         TotpManagementBridge,
+        TotpBatchBridge,
         TotpCreationCapability,
         AssignmentBridge,
         EntryManagementBridge,
@@ -694,6 +695,30 @@ class NativeSessionBridge
         'createdAt': createdAt,
       }),
     );
+  }
+
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> entryIds, {
+    required int windowSeconds,
+  }) {
+    if (entryIds.isEmpty ||
+        entryIds.length > 49 ||
+        entryIds.toSet().length != entryIds.length ||
+        entryIds.any(
+          (e) =>
+              e.isEmpty ||
+              e.length > 64 ||
+              RegExp(r'[\x00-\x20\x7f]').hasMatch(e),
+        ) ||
+        windowSeconds < 1 ||
+        windowSeconds > 600) {
+      throw ArgumentError('Invalid batch request');
+    }
+    final query = Uri(
+      queryParameters: {'entry': entryIds, 'window': '$windowSeconds'},
+    ).query;
+    return _call('GET', '/v1/manage/totp-codes?$query');
   }
 
   @override

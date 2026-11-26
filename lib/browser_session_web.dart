@@ -95,6 +95,10 @@ extension type _Session(JSObject _) implements JSObject {
     JSString? catalogId,
   ]);
   external JSPromise<_ReadResponse> totpCode(JSString entryId);
+  external JSPromise<_ReadResponse> totpBatch(
+    JSString entries,
+    JSNumber window,
+  );
   external JSPromise<_ReadResponse> read(JSString path);
   external JSPromise<_ReadResponse> organize(JSString method, JSString body);
   external JSPromise<_ReadResponse> copied(
@@ -127,6 +131,7 @@ class _Browser
         PasskeyLabelBridge,
         ProfileCacheBridge,
         TotpManagementBridge,
+        TotpBatchBridge,
         GmailSourceBridge,
         GoogleLinkBridge,
         GoogleConnectBridge,
@@ -214,6 +219,17 @@ class _Browser
   @override
   void onProfileRevoked(void Function() listener) =>
       _session.onProfileRevoked(listener.toJS);
+
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> entryIds, {
+    required int windowSeconds,
+  }) async {
+    final r = await _session
+        .totpBatch(jsonEncode(entryIds).toJS, windowSeconds.toJS)
+        .toDart;
+    return SessionResponse(r.status.toDartInt, r.body.toDart);
+  }
 
   @override
   Future<SessionResponse> totpCode(String entryId) async {

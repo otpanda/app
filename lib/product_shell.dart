@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'main_page_batch.dart';
+import 'totp_batch_contract.dart';
+
 import 'browser_session_contract.dart';
 import 'assignment_dialog.dart';
 import 'entry_manage_dialog.dart';
@@ -25,6 +28,7 @@ import 'session_contract.dart';
 /// until their endpoints exist.
 class ProductShell extends StatefulWidget {
   final ReadWorkspaceController controller;
+  final BatchPolicy? batchPolicy;
   final Future<void> Function(ReceivedCode) onCopyAssigned;
   final Future<void> Function(UnassignedCode) onCopyPrivate;
   final int Function() clock;
@@ -49,6 +53,7 @@ class ProductShell extends StatefulWidget {
   const ProductShell({
     super.key,
     required this.controller,
+    this.batchPolicy,
     required this.onCopyAssigned,
     required this.onCopyPrivate,
     required this.clock,
@@ -114,13 +119,50 @@ class _ProductShellState extends State<ProductShell> {
   static const freshForMs = 120000;
   Timer? freshTimer;
   bool hadFresh = false;
+  MainPageBatchController? batch;
+  int _batchRevision = -1;
+  void syncBatch() {
+    final b = batch;
+    if (b == null) return;
+    if (!widget.controller.signedIn ||
+        !widget.controller.hasLoaded ||
+        widget.controller.store.sessionExpired(widget.clock())) {
+      b.invalidate();
+      return;
+    }
+    if (_batchRevision != widget.controller.publishedRevision) {
+      _batchRevision = widget.controller.publishedRevision;
+      b.invalidate();
+    }
+    final q = query.trim().toLowerCase();
+    b.select([
+      for (final e in widget.controller.store.entries)
+        if (e.totp && ("${e.service} ${e.account}".toLowerCase().contains(q)))
+          e.id,
+    ]);
+  }
+
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(changed);
+    final policy = widget.batchPolicy, bridge = widget.controller.bridge;
+    if (policy != null && bridge is TotpBatchBridge) {
+      batch = MainPageBatchController(
+        bridge: bridge as TotpBatchBridge,
+        policy: policy,
+        active: () =>
+            widget.controller.signedIn &&
+            !widget.controller.suspended &&
+            !widget.controller.store.sessionExpired(widget.clock()),
+      )..addListener(changed);
+      syncBatch();
+    }
     // Lets the highlight fade on its own without any refresh.
-    freshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (mounted && hadFresh) setState(() {});
+    freshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      syncBatch();
+      batch?.tick();
+      if (mounted && (hadFresh || batch != null)) setState(() {});
     });
   }
 
@@ -140,6 +182,8 @@ class _ProductShellState extends State<ProductShell> {
   @override
   void dispose() {
     freshTimer?.cancel();
+    batch?.removeListener(changed);
+    batch?.dispose();
     widget.controller.removeListener(changed);
     searchController.dispose();
     super.dispose();
@@ -426,8 +470,10 @@ class _ProductShellState extends State<ProductShell> {
                   child: codeTile(
                     e.service,
                     e.account,
-                    null,
-                    null,
+                    e.totp ? batch?.current(e.id)?.value : null,
+                    e.totp && batch?.current(e.id) != null
+                        ? () => batch!.copy(e.id)
+                        : null,
                     true,
                     false,
                     null,
