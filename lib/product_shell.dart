@@ -153,6 +153,85 @@ class _ProductShellState extends State<ProductShell>
 
   String? _copiedTile;
 
+  void dismissCopyTutorial() {
+    setState(() {
+      _copyHint = false;
+      _copiedThisRun = true;
+    });
+    unawaited(_copyHintStore.markCopied().catchError((Object _) {}));
+  }
+
+  Widget copyTutorial() => Container(
+    key: const Key('copy-tutorial-banner'),
+    margin: const EdgeInsets.only(bottom: 16),
+    padding: const EdgeInsets.fromLTRB(16, 14, 6, 16),
+    decoration: BoxDecoration(
+      color: const Color(0xffe1f4ea),
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: const Color(0xff79b99b), width: 1.5),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: green,
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: const Icon(
+            Icons.touch_app_outlined,
+            color: Colors.white,
+            size: 26,
+          ),
+        ),
+        const SizedBox(width: 12),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'START HERE',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
+                  color: green,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Tap a card to copy',
+                style: TextStyle(
+                  fontSize: 19,
+                  height: 1.15,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xff123c2e),
+                ),
+              ),
+              SizedBox(height: 7),
+              Text(
+                'Tap anywhere on a code card below, then paste it where you need it.',
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.4,
+                  color: Color(0xff285443),
+                ),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          key: const Key('dismiss-copy-tutorial'),
+          tooltip: 'Dismiss copy tutorial',
+          onPressed: dismissCopyTutorial,
+          icon: const Icon(Icons.close, size: 20, color: Color(0xff285443)),
+        ),
+      ],
+    ),
+  );
+
   Future<void> copyTile(String id, Future<bool> Function() copy) async {
     try {
       if (!await copy() || !mounted) return;
@@ -1061,13 +1140,7 @@ class _ProductShellState extends State<ProductShell>
               _copyHint &&
               (tab == 0 || tab == 2) &&
               phase == _Phase.loaded)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 10),
-              child: Text(
-                'Tap a code card to copy it.',
-                style: TextStyle(fontSize: 12, color: muted),
-              ),
-            ),
+            copyTutorial(),
           body(),
           const SizedBox(height: 20),
           if (widget.controller.connectionLost) ...[
