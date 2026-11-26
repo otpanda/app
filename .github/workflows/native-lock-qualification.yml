@@ -1,0 +1,67 @@
+name: Manual native local-lock qualification (synthetic)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: otpanda/api
+          ref: a039207ec3a181f9f268208da1e775eeaebbc8dd
+          path: api-fixture
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.50.1'
+          channel: stable
+          cache: true
+      - name: Strict source checks and actual Kotlin-server wire contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NATIVE_CI_DIR="$RUNNER_TEMP/native-ci"
+          bash tool/android-recovery/ci.sh
+          python3 tool/check_local_lock_boundary.py
+          export KOTLIN_LIB="$NATIVE_CI_DIR/lib"
+          export KOTLIN_CONTRACT_CLASSES="$RUNNER_TEMP/contract-classes"
+          mkdir -p "$KOTLIN_CONTRACT_CLASSES"
+          java -cp "$KOTLIN_LIB/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect -classpath "$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" -d "$KOTLIN_CONTRACT_CLASSES" tool/android-recovery/LocalLockRecovery.kt tool/android-recovery/LocalLockContractRunner.kt
+          cd api-fixture
+          npm ci --no-audit --no-fund
+          node --test test/local-lock-kotlin-contract.test.js | tee "$RUNNER_TEMP/contract.log"
+          grep -q '# pass 4' "$RUNNER_TEMP/contract.log"
+          grep -q '# skipped 0' "$RUNNER_TEMP/contract.log"
+      - run: bash tool/bootstrap.sh
+      - run: flutter analyze
+      - run: flutter test test/native/native_app_lock_test.dart test/native/native_local_lock_recovery_test.dart test/native/native_local_lock_session_test.dart
+      - name: Enable KVM on disposable emulator only
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: REQUIRE_NO_SELF_STOP=1 bash tool/android-lock-prompt-qualification.sh native-lock-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-local-lock-evidence
+          path: |
+            native-lock-out
+          retention-days: 7
