@@ -25,6 +25,7 @@ class LocalLockController extends ChangeNotifier {
   final LocalLockPlatform platform;
   bool ready = false, enabled = false, locked = true, busy = false;
   String? error;
+  bool foreground = true;
   Future<void> load() async {
     try {
       enabled = await platform.enabled();
@@ -37,6 +38,7 @@ class LocalLockController extends ChangeNotifier {
   }
 
   void background() {
+    foreground = false;
     if (enabled && !locked) {
       locked = true;
       notifyListeners();
@@ -49,7 +51,7 @@ class LocalLockController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      if (await platform.verify()) locked = false;
+      if (await platform.verify() && foreground) locked = false;
     } catch (_) {
       error = 'Not unlocked. Try device unlock again.';
     } finally {
@@ -67,7 +69,7 @@ class LocalLockController extends ChangeNotifier {
       if (await platform.verify()) {
         await platform.setEnabled(value);
         enabled = value;
-        locked = false;
+        locked = enabled && !foreground;
       }
     } catch (_) {
       error = 'Device lock was not changed. A secure screen lock is required.';
@@ -107,7 +109,11 @@ class _NativeAppLockState extends State<NativeAppLock>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) widget.controller.background();
+    if (state != AppLifecycleState.resumed) {
+      widget.controller.background();
+    } else {
+      widget.controller.foreground = true;
+    }
   }
 
   @override
