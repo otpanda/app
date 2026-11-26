@@ -46,7 +46,7 @@ jobs:
           grep -q '# pass 4' "$RUNNER_TEMP/contract.log"
           grep -q '# skipped 0' "$RUNNER_TEMP/contract.log"
       - run: bash tool/bootstrap.sh
-      - run: flutter analyze
+      - run: flutter analyze lib test integration_test
       - run: flutter test test/native/native_app_lock_test.dart test/native/native_local_lock_recovery_test.dart test/native/native_local_lock_session_test.dart
       - name: Enable KVM on disposable emulator only
         run: |
