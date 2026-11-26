@@ -1760,8 +1760,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                           securityRequested = true;
                           unawaited(refreshSecurity());
                         }
-                        // Coming back to the page re-reads the status now; the
-                        // very first visit is loaded by protectionItems.
+                        // The first status read starts above only when shown.
+                        // Returning listens and catches up without a second first read.
                         listenSecurity();
                         if (securityInfo != null &&
                             status == 'restored' &&
