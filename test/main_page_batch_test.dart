@@ -18,26 +18,61 @@ import 'product_shell_test.dart' show FakeTransport;
 class BatchBridge extends FakeTransport implements TotpBatchBridge {
   BatchBridge(super.routes);
   int batches = 0;
+  final requests = <List<String>>[];
   @override
   Future<SessionResponse> totpBatch(
     List<String> ids, {
     required int windowSeconds,
   }) async {
     batches++;
+    requests.add(List.of(ids));
     return SessionResponse(
       200,
       jsonEncode({
         'serverNow': 45000,
         'coverageUntil': 600000,
-        'totalCodes': 20,
+        'totalCodes': 20 * ids.length,
         'entries': [
-          {
-            'entryId': 'a',
-            'period': 30,
-            'digits': 7,
-            'validFrom': 30,
-            'codes': List.filled(20, '0000001'),
-          },
+          for (final id in ids)
+            {
+              'entryId': id,
+              'period': 30,
+              'digits': 7,
+              'validFrom': 30,
+              'codes': List.filled(20, '0000001'),
+            },
+        ],
+        'omitted': [],
+      }),
+    );
+  }
+}
+
+class HorizonBridge extends FakeTransport implements TotpBatchBridge {
+  HorizonBridge(super.routes);
+  int now = 45000;
+  final requests = <List<String>>[];
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    requests.add(List.of(ids));
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': now,
+        'coverageUntil': now + 10000,
+        'totalCodes': ids.length,
+        'entries': [
+          for (final id in ids)
+            {
+              'entryId': id,
+              'period': 30,
+              'digits': 7,
+              'validFrom': now ~/ 30000 * 30,
+              'codes': ['0000001'],
+            },
         ],
         'omitted': [],
       }),
@@ -255,6 +290,43 @@ void main() {
     c.dispose();
   });
 
+  test('renewal names soonest expiring held entries rather than the previous missing subset', () async {
+    var time = 0;
+    final bridge = HorizonBridge({});
+    final c = MainPageBatchController(
+      bridge: bridge,
+      policy: const BatchPolicy(
+        maxEntries: 2,
+        maxTotalCodes: 32,
+        minPeriodSeconds: 20,
+        maxPeriodSeconds: 86400,
+        maxWindowSeconds: 600,
+        minRemainingMs: 1,
+      ),
+      active: () => true,
+      wallMilliseconds: () => time,
+      monotonicMilliseconds: () => time,
+    );
+    c.select(['a', 'b']);
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.requests.last, ['a', 'b']);
+    time = 3000;
+    bridge.now = 48000;
+    c.select(['c', 'd']);
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.requests.last, ['c', 'd']);
+    time = 6000;
+    bridge.now = 51000;
+    c.select(['a', 'b', 'c', 'd']);
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.requests.last, ['a', 'b']);
+    expect(bridge.requests.length, 3);
+    for (var i = 0; i < 10; i++) c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.requests.length, 3);
+    c.dispose();
+  });
+
   testWidgets(
     'main page automatically requests a batch and shows padded generated code with copy control',
     (tester) async {
@@ -363,6 +435,105 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+  testWidgets(
+    'viewport batching advances beyond first cap and scrolls to later entries without duplicate keys',
+    (tester) async {
+      for (final family in ['Figtree', 'BricolageGrotesque']) {
+        final loader = FontLoader(family);
+        for (final weight
+            in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+          final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+          loader.addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+              ),
+            ),
+          );
+        }
+        await loader.load();
+      }
+      final icons = FontLoader('MaterialIcons')
+        ..addFont(
+          Future.value(
+            ByteData.sublistView(
+              File(
+                '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+              ).readAsBytesSync(),
+            ),
+          ),
+        );
+      await icons.load();
+      final bridge = BatchBridge({
+        '/v1/manage/session': SessionResponse(
+          200,
+          jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+        ),
+        '/v1/manage/entries': SessionResponse(
+          200,
+          jsonEncode({
+            'entries': [
+              for (var i = 0; i < 8; i++)
+                {
+                  'entry_id': 'entry$i',
+                  'label': 'Test $i',
+                  'service_id': 'custom-totp',
+                  'capabilities': {'manage': true},
+                  'account_name': 'me',
+                  'totp': true,
+                },
+            ],
+          }),
+        ),
+        '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+        '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+        '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+      });
+      final controller = ReadWorkspaceController(
+        bridge: bridge,
+        clock: () => 45000,
+      );
+      await controller.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: controller,
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+            clock: () => 45000,
+            onSignedOut: () {},
+            batchPolicy: const BatchPolicy(
+              maxEntries: 2,
+              maxTotalCodes: 64,
+              minPeriodSeconds: 20,
+              maxPeriodSeconds: 86400,
+              maxWindowSeconds: 600,
+              minRemainingMs: 1000,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(bridge.batches, 1);
+      expect(bridge.requests.first.length, 2);
+      for (var i = 0; i < 4; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 3100)),
+        );
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pump();
+        await tester.drag(find.byType(ListView).first, const Offset(0, -450));
+        await tester.pump();
+      }
+      final all = bridge.requests.expand((ids) => ids).toSet();
+      expect(all.length, greaterThan(2));
+      expect(tester.takeException(), null);
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     },

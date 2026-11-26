@@ -59,10 +59,14 @@ class MainPageBatchController extends ChangeNotifier {
   }
 
   bool needsEntry(String id) =>
-      !store.omitted.containsKey(id) && !store.hasCoverage(id);
+      (!store.omitted.containsKey(id) || store.omissionRetryDue(id)) &&
+      !store.hasCoverage(id);
+  bool needsRenewal(String id) =>
+      needsEntry(id) ||
+      (store.hasCoverage(id) && store.entryCoverageRemainingMs(id) <= 15000);
 
   void select(List<String> ids) {
-    final next = ids.take(policy.maxEntries).toList();
+    final next = ids.toSet().toList();
     if (listEquals(next, _ids)) return;
     _ids = next;
     _successAt = 0;
@@ -89,9 +93,7 @@ class MainPageBatchController extends ChangeNotifier {
         !busy &&
         _mono() >= _retryAt &&
         _mono() >= _successAt &&
-        ((_ids.any((id) => !store.omitted.containsKey(id)) &&
-                store.needsRefresh(leadMs: 15000)) ||
-            _ids.any(needsEntry))) {
+        _ids.any(needsRenewal)) {
       refresh();
     }
     _notify();
@@ -107,14 +109,22 @@ class MainPageBatchController extends ChangeNotifier {
         _mono() - _lastRequest < 3000) {
       return;
     }
+    final targets = _ids.where(needsRenewal).toList();
+    targets.sort((a, b) {
+      final left = store.entryCoverageRemainingMs(a),
+          right = store.entryCoverageRemainingMs(b);
+      return left.compareTo(right);
+    });
+    final selected = targets.take(policy.maxEntries).toList();
+    if (selected.isEmpty) return;
     final generation = _generation;
     busy = true;
     _notify();
     try {
       _lastRequest = _mono();
-      final request = store.begin(_ids.toSet());
+      final request = store.begin(selected.toSet());
       final response = await bridge.totpBatch(
-        List.of(_ids),
+        selected,
         windowSeconds: policy.maxWindowSeconds,
       );
       if (_disposed || generation != _generation) return;

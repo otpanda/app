@@ -265,6 +265,14 @@ final class BatchCodeStore {
   int? _lastTick;
   final _held = <String, _Held>{};
   final omitted = <String, String>{};
+  final _omittedAt = <String, int>{};
+  bool omissionRetryDue(String id) =>
+      omitted[id] == 'unavailable' && _tick() - (_omittedAt[id] ?? 0) >= 60000;
+  int entryCoverageRemainingMs(String id) {
+    final h = _held[id];
+    return h == null ? 0 : h.coverageUntil - (_tick() + h.hiOffset);
+  }
+
   bool hasCoverage(String id) {
     final h = _held[id];
     if (h == null) return false;
@@ -338,6 +346,7 @@ final class BatchCodeStore {
       for (final id in request.ids) {
         _held.remove(id);
         omitted.remove(id);
+        _omittedAt.remove(id);
       }
       for (final e in batch.entries) {
         _held[e.entryId] = _Held(e, lo, hi, batch.coverageUntil!);
@@ -349,8 +358,8 @@ final class BatchCodeStore {
       }
       _accepted = request._sequence;
       return true;
-    } catch (_) {
-      clear();
+    } catch (e) {
+      if (e is! FormatException || e.message != 'Expired on arrival') clear();
       rethrow;
     }
   }
@@ -423,5 +432,6 @@ final class BatchCodeStore {
     _generation++;
     _held.clear();
     omitted.clear();
+    _omittedAt.clear();
   }
 }
