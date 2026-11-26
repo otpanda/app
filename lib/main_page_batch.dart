@@ -115,10 +115,13 @@ class MainPageBatchController extends ChangeNotifier {
 
   /// Reconcile an authenticated workspace refresh without blanking still-valid
   /// generated codes. The caller separately invalidates on owner/session loss.
-  void retainAuthorized(Set<String> ids) {
+  Set<String> _authorized = {};
+  void retainAuthorized(Set<String> ids, {Set<String> changed = const {}}) {
+    if (setEquals(_authorized, ids) && changed.isEmpty) return;
+    _authorized = Set.of(ids);
     _generation++;
     busy = false;
-    store.retainAuthorized(ids);
+    store.retainAuthorized(ids.difference(changed));
     _ids = _ids.where(ids.contains).toList();
     _warmAttempts.removeWhere(
       (key, _) => !ids.any((id) => key.startsWith('$id/')),
@@ -130,6 +133,7 @@ class MainPageBatchController extends ChangeNotifier {
     _successAt = 0;
     _warmAttempts.clear();
     _ids = [];
+    _authorized = {};
     store.clear();
     busy = false;
     error = null;

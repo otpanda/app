@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -416,6 +417,41 @@ MainPageBatchController _controller(
 );
 
 void main() {
+  test(
+    'unchanged authoritative entries preserve pending initial request',
+    () async {
+      final gate = Completer<SessionResponse>();
+      final bridge = PendingRetentionBridge(gate);
+      var t = 0;
+      final c = MainPageBatchController(
+        bridge: bridge,
+        policy: const BatchPolicy(
+          maxEntries: 1,
+          maxTotalCodes: 32,
+          minPeriodSeconds: 20,
+          maxPeriodSeconds: 86400,
+          maxWindowSeconds: 600,
+          minRemainingMs: 1,
+        ),
+        active: () => true,
+        wallMilliseconds: () => 1000 + t,
+        monotonicMilliseconds: () => t,
+      );
+      c.retainAuthorized({'a'});
+      c.select(['a']);
+      expect(c.busy, true);
+      c.retainAuthorized({'a'});
+      expect(c.busy, true);
+      gate.complete(await BatchBridge({}).totpBatch(['a'], windowSeconds: 600));
+      await Future<void>.delayed(Duration.zero);
+      expect(c.tileCurrent('a')?.value, '0000001');
+      t = 16000;
+      expect(c.tileCurrent('a')?.periodStartMs, 60000);
+      c.retainAuthorized({'a'}, changed: {'a'});
+      expect(c.tileCurrent('a'), isNull);
+      c.dispose();
+    },
+  );
   test(
     'sleep divergence clears held codes and stale copy, background clears',
     () async {
@@ -1957,12 +1993,24 @@ void main() {
       await tester.pump();
       expect(find.text('0000001'), findsOneWidget);
       expect(bridge.batches, before);
+      bridge.routes['/v1/manage/session'] = const SessionResponse(
+        200,
+        '{"ownerId":"owner2","expiresAt":9999999}',
+      );
+      wall = 75000;
+      await c.refresh();
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.text('0000001'),
+        findsNothing,
+      ); // same entry id, different owner
       // A freshly authenticated list no longer authorizes the removed entry.
       bridge.routes['/v1/manage/entries'] = const SessionResponse(
         200,
         '{"entries":[]}',
       );
-      wall = 75000;
+      wall = 90000;
       await c.refresh();
       await tester.pump();
       await tester.pump();
@@ -2051,4 +2099,14 @@ class TimerCodesBridge extends BatchBridge {
       }),
     );
   }
+}
+
+class PendingRetentionBridge extends BatchBridge {
+  PendingRetentionBridge(this.pending) : super({});
+  final Completer<SessionResponse> pending;
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) => pending.future;
 }
