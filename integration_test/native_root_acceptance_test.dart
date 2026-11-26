@@ -1,6 +1,9 @@
 // ignore_for_file: avoid_print
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/rendering.dart';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -99,6 +102,28 @@ void _lifecycle(WidgetTester t, List<AppLifecycleState> seq) {
 // (tool/android-native-root.sh sets both). The test enrolls a synthetic device
 // with the real AndroidKeystore and the real native-channel store; the root
 // then restores it. Run on a clean emulator only: it deletes the Keystore alias.
+final _shotKey = GlobalKey();
+
+Future<void> _shot(WidgetTester t, String name) async {
+  await t.pump(const Duration(milliseconds: 300));
+  final b =
+      _shotKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+  final bytes = await t.runAsync(() async {
+    final img = await b.toImage(pixelRatio: 1);
+    final d = await img.toByteData(format: ui.ImageByteFormat.png);
+    return d!.buffer.asUint8List();
+  });
+  expect(bytes!.length, greaterThan(2000), reason: 'blank screenshot $name');
+  final s = base64Encode(bytes);
+  const n = 800;
+  final parts = (s.length / n).ceil();
+  for (var i = 0; i < parts; i++) {
+    print(
+      'SHOTPART:$name:$i:$parts:${s.substring(i * n, (i + 1) * n > s.length ? s.length : (i + 1) * n)}',
+    );
+  }
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -140,7 +165,9 @@ void main() {
 
       await t.binding.setSurfaceSize(const Size(390, 844));
       addTearDown(() => t.binding.setSurfaceSize(null));
-      await t.pumpWidget(buildNativeRoot());
+      await t.pumpWidget(
+        RepaintBoundary(key: _shotKey, child: buildNativeRoot()),
+      );
       await _until(t, find.text('123 456'));
 
       _lifecycle(t, [
@@ -171,18 +198,18 @@ void main() {
         'VISIBLE-REVOKED: ${t.widgetList<Text>(find.byType(Text)).map((v) => v.data ?? '').join(' | ')}',
       );
 
-      print('ADB-SHOT-READY:revoked');
-      await t.runAsync(() => Future<void>.delayed(const Duration(seconds: 4)));
+      await _shot(t, 'root-revoked');
 
       // Cold restart of the root.
       await t.pumpWidget(const SizedBox());
-      await t.pumpWidget(buildNativeRoot());
+      await t.pumpWidget(
+        RepaintBoundary(key: _shotKey, child: buildNativeRoot()),
+      );
       await _until(t, find.byType(AuthEntry), secs: 60);
       expect(find.text('123 456'), findsNothing);
       expect(find.text('Remember this device'), findsNothing);
       expect(find.text('Temporary demo'), findsNothing);
-      print('ADB-SHOT-READY:cold');
-      await t.runAsync(() => Future<void>.delayed(const Duration(seconds: 4)));
+      await _shot(t, 'root-cold');
       await t.pumpWidget(const SizedBox());
       await ks.deleteKey();
       await store.clear();

@@ -24,23 +24,15 @@ done
 grep -q '^READY' "$OUT/harness.log" || { echo "harness not ready"; exit 1; }
 adb reverse "tcp:$PORT" "tcp:$PORT"
 mkdir -p "$OUT/shots"
-( for state in revoked cold; do
-    for i in $(seq 1 360); do
-      if grep -q "ADB-SHOT-READY:$state" "$OUT/test.log" 2>/dev/null; then
-        adb exec-out screencap -p > "$OUT/shots/$state.png"
-        break
-      fi
-      sleep 1
-    done
-  done ) &
-WATCH=$!
 set +e
 flutter test integration_test/native_root_acceptance_test.dart --flavor google --dart-define=NATIVE_SIGNIN=true --dart-define="OTPANDA_API_ORIGIN=http://127.0.0.1:$PORT" -d "${DEVICE:-emulator-5554}" \
   --dart-define="HARNESS=http://127.0.0.1:$PORT" 2>&1 | tee "$OUT/test.log"
 result=${PIPESTATUS[0]}
 set -e
-kill "$WATCH" 2>/dev/null || true
-wait "$WATCH" 2>/dev/null || true
 python3 "$(dirname "$0")/extract-shots.py" "$OUT/test.log" "$OUT/shots"
 
+if [ "$result" -eq 0 ]; then
+  test -s "$OUT/shots/root-revoked.png"
+  test -s "$OUT/shots/root-cold.png"
+fi
 exit "$result"
