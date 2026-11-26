@@ -122,6 +122,16 @@ private fun wireChecks() {
         r.ss.docs[key] = doc.lines().joinToString("\n") { line -> if (line.startsWith("active ")) line.split(' ').take(3).joinToString(" ") else line }
         want(SyncKeyError.METADATA_UNAVAILABLE) { r.c.enrolled("o") }
     }
+    run {
+        val r = Rig(); val key = r.c.enroll("o", INST, 1).keyId
+        check(r.c.runIfActive("o", key, 0) {
+            want(SyncKeyError.INVALID_INPUT) { r.c.erase("o", 0, EraseTrigger.SIGN_OUT) }
+            want(SyncKeyError.INVALID_INPUT) { r.c.enroll("o", INST, 1) }
+            want(SyncKeyError.INVALID_INPUT) { r.c.signRawForTests("o", byteArrayOf(1)) }
+            want(SyncKeyError.INVALID_INPUT) { r.c.runIfActive("o", key, 0) {} }
+        } == null)
+        check(r.c.enrolled("o"))
+    }
     // W1. native-built bytes equal the server's bytes for all three purposes; the server's P1363 signature verifies; every field change and every cross-purpose use fails.
     for ((p, f, ms) in purposes) {
         val msg = SeedSyncWire.proofMessage(p, f)
@@ -323,6 +333,184 @@ private fun wireChecks() {
         check(SyncPurpose.values().map { it.wire }.toSet().size == 4)
     }
 
+}
+
+
+private fun handleChecks() {
+    // W11. batch handle: single use, exact entry set, per-entry consume before decrypt, zeroing on every path, stops after erase / re-enrollment / epoch change.
+    run {
+        val now = 1_800_000_000_000L; val chl = "H".repeat(43); val jp = SeedSyncWire.jcaParams()
+        class Srv {
+            val kp = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+            val raw: ByteArray = (kp.public as ECPublicKey).w.let { w ->
+                fun f(b: BigInteger) = b.toByteArray().let { if (it.size > 32) it.copyOfRange(it.size - 32, it.size) else ByteArray(32 - it.size) + it }
+                byteArrayOf(4) + f(w.affineX) + f(w.affineY) }
+            val pub: String get() = SeedSyncWire.b64(raw)
+        }
+        fun seal(srv: Srv, ephPub: String, ctx: SeedSyncWire.SealContext, seed: ByteArray, nonce: ByteArray = ByteArray(12) { 3 }): Pair<String, String> {
+            val ephRaw = SeedSyncWire.unb64(ephPub, 65); val ephDigest = SeedSyncWire.sha256Hex(ephRaw)
+            val ka = javax.crypto.KeyAgreement.getInstance("ECDH"); ka.init(srv.kp.private)
+            ka.doPhase(KeyFactory.getInstance("EC").generatePublic(ECPublicKeySpec(ECPoint(BigInteger(1, ephRaw.copyOfRange(1, 33)), BigInteger(1, ephRaw.copyOfRange(33, 65))), jp)), true)
+            val key = SeedSyncWire.hkdf32(ka.generateSecret(), SeedSyncWire.challengeDigest(ctx.challenge).chunked(2).map { it.toInt(16).toByte() }.toByteArray(),
+                "otpanda-seed-sync-seal-v1|$ephDigest|${SeedSyncWire.sha256Hex(srv.raw)}".toByteArray())
+            val ct = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").run { init(javax.crypto.Cipher.ENCRYPT_MODE, javax.crypto.spec.SecretKeySpec(key, "AES"), javax.crypto.spec.GCMParameterSpec(128, nonce)); updateAAD(SeedSyncWire.sealAad(ctx, ephDigest)); doFinal(seed) }
+            return SeedSyncWire.b64(nonce) to SeedSyncWire.b64(ct)
+        }
+        val specs = listOf(SealedEntrySpec("e1", 3, "SHA-1", 6, 30), SealedEntrySpec("e2", 5, "SHA-256", 8, 60), SealedEntrySpec("e3", 1, "SHA-512", 7, 15))
+        fun ctxOf(s: SealedEntrySpec, ep: Long) = SeedSyncWire.SealContext("o", "device", ep, s.entryId, s.seedVersion, s.algorithm, s.digits, s.period, chl)
+        fun seedOf(i: Int) = ByteArray(20) { (i * 31 + it).toByte() }
+        fun signed(r: Rig, n: Int = 3): SeedSyncBatchHandle {
+            val h = SeedSyncBatchHandle.begin(r.c, "o", "device", 1, r.custody.readOwnerState("o").epoch, specs.take(n))
+            h.bind(chl, now + 60_000, now); h.signProof(now); return h
+        }
+        fun refused(reason: String, w: () -> Any?) { val g = wireErr(w); check(g == reason) { "expected $reason got $g" } }
+        // lifecycle and validation
+        run {
+            val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+            val h = SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs)
+            refused("state") { h.signProof(now) }; check(h.state == SeedSyncBatchHandle.State.DISCARDED)
+            refused("state") { h.bind(chl, now + 1000, now) }
+            for (bad in listOf(now, now - 1, now + 120_001, SeedSyncWire.MAX_SAFE + 1)) { val x = SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs); refused("expiresAt") { x.bind(chl, bad, now) }; check(x.state == SeedSyncBatchHandle.State.DISCARDED) }
+            refused("challenge") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs).bind("short", now + 1000, now) }
+            refused("entries") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, emptyList()) }
+            refused("entries") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs + SealedEntrySpec("e4", 1, "SHA-1", 6, 30)) }
+            refused("entries") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, listOf(specs[0], specs[0])) }
+            refused("algorithm") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, listOf(specs[0].copy(algorithm = "SHA-3"))) }
+            refused("not-enrolled") { SeedSyncBatchHandle.begin(Rig().c, "o", "device", 1, 0, specs) }
+            val s1 = signed(r); refused("state") { s1.signProof(now) }; check(s1.state == SeedSyncBatchHandle.State.DISCARDED) // one signature per handle
+            val wrongGen = SeedSyncBatchHandle.begin(r.c, "o", "device", 2, ep, specs); wrongGen.bind(chl, now + 1000, now)
+            refused("generation") { wrongGen.signProof(now) }; check(wrongGen.state == SeedSyncBatchHandle.State.DISCARDED)
+            val wrongEp = SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep + 1, specs); wrongEp.bind(chl, now + 1000, now)
+            refused("epoch") { wrongEp.signProof(now) }
+            val late = SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs); late.bind(chl, now + 1000, now)
+            refused("expired") { late.signProof(now + 1000) }
+        }
+        // the proof covers exactly this handle's ephemeral key and entry set (verified against the enrollment public key)
+        run {
+            val r = Rig(); val en = r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+            val h = SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs); h.bind(chl, now + 60_000, now); val sig = h.signProof(now)
+            val pub = KeyFactory.getInstance("EC").generatePublic(ECPublicKeySpec(ECPoint(BigInteger(1, en.publicKey.copyOfRange(1, 33)), BigInteger(1, en.publicKey.copyOfRange(33, 65))), jp))
+            fun msg(es: List<Pair<String, Long>>) = SeedSyncWire.proofMessage(SyncPurpose.BATCH, mapOf("ownerId" to "o", "keyId" to en.keyId, "deviceId" to "device", "generation" to 1L, "epoch" to ep, "challenge" to chl,
+                "ephemeralDigest" to SeedSyncWire.sha256Hex(SeedSyncWire.unb64(h.ephemeralPublic(), 65)), "entriesDigest" to SeedSyncWire.entriesDigest(es), "expiresAt" to now + 60_000))
+            check(verifyServerSig(msg(specs.map { it.entryId to it.seedVersion }), sig, pub))
+            check(!verifyServerSig(msg(specs.take(2).map { it.entryId to it.seedVersion }), sig, pub))
+        }
+        // happy path: three entries, seeds delivered then zeroed, nothing retained, handle DONE
+        run {
+            val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+            val h = signed(r); val srv = Srv(); val got = ArrayList<Pair<String, ByteArray>>(); val refs = ArrayList<ByteArray>()
+            specs.forEachIndexed { i, s ->
+                val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(s, ep), seedOf(i))
+                h.open(s.entryId, srv.pub, n, c, now + 1000) { sp, seed -> got.add(sp.entryId to seed.copyOf()); refs.add(seed); check(seed.contentEquals(seedOf(i))) }
+            }
+            check(got.map { it.first } == listOf("e1", "e2", "e3") && h.state == SeedSyncBatchHandle.State.DONE && h.pendingEntries().isEmpty())
+            check(refs.all { r0 -> r0.all { it == 0.toByte() } }) { "seed not zeroed after provision" }
+            refused("state") { h.open("e1", srv.pub, "x", "y", now + 1000) { _, _ -> } }
+        }
+        // per-entry consume BEFORE decrypt: a tampered entry fails, the whole handle is discarded, a retry of that entry or a sibling is refused; no seed is delivered
+        run {
+            val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+            val h = signed(r); val srv = Srv(); var delivered = 0
+            val (n1, c1) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0], ep), seedOf(0))
+            val tam = SeedSyncWire.unb64(c1).also { it[0] = (it[0].toInt() xor 1).toByte() }
+            refused("open") { h.open("e1", srv.pub, n1, SeedSyncWire.b64(tam), now + 1000) { _, _ -> delivered++ } }
+            check(h.state == SeedSyncBatchHandle.State.DISCARDED && delivered == 0)
+            refused("state") { h.open("e1", srv.pub, n1, c1, now + 1000) { _, _ -> delivered++ } }
+            val (n2, c2) = seal(srv, h.ephemeralPublic(), ctxOf(specs[1], ep), seedOf(1))
+            refused("state") { h.open("e2", srv.pub, n2, c2, now + 1000) { _, _ -> delivered++ } }
+            check(delivered == 0)
+        }
+        // entry not in the request / entry opened twice / different server key mid-batch / wrong seed size
+        run {
+            val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+            val srv = Srv(); val srv2 = Srv()
+            run { val h = signed(r, 2); val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[2], ep), seedOf(2)); refused("entry") { h.open("e3", srv.pub, n, c, now + 1000) { _, _ -> } }; check(h.state == SeedSyncBatchHandle.State.DISCARDED) }
+            run { val h = signed(r, 2); val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0], ep), seedOf(0)); h.open("e1", srv.pub, n, c, now + 1000) { _, _ -> }
+                refused("entry") { h.open("e1", srv.pub, n, c, now + 1000) { _, _ -> } } }
+            run { val h = signed(r, 2); val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0], ep), seedOf(0)); h.open("e1", srv.pub, n, c, now + 1000) { _, _ -> }
+                val (n2, c2) = seal(srv2, h.ephemeralPublic(), ctxOf(specs[1], ep), seedOf(1)); refused("serverKey") { h.open("e2", srv2.pub, n2, c2, now + 1000) { _, _ -> } }; check(h.state == SeedSyncBatchHandle.State.DISCARDED) }
+            run { val h = signed(r, 1); val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0], ep), ByteArray(9)); refused("length") { h.open("e1", srv.pub, n, c, now + 1000) { _, _ -> } } }
+            run { val h = signed(r, 1); val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0], ep), seedOf(0)); refused("expired") { h.open("e1", srv.pub, n, c, now + 60_000) { _, _ -> } } }
+            run { val h = signed(r, 1); val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0].copy(seedVersion = 99), ep), seedOf(0)); refused("open") { h.open("e1", srv.pub, n, c, now + 1000) { _, _ -> } } } // bound to the requested version
+        }
+        // skip consumes without opening; a mix of skipped and opened entries finishes the handle
+        run {
+            val r = Rig(); r.c.enroll("o", INST, 1)
+            val h = signed(r, 2); h.skip("e1", now + 1000); refused("entry") { h.skip("e1", now + 1000) }
+        }
+        run {
+            val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+            val h = signed(r, 2); val srv = Srv(); h.skip("e1", now + 1000)
+            val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[1], ep), seedOf(1)); h.open("e2", srv.pub, n, c, now + 1000) { _, _ -> }
+            check(h.state == SeedSyncBatchHandle.State.DONE)
+        }
+        // provision throws (RuntimeException and Error): the seed is still zeroed, the failure propagates, the handle is discarded
+        for (kind in listOf("runtime", "death")) {
+            val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+            val h = signed(r, 1); val srv = Srv(); val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0], ep), seedOf(0)); var ref: ByteArray? = null
+            val thrown = try { h.open("e1", srv.pub, n, c, now + 1000) { _, seed -> ref = seed; if (kind == "runtime") throw IllegalStateException("x") else throw ProcessDeath() }; null } catch (e: Throwable) { e }
+            check(thrown != null && ref!!.all { it == 0.toByte() } && h.state == SeedSyncBatchHandle.State.DISCARDED) { kind }
+        }
+        // sign-out / disable / re-enrollment / epoch change mid-batch: nothing is provisioned, and an epoch change never purges
+        for (what in listOf("erase", "disable", "reenroll", "epoch")) {
+            val r = Rig(); r.c.enroll("o", INST, 1); r.seed("o"); val ep = r.custody.readOwnerState("o").epoch
+            val h = signed(r, 2); val srv = Srv(); var delivered = 0
+            val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0], ep), seedOf(0))
+            when (what) {
+                "erase" -> r.c.erase("o", ep, EraseTrigger.SIGN_OUT)
+                "disable" -> r.c.erase("o", ep, EraseTrigger.DISABLE)
+                "reenroll" -> r.c.enroll("o", INST, 1)
+                else -> r.seed("o", "other", ep) // native epoch is unchanged by provisioning; bump it through an owner purge-free path below
+            }
+            if (what == "epoch") { r.custody.clearOwner("o", ep); check(r.custody.readOwnerState("o").epoch != ep) }
+            val seedsBefore = r.cv.keys.size
+            val reason = wireErr { h.open("e1", srv.pub, n, c, now + 1000) { _, _ -> delivered++ } }
+            check(delivered == 0 && reason != null && h.state == SeedSyncBatchHandle.State.DISCARDED) { "$what: $reason" }
+            if (what == "epoch") check(reason == "epoch" && r.cv.keys.size == seedsBefore) // refused, and nothing was purged by the handle
+            if (what == "reenroll") check(reason == "inactive")
+        }
+        // v6: erase between decrypt and provision (hook), including an owner with ZERO seed records: refused, nothing provisioned, handle discarded, owed clean
+        for (withSeed in listOf(true, false)) for (trig in listOf(EraseTrigger.SIGN_OUT, EraseTrigger.DISABLE)) {
+            val r = Rig(); r.c.enroll("o", INST, 1); if (withSeed) r.seed("o"); val ep = r.custody.readOwnerState("o").epoch
+            val h = signed(r, 1); val srv = Srv(); var delivered = 0
+            val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0], ep), seedOf(0))
+            h.testHookBeforeGuard = { r.c.erase("o", ep, trig) }
+            val before = r.cv.keys.size
+            val reason = wireErr { h.open("e1", srv.pub, n, c, now + 1000) { _, _ -> delivered++ } }
+            check(reason == "inactive" && delivered == 0 && h.state == SeedSyncBatchHandle.State.DISCARDED) { "hook $withSeed $trig: $reason" }
+            check(r.cv.keys.size == 0 && !r.c.purgeOwed("o") && r.c.pendingKeyDeletes("o") == 0 && !r.c.enrolled("o")) { "owed not clean $withSeed $trig" }
+        }
+        // v6: a concurrent erase cannot land while the provision callback runs; it waits, then purges what was provisioned
+        run {
+            val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+            val h = signed(r, 1); val srv = Srv(); val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0], ep), seedOf(0))
+            var t: Thread? = null; var aliveDuring = false; var erasedDuring = false
+            h.open("e1", srv.pub, n, c, now + 1000) { sp, seed ->
+                r.custody.provision("o", sp.entryId, sp.seedVersion, TotpCalculator.Algorithm.SHA1, 6, 30, seed.copyOf(), ep)
+                t = Thread { r.c.erase("o", ep, EraseTrigger.SIGN_OUT); erasedDuring = true }.also { it.start() }
+                Thread.sleep(300); aliveDuring = t!!.isAlive; check(r.cv.keys.size == 1)
+            }
+            t!!.join(5000)
+            check(aliveDuring && !t!!.isAlive && r.cv.keys.size == 0 && !r.c.purgeOwed("o")) { "erase must wait for provision and then purge" }
+        }
+        // v6: leftover entries (server sealed fewer): finish() drops the handle; the callback's retained reference is zero, its own synchronous copy survives
+        run {
+            val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+            val h = signed(r, 3); val srv = Srv(); var ref: ByteArray? = null; var copy: ByteArray? = null
+            val (n, c) = seal(srv, h.ephemeralPublic(), ctxOf(specs[0], ep), seedOf(0))
+            h.open("e1", srv.pub, n, c, now + 1000) { _, seed -> ref = seed; copy = seed.copyOf() }
+            check(h.state == SeedSyncBatchHandle.State.SIGNED && h.pendingEntries().size == 2)
+            h.finish()
+            check(h.state == SeedSyncBatchHandle.State.DISCARDED && h.pendingEntries().isEmpty())
+            check(ref!!.all { it == 0.toByte() } && copy!!.contentEquals(seedOf(0)))
+            h.finish() // idempotent
+        }
+        // v6: the batch cap cannot be raised above the default by a caller
+        run {
+            val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
+            refused("entries") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs + SealedEntrySpec("e4", 1, "SHA-1", 6, 30), maxEntries = 10) }
+        }
+    }
 }
 
 private fun owners(r: Rig) = r.ss.docs.keys.toList()
@@ -604,5 +792,6 @@ fun main() {
         r.c.enroll("o", INST, 1); check(r.c.enrolled("o")); check(good.isNotEmpty())
     }
     wireChecks()
+    handleChecks()
     println("PASS seed-sync enrollment key, deny-first erase state machine and wire interop vs vector 7e2e6f9c (JVM fakes, synthetic keys, simulated process death)")
 }

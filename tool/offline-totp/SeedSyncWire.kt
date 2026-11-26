@@ -126,13 +126,14 @@ object SeedSyncWire {
      * (for snapshot, batch, revoke) the generation the server expects, plus the epoch the caller believes for snapshot and batch. ownerId, keyId and, for enroll,
      * installId are NATIVE (the durable enrollment record). Generation must EQUAL the enrollment's recorded generation, and epoch must EQUAL the owner's real native
      * epoch read from custody: a different value is refused before any signature. expiresAt must be in (now, now + 120 s]. Returns 86-char base64url P1363. */
-    fun signProof(core: SeedSyncKeyCore, owner: String, purpose: SyncPurpose, fields: Map<String, Any>, nowMs: Long): String {
+    fun signProof(core: SeedSyncKeyCore, owner: String, purpose: SyncPurpose, fields: Map<String, Any>, nowMs: Long, expectKeyId: String? = null): String {
         val native = setOf("ownerId", "keyId", "installId")
         if (purpose == SyncPurpose.ENROLL) bad("purpose") // enroll goes through signEnrollProof only: its digest is recomputed there
         if (fields.keys != purpose.fields.toSet() - native) bad("fields")
         val exp = fields["expiresAt"]
         if (exp !is Long || nowMs < 0 || exp <= nowMs || exp > nowMs + PROOF_TTL_MS || exp > MAX_SAFE) bad("expiresAt")
         val der = core.signBuilt(owner) { ctx ->
+            if (expectKeyId != null && ctx.keyId != expectKeyId) bad("key")
             if (fields["generation"] != ctx.generation) bad("generation")
             if ("epoch" in purpose.fields && fields["epoch"] != ctx.epoch) bad("epoch")
             proofMessage(purpose, fields + mapOf("ownerId" to owner, "keyId" to ctx.keyId))
@@ -142,9 +143,9 @@ object SeedSyncWire {
 
     /** Batch proof with ephemeralDigest and entriesDigest computed here from the native handle and the exact requested entry set. */
     fun signBatchProof(core: SeedSyncKeyCore, owner: String, deviceId: String, generation: Long, epoch: Long, challenge: String, expiresAt: Long,
-                       ephemeralRaw: ByteArray, entries: List<Pair<String, Long>>, nowMs: Long): String =
+                       ephemeralRaw: ByteArray, entries: List<Pair<String, Long>>, nowMs: Long, expectKeyId: String? = null): String =
         signProof(core, owner, SyncPurpose.BATCH, mapOf("deviceId" to deviceId, "generation" to generation, "epoch" to epoch, "challenge" to challenge,
-            "ephemeralDigest" to ephemeralDigest(ephemeralRaw), "entriesDigest" to entriesDigest(entries), "expiresAt" to expiresAt), nowMs)
+            "ephemeralDigest" to ephemeralDigest(ephemeralRaw), "entriesDigest" to entriesDigest(entries), "expiresAt" to expiresAt), nowMs, expectKeyId)
 
     /** lowercase hex sha256 of UTF-8 JSON.stringify(["seed-sync-enroll-v1", ownerId, installId, keyText, generation]) where keyText is the JSON text
      * {"kty":"EC","crv":"P-256","x":..,"y":..} (that order, unpadded base64url coordinates) embedded as an escaped JSON string. Computed from the NEW key's own public point. */

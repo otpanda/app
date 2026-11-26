@@ -14,7 +14,7 @@ java -cp "$out/custody:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.totp.Se
 compile '' "$out/custody2" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/NativeCustodyTest.kt"
 java -cp "$out/custody2:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.totp.NativeCustodyTestKt
 # Seed-sync key lifecycle: deny-first erase state machine, JVM fakes, synthetic keys (not Keystore evidence).
-compile '' "$out/seedsync" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/NativeCustody.kt" "$root/SeedSyncKey.kt" "$root/SeedSyncWire.kt" "$root/SeedSyncKeyTest.kt"
+compile '' "$out/seedsync" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/NativeCustody.kt" "$root/SeedSyncKey.kt" "$root/SeedSyncWire.kt" "$root/SeedSyncHandle.kt" "$root/SeedSyncKeyTest.kt"
 java -cp "$out/seedsync:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.totp.SeedSyncKeyTestKt
 bash "$root/release-guard.sh" "$root/../.."
 # Guard self-test: a production file using the seam must make the guard fail.
@@ -45,13 +45,13 @@ python3 "$root/runtime/extract-instrument-test.py"
 
 # Android adapters compile against the platform jar when one is provided; compiling is not device behavior.
 if [ -n "${ANDROID_JAR:-}" ]; then
-  compile "$ANDROID_JAR" "$out/android" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt" "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/OwnerStateFileStore.kt" "$root/SeedSyncKey.kt" "$root/SeedSyncWire.kt" "$root/SeedSyncStateFileStore.kt"
+  compile "$ANDROID_JAR" "$out/android" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt" "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/OwnerStateFileStore.kt" "$root/SeedSyncKey.kt" "$root/SeedSyncWire.kt" "$root/SeedSyncHandle.kt" "$root/SeedSyncStateFileStore.kt"
   printf '%s\n' 'PASS inactive Android seed vault and record store compile; Keystore, hardware level, uninstall and backup behavior remain unverified'
   compile "$ANDROID_JAR" "$out/fixture" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt" "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/OwnerStateFileStore.kt" "$root/runtime/RuntimeFixture.kt" "$root/runtime/RuntimeFixtureV2.kt" "$root/runtime/FixtureRunner.kt"
   printf '%s\n' 'PASS fixture APK sources (instrumentation) compile (UNRUN: executes only in the manual emulator workflow)'
   # Also compile against API 30 (minimum supported) when provided, to catch newer-API use such as readNBytes (API 33) or KeyInfo.securityLevel (API 31).
   if [ -n "${ANDROID_JAR_API30:-}" ]; then
-    compile "$ANDROID_JAR_API30" "$out/android30" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt" "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/OwnerStateFileStore.kt" "$root/SeedSyncKey.kt" "$root/SeedSyncWire.kt" "$root/SeedSyncStateFileStore.kt"
+    compile "$ANDROID_JAR_API30" "$out/android30" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/AndroidSeedVault.kt" "$root/NoBackupSeedRecordStore.kt" "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/OwnerStateFileStore.kt" "$root/SeedSyncKey.kt" "$root/SeedSyncWire.kt" "$root/SeedSyncHandle.kt" "$root/SeedSyncStateFileStore.kt"
     printf '%s\n' 'PASS adapters compile against API 30 android.jar (compile-time API surface only, not runtime on API 30-32 devices)'
   fi
 fi
