@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Fail-closed verifier for the emulator fixture log. Usage: verify-log.py LOG EXPECTED_API. Exit 0 only if every check holds."""
 import re, sys
-PHASES = ["env", "secure-default", "seam-provision", "seam-restart", "seam-loss", "seam-orphan", "size", "cleanup"]
-MIN_OKS = {"env": 0, "secure-default": 2, "seam-provision": 4, "seam-restart": 4, "seam-loss": 4, "seam-orphan": 3, "size": 0, "cleanup": 1}
+PHASES = ["env", "secure-default", "seam-provision", "seam-restart", "seam-loss", "seam-orphan", "size", "cleanup", "v2-capability", "v2-provision", "v2-restart", "v2-rotate", "v2-pending", "v2-pending-retry", "v2-metadata", "v2-keylen", "v2-cleanup"]
+MIN_OKS = {"env": 0, "secure-default": 2, "seam-provision": 4, "seam-restart": 4, "seam-loss": 4, "seam-orphan": 3, "size": 0, "cleanup": 1,
+            "v2-capability": 2, "v2-provision": 5, "v2-restart": 3, "v2-rotate": 8, "v2-pending": 4, "v2-pending-retry": 5, "v2-metadata": 11, "v2-keylen": 7, "v2-cleanup": 3}
 BAD = re.compile(r"FIXTURE api=\d+ FAIL|FATAL|Aborted|INSTRUMENTATION_FAILED|Process crashed|Exception|Traceback|\bsignal \d+|Segmentation|not found|inaccessible", re.I)
 def verify(text, api):
     errs = []
@@ -25,6 +26,14 @@ def verify(text, api):
         if name == "env" and not re.search(r"FIXTURE api=\d+ env fingerprint=\S", body): errs.append("env: no fingerprint line")
         if name == "secure-default" and not re.search(r"RESULT secure-default outcome=(accepted|protection_too_weak)\s*$", body, flags=re.M): errs.append("secure-default: missing or unexpected RESULT")
         if name == "size" and not re.search(r"RESULT size65 outcome=\S+", body): errs.append("size: missing size65 RESULT")
+        if name == "v2-capability" and not re.search(r"RESULT v2-capability protection=(HARDWARE_HMAC|HARDWARE_WRAPPED|OS_ENCRYPTED)\b", body): errs.append("v2-capability: missing or unusable protection RESULT")
+        if name == "v2-provision":
+            for e in ("fxsha1", "fxsha256", "fxsha512"):
+                if not re.search(rf"RESULT v2-level {e}=(secure_hardware|software)\s*$", body, flags=re.M): errs.append(f"v2-provision: missing level for {e}")
+        if name == "v2-keylen":
+            for n in (10, 20, 32, 64, 65, 100, 128):
+                if not re.search(rf"RESULT keylen {n}=\S+\s*$", body, flags=re.M): errs.append(f"v2-keylen: missing RESULT for {n}")
+            if re.search(r"RESULT keylen \d+=WRONG_CODE", body): errs.append("v2-keylen: a seed produced a wrong code")
         if name == "seam-provision":
             for acct in ("fxsha1", "fxsha256", "fxsha512"):
                 if not re.search(rf"RESULT level {acct}=(secure_hardware|software)\s*$", body, flags=re.M): errs.append(f"seam-provision: missing level for {acct}")

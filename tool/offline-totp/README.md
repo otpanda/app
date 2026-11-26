@@ -38,3 +38,12 @@ Fixes after review (v2): no API 33 calls (bounded read loop; adapters also compi
 
 
 API34 isolated instrumentation run on26November2026 passed: https://github.com/otpanda/app/actions/runs/45813877902 . Artifact: https://github.com/otpanda/app/actions/runs/45813877902/artifacts/15114675750 . Default refused software keys and rolled back; explicit test seam generated SHA1/256/512 RFC codes with reported software keys; separate processes retained records/codes; simulated key loss and orphan reconciliation passed;65byte key was accepted. Raw perphase instrumentation output and empty crash log inspected. This does not establish API30 runtime, physical hardware, lock/unlock behavior, actual uninstall/reinstall or backup/restore. Final fixture record cleanup passed; the teardown uninstall command did not preserve independent absence proof. No real seed, host wiring or production policy selection.
+
+## Native custody v2 (owner/version/epoch contract), UNWIRED
+
+`NativeCustody.kt` (`NativeSeedCustodyCore`, pure JVM), `OwnerStateFileStore.kt` (atomic per-owner state in noBackupFilesDir) and `AndroidSeedVault.probe()`
+implement the Kotlin side of the Dart `NativeSeedCustody` contract. The v1 `LocalSeedCustody` above is superseded but kept until v2 is reviewed; retire it then.
+Key alias = SHA-256 of the same length-prefixed AAD as Dart `custodyAad` (pinned by a cross-language test vector), so a record cannot move to another
+owner, entry, version, epoch or parameter set. Software-backed Keystore keys are accepted (OS-encrypted); capability() reports hardware vs OS-encrypted by probe.
+Tests: `NativeCustodyTest.kt` (JVM fakes only). Not proven: real Keystore, hardware level, lock, uninstall/backup behavior, 64+ byte seeds, rollback or replacement of
+the state file by code running as the app UID (not prevented). `NativeCustodyChannel.kt` is a Flutter-free MethodChannel handler proposal (JVM-tested); MainActivity wiring is not done. Emulator fixture phases v2-* exist (runtime/RuntimeFixtureV2.kt) and are UNRUN until the manual workflow executes them.
