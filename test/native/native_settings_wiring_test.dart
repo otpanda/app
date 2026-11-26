@@ -1,6 +1,12 @@
 import 'dart:typed_data';
+import 'dart:convert';
+import 'dart:io' show Platform, File;
 
-import 'package:flutter/widgets.dart' show Size;
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
+import 'package:otpanda_client/main.dart' show otpandaTheme;
+import 'package:otpanda_client/browser_account_page.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/lost_access_page.dart';
 import 'package:otpanda_client/native/native_app.dart';
@@ -60,9 +66,35 @@ class _Pk implements PasskeyAssertionSource, PasskeyCreationSource {
   Future<String?> create(String requestJson) async => null;
 }
 
+Future<void> _fonts() async {
+  Future<void> load(String family, List<String> paths) async {
+    final l = FontLoader(family);
+    for (final p in paths) {
+      l.addFont(Future.value(ByteData.sublistView(File(p).readAsBytesSync())));
+    }
+    await l.load();
+  }
+
+  await load('Figtree', [
+    'assets/fonts/Figtree-400.ttf',
+    'assets/fonts/Figtree-500.ttf',
+    'assets/fonts/Figtree-600.ttf',
+    'assets/fonts/Figtree-700.ttf',
+  ]);
+  await load('BricolageGrotesque', [
+    'assets/fonts/BricolageGrotesque-700.ttf',
+    'assets/fonts/BricolageGrotesque-800.ttf',
+  ]);
+  await load('GoogleSans', ['assets/fonts/GoogleSans.ttf']);
+  await load('MaterialIcons', [
+    '${Platform.environment['FLUTTER_ROOT'] ?? '/tmp/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+  ]);
+}
+
 void main() {
   late List<(String, String, String?)> calls;
   late bool signedOut;
+  Map<String, dynamic>? answers;
 
   NativeSessionController ctl() => NativeSessionController(
     NativeAuth(
@@ -96,7 +128,7 @@ void main() {
         (m, p, {body, query, required bearer}) async {
           calls.add((m, p, body));
           if (bearer != 'ACC') return const SessionResponse(401, '{}');
-          return const SessionResponse(200, '{"x":1}');
+          return SessionResponse(200, jsonEncode(answers?[p] ?? {'x': 1}));
         },
         passkeys: _Pk(),
         creation: _Pk(),
@@ -106,7 +138,99 @@ void main() {
   setUp(() {
     calls = [];
     signedOut = false;
+    answers = null;
   });
+
+  testWidgets(
+    'real native bridge loads security and passkey list only on their pages',
+    (t) async {
+      if (Platform.isLinux) await _fonts();
+      t.view.physicalSize = const Size(390, 900);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      final now = DateTime.now().millisecondsSinceEpoch;
+      answers = {
+        '/v1/manage/session': {'ownerId': 'owner', 'expiresAt': now + 60000},
+        '/v1/manage/account': {
+          'email': 'fixture@example.test',
+          'passkeys': 1,
+          'google': true,
+          'recoveryDevices': 0,
+        },
+        '/v1/manage/security/status': {
+          'enabled': true,
+          'pending': [],
+          'changes': [],
+        },
+        '/v1/manage/recovery/status': {
+          'emailEscape': {'enabled': false, 'delayDays': 7},
+          'passkeys': [
+            {
+              'id': 'fixture-key',
+              'createdAt': 1800000000000,
+              'label': 'Fixture phone',
+            },
+          ],
+          'sessions': [],
+          'emailRecoveryRequest': null,
+        },
+      };
+      final c = ctl();
+      await c.start();
+      final b = make(c, on: true);
+      await t.pumpWidget(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: otpandaTheme(),
+          home: BrowserAccountPage(
+            bridge: b,
+            accountOnly: true,
+            workspaceEnabled: true,
+            navigation: 'settings',
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(calls.where((r) => r.$2 == '/v1/manage/account'), isEmpty);
+      expect(calls.where((r) => r.$2.endsWith('/status')), isEmpty);
+      await t.tap(find.text('Account & security'));
+      await t.pumpAndSettle();
+      expect(
+        calls.where((r) => r.$2 == '/v1/manage/security/status').length,
+        1,
+      );
+      expect(find.text('Verification settings could not load.'), findsNothing);
+      expect(
+        t.widget<SwitchListTile>(find.byType(SwitchListTile).first).value,
+        isTrue,
+      );
+      final beforePasskeys = calls
+          .where((r) => r.$2 == '/v1/manage/recovery/status')
+          .length;
+      if (Platform.isLinux)
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile('goldens/native-settings-enabled.png'),
+        );
+      await t.tap(find.text('Passkeys'));
+      await t.pumpAndSettle();
+      expect(
+        calls.where((r) => r.$2 == '/v1/manage/recovery/status').length,
+        beforePasskeys + 1,
+      );
+      expect(find.text('Fixture phone'), findsOneWidget);
+      if (Platform.isLinux)
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile('goldens/native-passkeys-enabled.png'),
+        );
+      expect(find.text('Passkeys could not load here.'), findsNothing);
+      expect(calls.every((r) => r.$1 == 'GET'), isTrue);
+      await t.pumpWidget(const SizedBox.shrink());
+      await t.pumpAndSettle();
+      c.dispose();
+    },
+  );
 
   test('default off: nothing is available and nothing is called', () async {
     final c = ctl();

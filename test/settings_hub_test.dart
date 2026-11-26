@@ -329,6 +329,7 @@ void main() {
       ..clockNow = 100000;
     await pump(t, b, navigation: 'settings');
     expect(b.organizationReads, 0);
+    expect(b.paths, isNot(contains('/v1/manage/account')));
     for (final p in [
       '/v1/manage/entries',
       '/v1/manage/active-codes',
