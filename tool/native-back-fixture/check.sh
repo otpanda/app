@@ -31,3 +31,10 @@ sleep 2
 shot back-codes
 adb shell dumpsys activity activities > back-out/activity-codes.txt
 grep -q app.otpanda back-out/activity-codes.txt
+
+# Record actual installed launcher mask after completing Back checks.
+adb shell input keyevent KEYCODE_HOME
+sleep 4
+adb shell input swipe 500 1450 500 300 350
+sleep 3
+shot installed-launcher
