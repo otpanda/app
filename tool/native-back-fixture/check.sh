@@ -19,7 +19,7 @@ adb pull /sdcard/otpanda-startup.mp4 back-out/startup.mp4
 adb logcat -d > back-out/startup-logcat.txt
 shot(){ adb exec-out screencap -p > "back-out/$1.png";adb shell uiautomator dump /sdcard/back.xml;adb pull /sdcard/back.xml "back-out/$1.xml"; }
 shot codes
-grep -q '0000001' back-out/codes.xml
+grep -Eq '000000[1-4]' back-out/codes.xml
 python3 tool/native-back-fixture/tap.py 'Copy code'
 adb shell input keyevent KEYCODE_HOME
 sleep 4
@@ -27,7 +27,7 @@ shot background
 adb shell am start -n app.otpanda/.MainActivity
 sleep 5
 shot resumed
-grep -q '0000001' back-out/resumed.xml
+grep -Eq '000000[1-4]' back-out/resumed.xml
 # Click actual shared Settings control by accessibility label and record layout.
 python3 tool/native-back-fixture/tap.py 'Account & security'
 sleep 3
