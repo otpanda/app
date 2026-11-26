@@ -1257,7 +1257,7 @@ void main() {
     },
   );
   testWidgets(
-    'ambiguous boundary shows renewing without false empty state or height jump; copy waits for validity',
+    'prepared next code replaces directly within approved two-second window',
     (tester) async {
       if (Platform.isLinux && !_fontsLoaded) {
         for (final family in ['Figtree', 'BricolageGrotesque']) {
@@ -1345,10 +1345,20 @@ void main() {
       final before = tester.getSize(find.byType(Card).last).height;
       t = 15001;
       await tester.pump(const Duration(seconds: 1));
-      expect(find.text('Renewing code...'), findsOneWidget);
+      expect(find.text('Renewing code...'), findsNothing);
       expect(find.text('No active code'), findsNothing);
-      expect(find.text('0000001'), findsNothing);
+      expect(find.text('0000001'), findsOneWidget);
       expect(find.byTooltip('Copy code'), findsNothing);
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      await tester.pump();
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/batch-next-early-mobile.png'),
+        );
+      }
+      await tester.binding.setSurfaceSize(null);
+      await tester.pump();
       String? invalidCopy;
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
@@ -1361,28 +1371,28 @@ void main() {
       );
       await tester.tap(find.text('Test'));
       await tester.pump();
-      expect(invalidCopy, isNull);
+      expect(invalidCopy, '0000001');
       expect(find.byType(AlertDialog), findsNothing);
-      expect(find.text('Copied'), findsNothing);
+      expect(find.text('Copied'), findsOneWidget);
       expect(tester.getSize(find.byType(Card).last).height, before);
       if (Platform.isLinux) {
         await expectLater(
           find.byType(ProductShell),
-          matchesGoldenFile('goldens/batch-renewing.png'),
+          matchesGoldenFile('goldens/batch-direct-replacement.png'),
         );
       }
       await tester.binding.setSurfaceSize(const Size(390, 844));
       await tester.pump();
       expect(tester.takeException(), isNull);
-      expect(find.text('Renewing code...'), findsOneWidget);
+      expect(find.text('Renewing code...'), findsNothing);
       if (Platform.isLinux) {
         await expectLater(
           find.byType(ProductShell),
-          matchesGoldenFile('goldens/batch-renewing-mobile.png'),
+          matchesGoldenFile('goldens/batch-direct-replacement-mobile.png'),
         );
       }
       await tester.binding.setSurfaceSize(null);
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1500));
       t = 15401;
       await tester.pump(const Duration(seconds: 1));
       expect(find.text('Renewing code...'), findsNothing);

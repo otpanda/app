@@ -470,6 +470,51 @@ void main() {
       expect(store.current('a')!.value, code('a', 1, 6));
     });
 
+    test(
+      'tile future code is at most 2 seconds early, strict code unchanged',
+      () {
+        for (final latency in [1, 20, 400, 2500]) {
+          tick = 5000;
+          final subject = BatchCodeStore(monotonicMilliseconds: () => tick);
+          final r = subject.begin({'a'});
+          tick += latency;
+          subject.accept(r, body({'a': (30, 6)}), policy: policy);
+          final boundary = ((nowSec ~/ 30) * 30 + 30) * 1000;
+          final lowEdge = 5000 + boundary - serverNow + latency;
+          for (var delta = -2500; delta <= 500; delta += 50) {
+            tick = lowEdge + delta;
+            final v = subject.tileCurrent('a')!;
+            if (v.copyable && v.periodStartMs == boundary) {
+              expect(delta, greaterThanOrEqualTo(-2000));
+            }
+            if (delta >= -2000 && delta < 0) {
+              expect(v.value, code('a', 1, 6));
+              expect(v.copyable, true);
+              expect(v.early, true);
+            }
+            if (delta < 0 && delta >= -latency) {
+              expect(subject.current('a'), isNull);
+            }
+          }
+        }
+      },
+    );
+    test('expired held digits remain dimmable but never copyable without successor', () {
+      tick = 5000;
+      final subject = BatchCodeStore(monotonicMilliseconds: () => tick);
+      final r = subject.begin({'a'});
+      tick += 400;
+      final j = body({'a': (30, 6)}, window: 2);
+      subject.accept(r, j, policy: policy);
+      tick += 31000;
+      expect(subject.current('a'), isNull);
+      final v = subject.tileCurrent('a')!;
+      expect(v.value, code('a', 0, 6));
+      expect(v.copyable, false);
+      subject.clear();
+      expect(subject.tileCurrent('a'), isNull);
+    });
+
     test('boundary repaint targets strict ambiguity edges exactly', () {
       tick = 5000;
       final subject = BatchCodeStore(monotonicMilliseconds: () => tick);
@@ -487,7 +532,7 @@ void main() {
       expect(subject.nextBoundaryDelayMs('a'), 1);
       tick++;
       expect(subject.current('a'), isNotNull);
-      expect(subject.nextBoundaryDelayMs('a'), 29600);
+      expect(subject.nextBoundaryDelayMs('a'), 28000);
       subject.clear();
       expect(subject.nextBoundaryDelayMs('a'), isNull);
     });

@@ -207,6 +207,7 @@ class MainPageBatchController extends ChangeNotifier {
   }
 
   BatchCode? current(String id) => _safe ? store.current(id) : null;
+  BatchCode? tileCurrent(String id) => _safe ? store.tileCurrent(id) : null;
   bool awaitingBoundary(String id) => _safe && store.awaitingBoundary(id);
   int? get nextBoundaryDelayMs {
     if (!_safe) return null;
@@ -219,8 +220,8 @@ class MainPageBatchController extends ChangeNotifier {
   }
 
   Future<bool> copy(String id) async {
-    final code = current(id);
-    if (code == null) return false;
+    final code = tileCurrent(id);
+    if (code == null || !code.copyable) return false;
     await Clipboard.setData(ClipboardData(text: code.value));
     return true;
   }

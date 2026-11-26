@@ -310,6 +310,8 @@ class _ProductShellState extends State<ProductShell>
     Object? barId,
     bool renewing = false,
     String? copyId,
+    bool expired = false,
+    bool early = false,
   ]) => Card(
     clipBehavior: Clip.antiAlias,
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
@@ -322,7 +324,7 @@ class _ProductShellState extends State<ProductShell>
         : null,
     child: Tooltip(
       message: code != null && onCopy != null && copyId != null
-          ? 'Copy code'
+          ? (early ? 'Copy next code, valid in up to 2 seconds' : 'Copy code')
           : '',
       child: InkWell(
         onTap: code != null && onCopy != null && copyId != null
@@ -365,21 +367,38 @@ class _ProductShellState extends State<ProductShell>
                     if (code != null) ...[
                       const SizedBox(width: 6),
                       Stack(
+                        clipBehavior: Clip.none,
                         alignment: Alignment.center,
                         children: [
                           Opacity(
-                            opacity: _copiedTile == copyId ? 0 : 1,
+                            opacity: _copiedTile == copyId && copyId != null
+                                ? 0
+                                : (expired ? 0.45 : 1),
                             child: Text(
                               spaced(code),
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontFamily: 'Figtree',
                                 fontFeatures: [FontFeature.tabularFigures()],
                                 fontSize: 22,
                                 fontWeight: FontWeight.w600,
+                                color: expired ? muted : ink,
                               ),
                             ),
                           ),
-                          if (_copiedTile == copyId)
+                          if (expired)
+                            const Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: -10,
+                              child: Align(
+                                alignment: Alignment.bottomCenter,
+                                child: Text(
+                                  'Expired',
+                                  style: TextStyle(fontSize: 9, color: muted),
+                                ),
+                              ),
+                            ),
+                          if (_copiedTile == copyId && copyId != null)
                             Semantics(
                               liveRegion: true,
                               child: Row(
@@ -645,12 +664,12 @@ class _ProductShellState extends State<ProductShell>
                 child: Builder(
                   builder: (_) {
                     // One clock read for value, bar and copy state.
-                    final v = e.totp ? batch?.current(e.id) : null;
+                    final v = e.totp ? batch?.tileCurrent(e.id) : null;
                     return codeTile(
                       e.service,
                       e.account,
                       v?.value,
-                      v != null ? () => batch!.copy(e.id) : null,
+                      v != null && v.copyable ? () => batch!.copy(e.id) : null,
                       true,
                       false,
                       null,
@@ -661,6 +680,8 @@ class _ProductShellState extends State<ProductShell>
                       v == null ? null : '${e.id}/${v.periodStartMs}',
                       e.totp && (batch?.awaitingBoundary(e.id) ?? false),
                       v == null ? null : 'totp/${e.id}/${v.periodStartMs}',
+                      v != null && !v.copyable,
+                      v?.early ?? false,
                     );
                   },
                 ),
