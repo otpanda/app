@@ -9,7 +9,7 @@ const PAGES = 'otpanda.github.io', API_HOST = 'otpanda-api.abrahammurciano.worke
 const b64u = b => Buffer.from(b).toString('base64url');
 const opaque = () => b64u(randomBytes(32));
 const token = () => 'otpda_' + b64u(randomBytes(42)).slice(0, 55);
-export async function startStandin({ pagesRoot, cert, key, ttlMs = 300000, redirects, real }) {
+export async function startStandin({ pagesRoot, cert, key, ttlMs = 900000, redirects, real }) {
   const st = { log: [], pinnedOrigin: undefined, mode: { challenge: 'ok', renew: 'ok', read: 'ok' }, devices: new Map(), codes: new Map(), nonces: new Map(), tokens: new Map(), webCodes: new Map(), exchanges: 0, ttlMs, redirects };
   st.real = real;
   st.revokeAll = () => (real ? real.revokeAll() : [...st.devices.values()].forEach(d => { d.revoked = true; }));
@@ -36,7 +36,7 @@ export async function startStandin({ pagesRoot, cert, key, ttlMs = 300000, redir
     if (p === '/auth/exchange') {
       const j = JSON.parse(body), w = st.webCodes.get(j.code); st.webCodes.delete(j.code);
       if (!w || createHash('sha256').update(j.verifier).digest('base64url') !== w.challenge) return send(res, 401, { error: 'invalid_grant' }, cors);
-      if (real) return send(res, 200, { access: real.webAccess, accessExpiresAt: Date.now() + 300000 }, cors);
+      if (real) return send(res, 200, { access: real.webAccess, accessExpiresAt: Date.now() + 900000 }, cors);
       const t = mint('web'); return send(res, 200, { access: t.access, accessExpiresAt: t.access_expires_at }, cors);
     }
     if (real && (p.startsWith('/auth/extension/') || p.startsWith('/v1/manage/'))) {

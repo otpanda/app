@@ -117,6 +117,30 @@ void main() {
     },
   );
 
+  test('15 minute access stays fresh at 5 minutes and renews at the 60 second margin', () async {
+    st.id = 'DEV';
+    final issued = now;
+    routes['/auth/native/renew'] = (status: 200, body: {
+      'access': 'A15', 'access_expires_at': issued.millisecondsSinceEpoch + 900000,
+    });
+    final c = make();
+    await c.start();
+    expect(c.phase, NativeSessionPhase.signedIn);
+    paths.clear();
+    now = issued.add(const Duration(minutes: 5));
+    expect(await c.accessToken(), 'A15');
+    expect(paths, isEmpty);
+    now = issued.add(const Duration(seconds: 839));
+    expect(await c.accessToken(), 'A15');
+    expect(paths, isEmpty);
+    now = issued.add(const Duration(seconds: 840));
+    routes['/auth/native/renew'] = (status: 200, body: {
+      'access': 'A15renew', 'access_expires_at': now.millisecondsSinceEpoch + 900000,
+    });
+    expect(await c.accessToken(), 'A15renew');
+    expect(paths, ['/auth/native/challenge', '/auth/native/renew']);
+  });
+
   test(
     'two 401s: sign-in required, key and id kept; outage: offline, kept',
     () async {

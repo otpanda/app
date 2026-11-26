@@ -26,7 +26,7 @@ test('refuses to build without a configured https API origin and redirect key', 
 });
 test('sign-in sends exact exchange keys with PKCE S256 and a 65-byte public key; record saved only after success', async () => {
   let grabbed, body;
-  const t = mk({ identity: goodIdentity((p, url) => { grabbed = { p, url }; }), net: async (u, o) => { body = JSON.parse(o.body); return R(200, { device_id: 'dev_1', access: 'tok', access_expires_at: 1e12 + 300000 }); } });
+  const t = mk({ identity: goodIdentity((p, url) => { grabbed = { p, url }; }), net: async (u, o) => { body = JSON.parse(o.body); return R(200, { device_id: 'dev_1', access: 'tok', access_expires_at: 1e12 + 900000 }); } });
   assert.deepEqual(await t.auth.signIn(), { ok: true });
   assert.ok(grabbed.url.startsWith(WEB + '#extension=1&'));
   assert.deepEqual([...grabbed.p.keys()].sort(), ['challenge', 'extension', 'redirect', 'state']);
@@ -52,7 +52,7 @@ test('restart cancels the older pending flow: its late return is ignored', async
   let release; const first = new Promise(r => { release = r; });
   let n = 0; const states = [];
   const identity = { getRedirectURL: () => RU, launchWebAuthFlow: async ({ url }) => { const p = new URLSearchParams(url.slice(url.indexOf('#') + 1)); states.push(p.get('state')); return n++ === 0 ? first.then(() => RU + '#code=' + 'c'.repeat(43) + '&state=' + states[0]) : RU + '#code=' + 'd'.repeat(43) + '&state=' + p.get('state'); } };
-  const t = mk({ identity, net: async () => R(200, { device_id: 'dev_2', access: 'tok', access_expires_at: 1e12 + 300000 }) });
+  const t = mk({ identity, net: async () => R(200, { device_id: 'dev_2', access: 'tok', access_expires_at: 1e12 + 900000 }) });
   const a = t.auth.signIn(); await new Promise(r => setTimeout(r, 5));
   const b = await t.auth.signIn(); release(); const a2 = await a;
   assert.deepEqual(b, { ok: true }); assert.deepEqual(a2, { ok: false, error: 'cancelled' });
@@ -76,7 +76,7 @@ test('renew signs the exact domain string; 5xx, 429 and network errors keep the 
   const { t } = await signedIn(async (u, o) => {
     seen.push(u);
     if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_3', nonce: 'n'.repeat(43), expires_at: 1e12 + 60000 });
-    sig = JSON.parse(o.body); return R(200, { access: 'tok2', access_expires_at: 1e12 + 300000 });
+    sig = JSON.parse(o.body); return R(200, { access: 'tok2', access_expires_at: 1e12 + 900000 });
   });
   const g = await t.auth.getAccess(); assert.equal(g.token, 'tok2');
   assert.deepEqual(Object.keys(sig).sort(), ['device_id', 'expires_at', 'nonce', 'signature']); assert.equal(Buffer.from(sig.signature, 'base64url').length, 64); assert.equal(sig.signature.length, 86);
@@ -89,16 +89,16 @@ test('renew signs the exact domain string; 5xx, 429 and network errors keep the 
 });
 test('one renew in flight; a fresh bearer is reused; expiry margin triggers renew', async () => {
   let renews = 0;
-  const { t } = await signedIn(async u => { if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_3', nonce: 'n', expires_at: 5 }); renews++; return R(200, { access: 'tok' + renews, access_expires_at: 1e12 + 300000 }); });
+  const { t } = await signedIn(async u => { if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_3', nonce: 'n', expires_at: 5 }); renews++; return R(200, { access: 'tok' + renews, access_expires_at: 1e12 + 900000 }); });
   await Promise.all([t.auth.getAccess(), t.auth.getAccess(), t.auth.getAccess()]); assert.equal(renews, 1);
   await t.auth.getAccess(); assert.equal(renews, 1);
-  t.tick(280000); await t.auth.getAccess(); assert.equal(renews, 2);
+  t.tick(880000); await t.auth.getAccess(); assert.equal(renews, 2);
 });
 test('read allows only fixed GET paths, retries once after 401 with a renewed bearer, and never sends credentials', async () => {
   let reads = 0;
   const { t } = await signedIn(async (u, o) => {
     if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_3', nonce: 'n', expires_at: 5 });
-    if (u.endsWith('/renew')) return R(200, { access: 'tokR', access_expires_at: 1e12 + 300000 });
+    if (u.endsWith('/renew')) return R(200, { access: 'tokR', access_expires_at: 1e12 + 900000 });
     reads++; return reads === 1 ? { status: 401, text: async () => '{}' } : { status: 200, text: async () => '{"ok":1}' };
   });
   for (const bad of ['/v1/manage/account', '/v1/manage/session', '/v1/manage/sources', '/v1/manage/unassigned', 'https://evil.example/']) { const u = await t.auth.read(bad); assert.deepEqual([u.status, u.unsupported], [503, true]); } assert.equal(t.calls.length, 0, 'unsupported paths never touch the network or renew');
@@ -128,15 +128,15 @@ test('transient renew failure backs off at least 10s, shared via session storage
   const again = createExtensionAuth({ api: API, webUrl: WEB, redirectKey: 'chrome', identity: goodIdentity(), fetch: async () => { throw Error('must not call'); }, records: y.t.records, session: y.t.session, now: () => 1e12 + 100 });
   assert.deepEqual(await again.getAccess(true), { state: 'unavailable' });
 });
-test('bearer validity is receipt time plus 300s minus margin; a skewed server absolute expiry is never compared to the local clock', async () => {
+test('bearer validity is receipt time plus 900s minus margin; a skewed server absolute expiry is never compared to the local clock', async () => {
   let renews = 0;
   const far = async u => { if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_3', nonce: 'n', expires_at: 5 }); renews++; return R(200, { access: 'tok' + renews, access_expires_at: 0 + 1 }); };
   const { t } = await signedIn(far);
   await t.auth.getAccess(); assert.equal(renews, 1);
-  t.tick(200000); await t.auth.getAccess(); assert.equal(renews, 1, 'server expiry in the past is ignored');
+  t.tick(800000); await t.auth.getAccess(); assert.equal(renews, 1, 'server expiry in the past is ignored; still fresh at 800s');
   t.tick(80000); await t.auth.getAccess(); assert.equal(renews, 2, 'renews inside the margin');
   const { t: t2 } = await signedIn(async u => (u.endsWith('/challenge') ? R(200, { device_id: 'dev_3', nonce: 'n', expires_at: 5 }) : R(200, { access: 'z', access_expires_at: 4e15 })));
-  await t2.auth.getAccess(); t2.tick(280000); await t2.auth.getAccess(); assert.ok(t2.calls.filter(c => c.u.endsWith('/renew')).length === 2, 'a far-future server expiry cannot extend the local lifetime');
+  await t2.auth.getAccess(); t2.tick(880000); await t2.auth.getAccess(); assert.ok(t2.calls.filter(c => c.u.endsWith('/renew')).length === 2, 'a far-future server expiry cannot extend the local lifetime');
   await t2.session.set('access', { token: 'tk', receivedAt: 1e12 + 5e6 }); assert.equal((await t2.auth.getAccess()).token !== 'tk', true, 'a receipt time in the future is not fresh');
 });
 test('final 401 on a read is never reported as signed out; only a cleared record is', async () => {
@@ -168,7 +168,7 @@ test('client read allowlist matches the API source (set OTPANDA_API_SRC to a che
 const TK = 'rt1.' + 'A'.repeat(16) + '.' + 'B'.repeat(43);
 const ticketNet = (onTicket, calls = []) => async (u, o) => {
   calls.push(u);
-  if (u.endsWith('/exchange')) return R(200, { device_id: 'dev_t', access: 'tok1', access_expires_at: 1e12 + 300000 });
+  if (u.endsWith('/exchange')) return R(200, { device_id: 'dev_t', access: 'tok1', access_expires_at: 1e12 + 900000 });
   if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_t', nonce: 'n', expires_at: 5 });
   if (u.endsWith('/renew')) return R(200, { access: 'tok2', access_expires_at: 1e12 + 600000 });
   if (u.endsWith('/auth/extension/realtime/ticket')) return onTicket(o);
@@ -207,7 +207,7 @@ test('ticket: a forced renew after a transient failure shares the 10s backoff (n
 test('fourth GET: the worker reads exactly one strict single-entry totp-code query; the popup allowlist keeps three; no other query form passes', async () => {
   const { TOTP_READ } = await import('./extension-auth.mjs');
   const calls = [];
-  const { t } = await signedIn(async (u, o) => { calls.push(u); if (u.endsWith('/exchange')) return R(200, { device_id: 'dev_t', access: 'tok1', access_expires_at: 1e12 + 300000 }); if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_t', nonce: 'n', expires_at: 5 }); if (u.endsWith('/renew')) return R(200, { access: 'tok2', access_expires_at: 1e12 + 600000 }); if (u.includes('/v1/manage/totp-code')) return R(200, { entryId: 'x' }); return R(404); });
+  const { t } = await signedIn(async (u, o) => { calls.push(u); if (u.endsWith('/exchange')) return R(200, { device_id: 'dev_t', access: 'tok1', access_expires_at: 1e12 + 900000 }); if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_t', nonce: 'n', expires_at: 5 }); if (u.endsWith('/renew')) return R(200, { access: 'tok2', access_expires_at: 1e12 + 600000 }); if (u.includes('/v1/manage/totp-code')) return R(200, { entryId: 'x' }); return R(404); });
   const before = calls.length;
   const ok = await t.auth.readInternal('/v1/manage/totp-code?entry=abc_DEF-1');
   assert.equal(ok.status, 200); assert.ok(calls.slice(before).some(u => u === API + '/v1/manage/totp-code?entry=abc_DEF-1'));
@@ -220,7 +220,7 @@ test('fourth GET: the worker reads exactly one strict single-entry totp-code que
   const { READ_PATHS } = await import('./extension-auth.mjs'); assert.equal(READ_PATHS.length, 3);
 });
 test('totp read: a 429 passes Retry-After (seconds, capped at an hour) to the caller and the final 401 never signs out', async () => {
-  const mkNet = f => async (u, o) => { if (u.endsWith('/exchange')) return R(200, { device_id: 'dev_t', access: 'tok1', access_expires_at: 1e12 + 300000 }); if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_t', nonce: 'n', expires_at: 5 }); if (u.endsWith('/renew')) return R(200, { access: 'tok2', access_expires_at: 1e12 + 600000 }); return f(u, o); };
+  const mkNet = f => async (u, o) => { if (u.endsWith('/exchange')) return R(200, { device_id: 'dev_t', access: 'tok1', access_expires_at: 1e12 + 900000 }); if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_t', nonce: 'n', expires_at: 5 }); if (u.endsWith('/renew')) return R(200, { access: 'tok2', access_expires_at: 1e12 + 600000 }); return f(u, o); };
   let { t } = await signedIn(mkNet(() => ({ status: 429, headers: new Map([['retry-after', '45']]), text: async () => '{}', json: async () => ({}) })));
   assert.deepEqual(await t.auth.readInternal('/v1/manage/totp-code?entry=a'), { status: 429, body: '{}', retryAfter: 45 });
   ({ t } = await signedIn(mkNet(() => ({ status: 429, headers: new Map([['retry-after', '999999']]), text: async () => '{}', json: async () => ({}) }))));
