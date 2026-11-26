@@ -1,3 +1,6 @@
+import 'package:flutter/services.dart';
+import 'package:otpanda_client/copy_hint.dart';
+
 import 'dart:convert';
 import 'dart:async';
 
@@ -117,6 +120,7 @@ Future<void> pump(
   ValueChanged<int>? onTabChanged,
   bool assignmentEnabled = false,
   bool entryEditEnabled = true,
+  CopyHintStore? copyHintStore,
 }) async {
   t.view.physicalSize = const Size(360, 800);
   t.view.devicePixelRatio = 1;
@@ -130,6 +134,7 @@ Future<void> pump(
       theme: otpandaTheme(),
       home: ProductShell(
         controller: controller,
+        copyHintStore: copyHintStore,
         initialTab: initialTab,
         assignmentEnabled: assignmentEnabled,
         entryEditEnabled: entryEditEnabled,
@@ -145,6 +150,79 @@ Future<void> pump(
 }
 
 void main() {
+  testWidgets(
+    '32-character code and placeholder fit narrow screen without changing length',
+    (t) async {
+      final entry = {
+        'entry_id': 'e',
+        'service_name': 'Acme',
+        'account_name': 'me',
+        'digits': 32,
+        'capabilities': {'manage': true},
+      };
+      await pump(t, FakeTransport(routes(entries: [entry])));
+      expect(find.text('-' * 32), findsOneWidget);
+      expect(t.takeException(), isNull);
+      await t.pumpWidget(const SizedBox());
+      await pump(
+        t,
+        FakeTransport(
+          routes(
+            entries: [entry],
+            codes: [
+              {
+                'entryId': 'e',
+                'code': '1' * 32,
+                'receivedAt': now - 1,
+                'expiresAt': now + 60000,
+              },
+            ],
+          ),
+        ),
+      );
+      expect(find.text('1' * 32), findsOneWidget);
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'first-use copy hint disappears only after success and stays gone',
+    (t) async {
+      final pref = TestCopyHint();
+      final tr = FakeTransport(
+        routes(
+          entries: [
+            {
+              'entry_id': 'e',
+              'service_name': 'Acme',
+              'account_name': 'me',
+              'capabilities': {'manage': true},
+            },
+          ],
+          codes: [
+            {
+              'entryId': 'e',
+              'code': '123456',
+              'receivedAt': now - 1000,
+              'expiresAt': now + 60000,
+            },
+          ],
+        ),
+      );
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+      await t.tap(find.text('Acme'));
+      await t.pump();
+      expect(find.text('Copied'), findsOneWidget);
+      expect(find.text('Tap a code card to copy it.'), findsNothing);
+      expect(pref.seen, true);
+      await t.pumpWidget(const SizedBox());
+      await t.pump();
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.text('Tap a code card to copy it.'), findsNothing);
+    },
+  );
+
   testWidgets(
     'hint refresh failure retains visible code without transient warning',
     (t) async {
@@ -257,7 +335,7 @@ void main() {
       ),
     );
     expect(find.text('Acme'), findsOneWidget);
-    expect(find.text('123 456'), findsOneWidget);
+    expect(find.text('123456'), findsOneWidget);
   });
 
   testWidgets('fresh received codes sit on top, highlighted; old ones do not', (
@@ -313,13 +391,13 @@ void main() {
     expect(find.byKey(const Key('fresh-Bravo-222222')), findsOneWidget);
     // The older code is listed normally, once, below the fresh ones.
     expect(find.byKey(const Key('fresh-Alpha-111111')), findsNothing);
-    expect(find.text('111 111'), findsOneWidget);
-    expect(find.text('222 222'), findsOneWidget);
-    final top = t.getTopLeft(find.text('333 333')).dy;
-    expect(top, lessThan(t.getTopLeft(find.text('111 111')).dy));
+    expect(find.text('111111'), findsOneWidget);
+    expect(find.text('222222'), findsOneWidget);
+    final top = t.getTopLeft(find.text('333333')).dy;
+    expect(top, lessThan(t.getTopLeft(find.text('111111')).dy));
     expect(
-      t.getTopLeft(find.text('222 222')).dy,
-      lessThan(t.getTopLeft(find.text('111 111')).dy),
+      t.getTopLeft(find.text('222222')).dy,
+      lessThan(t.getTopLeft(find.text('111111')).dy),
     );
   });
 
@@ -343,7 +421,7 @@ void main() {
     });
     await pump(t, FakeTransport(r));
     expect(find.text('No codes yet'), findsNothing);
-    expect(find.text('444 444'), findsOneWidget);
+    expect(find.text('444444'), findsOneWidget);
   });
 
   testWidgets('no highlight without recent received codes', (t) async {
@@ -371,7 +449,7 @@ void main() {
       ),
     );
     expect(find.text('Just arrived'), findsNothing);
-    expect(find.text('555 555'), findsOneWidget);
+    expect(find.text('555555'), findsOneWidget);
   });
 
   testWidgets('failed read is not shown as an empty account', (t) async {
@@ -403,7 +481,7 @@ void main() {
       expect(bridge.status, 'idle');
       expect(find.text('No codes yet'), findsNothing);
       expect(find.text('Acme'), findsNothing);
-      expect(find.text('123 456'), findsNothing);
+      expect(find.text('123456'), findsNothing);
     },
   );
   testWidgets('background-cleared data never claims the account is empty', (
@@ -477,7 +555,7 @@ void main() {
         ],
       );
       await pump(t, ManagedFake(r), initialTab: 0);
-      final status = t.getTopLeft(find.text('No active code'));
+      final status = t.getTopLeft(find.text('------'));
       final title = find.textContaining('A very long service');
       expect(t.getTopRight(title).dx + 8, lessThanOrEqualTo(status.dx));
       expect(t.takeException(), isNull);
@@ -686,7 +764,7 @@ void main() {
       assignmentEnabled: true,
     );
     expect(find.byKey(const Key('assign-v')), findsNothing);
-    expect(find.text('666 666'), findsOneWidget);
+    expect(find.text('666666'), findsOneWidget);
   });
 
   testWidgets('assign: picks an owned entry, then only asks to prepare it', (
@@ -694,8 +772,20 @@ void main() {
   ) async {
     final tr = AssignFake(withPrivateCode());
     await pump(t, tr, initialTab: 2, assignmentEnabled: true);
+    String? copied;
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String;
+        }
+        return null;
+      },
+    );
     await t.tap(find.byKey(const Key('assign-v')));
     await t.pumpAndSettle();
+    expect(copied, isNull);
+    expect(find.text('Copied'), findsNothing);
     expect(find.byKey(const Key('assign-picker')), findsOneWidget);
     await t.tap(find.byKey(const Key('assign-picker-cancel')));
     await t.pumpAndSettle();
@@ -868,4 +958,14 @@ void main() {
     const g = 'https://lh3.googleusercontent.com/a/example=s96-c';
     expect(await headerAvatarUrls(t, picture: g), [g]);
   });
+}
+
+class TestCopyHint implements CopyHintStore {
+  bool seen = false;
+  @override
+  Future<bool> copiedBefore() async => seen;
+  @override
+  Future<void> markCopied() async {
+    seen = true;
+  }
 }

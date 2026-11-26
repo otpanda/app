@@ -453,8 +453,11 @@ void main() {
       final tLow = 5400 + (boundary - serverNow); // if stamped at arrival
       final tHigh = 5000 + (boundary - serverNow); // if stamped at send
       tick = tHigh - 1;
+      expect(store.awaitingBoundary('a'), false);
       expect(store.current('a')!.value, code('a', 0, 6));
       tick = tHigh + 1;
+      expect(store.awaitingBoundary('a'), true);
+      expect(store.awaitingBoundary('missing'), false);
       expect(
         store.current('a'),
         isNull,
@@ -463,8 +466,122 @@ void main() {
       tick = tLow - 1;
       expect(store.current('a'), isNull, reason: 'still ambiguous');
       tick = tLow;
+      expect(store.awaitingBoundary('a'), false);
       expect(store.current('a')!.value, code('a', 1, 6));
     });
+
+    test(
+      'tile future code is at most 2 seconds early, strict code unchanged',
+      () {
+        for (final latency in [1, 20, 400, 2500]) {
+          tick = 5000;
+          final subject = BatchCodeStore(monotonicMilliseconds: () => tick);
+          final r = subject.begin({'a'});
+          tick += latency;
+          subject.accept(r, body({'a': (30, 6)}), policy: policy);
+          final boundary = ((nowSec ~/ 30) * 30 + 30) * 1000;
+          final lowEdge = 5000 + boundary - serverNow + latency;
+          for (var delta = -2500; delta <= 500; delta += 50) {
+            tick = lowEdge + delta;
+            final v = subject.tileCurrent('a')!;
+            if (v.copyable && v.periodStartMs == boundary) {
+              expect(delta, greaterThanOrEqualTo(-2000));
+            }
+            if (delta >= -2000 && delta < 0) {
+              expect(v.value, code('a', 1, 6));
+              expect(v.copyable, true);
+              expect(v.early, true);
+            }
+            if (delta < 0 && delta >= -latency) {
+              expect(subject.current('a'), isNull);
+            }
+          }
+        }
+      },
+    );
+    test('expired held digits remain dimmable but never copyable without successor', () {
+      tick = 5000;
+      final subject = BatchCodeStore(monotonicMilliseconds: () => tick);
+      final r = subject.begin({'a'});
+      tick += 400;
+      final j = body({'a': (30, 6)}, window: 2);
+      subject.accept(r, j, policy: policy);
+      final end = ((nowSec ~/ 30) * 30 + 30) * 1000;
+      tick = 5000 + end - serverNow + 500;
+      expect(subject.current('a'), isNull);
+      final v = subject.tileCurrent('a')!;
+      expect(v.value, code('a', 0, 6));
+      expect(v.copyable, false);
+      tick = 5000 + end - serverNow + 2001;
+      expect(subject.tileCurrent('a'), isNull);
+      tick += 30000;
+      expect(subject.tileCurrent('a'), isNull);
+      tick += 600000;
+      expect(subject.tileCurrent('a'), isNull);
+      subject.clear();
+      expect(subject.tileCurrent('a'), isNull);
+    });
+
+    test('boundary repaint targets strict ambiguity edges exactly', () {
+      tick = 5000;
+      final subject = BatchCodeStore(monotonicMilliseconds: () => tick);
+      final r = subject.begin({'a'});
+      tick += 400;
+      subject.accept(r, body({'a': (30, 6)}), policy: policy);
+      final boundary = ((nowSec ~/ 30) * 30 + 30) * 1000;
+      final at = 5000 + boundary - serverNow;
+      tick = at - 50;
+      expect(subject.nextBoundaryDelayMs('a'), 50);
+      tick = at;
+      expect(subject.current('a'), isNull);
+      expect(subject.nextBoundaryDelayMs('a'), 400);
+      tick = at + 399;
+      expect(subject.nextBoundaryDelayMs('a'), 1);
+      tick++;
+      expect(subject.current('a'), isNotNull);
+      expect(subject.nextBoundaryDelayMs('a'), 28000);
+      subject.clear();
+      expect(subject.nextBoundaryDelayMs('a'), isNull);
+    });
+
+    test(
+      'renewing status agrees with strict validity across RTT intervals',
+      () {
+        for (final latency in [1, 20, 400, 1500]) {
+          for (final period in [20, 30, 60, 300]) {
+            tick = 5000;
+            final subject = BatchCodeStore(monotonicMilliseconds: () => tick);
+            final r = subject.begin({'a'});
+            tick += latency;
+            subject.accept(r, body({'a': (period, 6)}), policy: policy);
+            final start = (nowSec ~/ period) * period;
+            final boundary = (start + period) * 1000;
+            final at = 5000 + boundary - serverNow;
+            for (final delta in [
+              -1,
+              0,
+              1,
+              latency ~/ 2,
+              latency - 1,
+              latency,
+              latency + 1,
+            ]) {
+              final next = at + delta;
+              if (next < tick) continue;
+              tick = next;
+              final renewing = subject.awaitingBoundary('a');
+              final value = subject.current('a');
+              if (renewing) expect(value, isNull);
+              if (subject.hasCoverage('a') && value == null) {
+                expect(renewing, isTrue);
+              }
+            }
+            subject.clear();
+            expect(subject.awaitingBoundary('a'), isFalse);
+          }
+        }
+      },
+    );
 
     test('hasNextCode is true only when a later code is held', () {
       final r = begin({'a'});

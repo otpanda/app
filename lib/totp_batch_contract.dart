@@ -227,9 +227,12 @@ final class BatchCode {
     this.value,
     this.period,
     this.remainingMs,
-    this.periodStartMs,
-  );
+    this.periodStartMs, [
+    this.copyable = true,
+    this.early = false,
+  ]);
   final String entryId, value;
+  final bool copyable, early;
   final int period;
 
   /// Milliseconds until this code stops being valid, rounded down by the
@@ -414,6 +417,102 @@ final class BatchCodeStore {
       startMs + (iHigh + 1) * periodMs - high,
       startMs + iHigh * periodMs,
     );
+  }
+
+  int? expectedDigits(String id) => _held[id]?.entry.digits;
+
+  /// Tile-only user-approved policy: a held successor may be shown/copied at
+  /// most two seconds before its start, measured against the EARLIEST possible
+  /// server time. Does not alter strict current() or authorize missing codes.
+  /// If no usable successor is held, old digits remain visible but uncopyable.
+  BatchCode? tileCurrent(String id) {
+    try {
+      final h = _held[id];
+      if (h == null) return null;
+      final t = _tick(), e = h.entry;
+      final start = e.validFrom * 1000, period = e.period * 1000;
+      final low = t + h.loOffset, high = t + h.hiOffset;
+      if (low < start) return null;
+      final wanted = (low + 2000 - start) ~/ period;
+      if (wanted >= 0 && wanted < e.codes.length) {
+        final from = start + wanted * period, until = from + period;
+        if (high < until && high < h.coverageUntil) {
+          return BatchCode._(
+            id,
+            e.codes[wanted],
+            e.period,
+            until - high,
+            from,
+            true,
+            low < from,
+          );
+        }
+      }
+      // Without a held successor, keep the existing valid code usable until
+      // its conservative expiry. Only then retain disabled stale digits.
+      final strict = current(id);
+      if (strict != null) return strict;
+      final old = ((low - start) ~/ period).clamp(0, e.codes.length - 1);
+      final end = start + (old + 1) * period;
+      // Keep stale digits only for a brief transition, never indefinitely
+      // after any held period or the whole coverage is exhausted.
+      if (high > end + 2000) return null;
+      return BatchCode._(
+        id,
+        e.codes[old],
+        e.period,
+        0,
+        start + old * period,
+        false,
+        false,
+      );
+    } catch (_) {
+      clear();
+      return null;
+    }
+  }
+
+  /// Next instant the strict displayed value can change, using held clock bounds.
+  /// A caller can repaint then rather than waiting for a one-second UI tick.
+  int? nextBoundaryDelayMs(String id) {
+    try {
+      final h = _held[id];
+      if (h == null) return null;
+      final t = _tick(), e = h.entry;
+      final start = e.validFrom * 1000, period = e.period * 1000;
+      final low = t + h.loOffset, high = t + h.hiOffset;
+      if (low < start || high >= h.coverageUntil) return null;
+      final first = (low - start) ~/ period, last = (high - start) ~/ period;
+      if (last >= e.codes.length) return null;
+      final next = first == last
+          ? start + (last + 1) * period - high
+          : start + (first + 1) * period - low;
+      final early = start + (first + 1) * period - 2000 - low;
+      final due = early > 0 && early < next ? early : next;
+      return due > 0 ? due : 1;
+    } catch (_) {
+      clear();
+      return null;
+    }
+  }
+
+  /// True only when authenticated held codes cover both sides of an uncertain
+  /// boundary. Neither code is safe to show or copy yet. This is not an empty
+  /// account or a failed request, and never grants access to either value.
+  bool awaitingBoundary(String id) {
+    try {
+      final h = _held[id];
+      if (h == null) return false;
+      final t = _tick(), e = h.entry;
+      final start = e.validFrom * 1000, period = e.period * 1000;
+      final low = t + h.loOffset, high = t + h.hiOffset;
+      if (low < start || high >= h.coverageUntil) return false;
+      final first = (low - start) ~/ period, last = (high - start) ~/ period;
+      return first != last && first >= 0 && last < e.codes.length;
+    } catch (_) {
+      clear();
+      return false;
+    }
   }
 
   /// True when a code after the current one is held for [id], so the tile can

@@ -170,7 +170,7 @@ void main() {
         isNotNull,
       );
       await t.pumpWidget(const SizedBox.shrink());
-        await t.pumpAndSettle();
+      await t.pumpAndSettle();
     });
   }
 }

@@ -231,8 +231,7 @@ void main() {
     expect(await assigned(s), s['entryId']);
   }, skip: skip);
 
-  test('assignment: shared target, real device-key signature, prompt text',
-      () async {
+  test('assignment: shared target, real device-key signature, prompt text', () async {
     final s = await seed('shared');
     final c = await controllerFor('A');
     final src = _Real('A', key: true);
@@ -253,17 +252,20 @@ void main() {
     expect(b, isNotNull);
   }, skip: skip);
 
-  test('assignment: shared target on a phone without an enrolled key is refused',
-      () async {
-    final s = await seed('shared');
-    final c = await controllerFor('B');
-    final src = _Real('B', key: false);
-    final d = driverFor(bridgeFor(c), c, src);
-    await expectLater(d.prepare(target(s)), throwsA(anything));
-    expect(d.state, 'unavailable');
-    expect(src.signs, 0);
-    expect(await assigned(s), isNull);
-  }, skip: skip);
+  test(
+    'assignment: shared target on a phone without an enrolled key is refused',
+    () async {
+      final s = await seed('shared');
+      final c = await controllerFor('B');
+      final src = _Real('B', key: false);
+      final d = driverFor(bridgeFor(c), c, src);
+      await expectLater(d.prepare(target(s)), throwsA(anything));
+      expect(d.state, 'unavailable');
+      expect(src.signs, 0);
+      expect(await assigned(s), isNull);
+    },
+    skip: skip,
+  );
 
   test('entry edit: rename and account on the real native route', () async {
     await bridge('/_t/reset-limits', {});
@@ -283,9 +285,6 @@ void main() {
     // Same value again is still confirmed (server answers ok:true).
     await b.renameEntry(id, 'Renamed Entry');
     // Another owner's or a missing entry is "not confirmed", nothing changes.
-    await expectLater(
-      b.renameEntry('missing-entry', 'x'),
-      throwsStateError,
-    );
+    await expectLater(b.renameEntry('missing-entry', 'x'), throwsStateError);
   }, skip: skip);
 }

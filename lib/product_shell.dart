@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'copy_hint.dart';
+
 import 'main_page_batch.dart';
 import 'totp_batch_contract.dart';
 
@@ -30,6 +32,7 @@ import 'session_contract.dart';
 class ProductShell extends StatefulWidget {
   final ReadWorkspaceController controller;
   final BatchPolicy? batchPolicy;
+  final CopyHintStore? copyHintStore;
 
   /// Test seam: replaces the batch controller's monotonic and wall clocks.
   @visibleForTesting
@@ -58,6 +61,7 @@ class ProductShell extends StatefulWidget {
   const ProductShell({
     super.key,
     required this.controller,
+    this.copyHintStore,
     this.batchPolicy,
     this.batchClock,
     required this.onCopyAssigned,
@@ -131,6 +135,49 @@ class _ProductShellState extends State<ProductShell>
   /// Codes that arrived this recently sit on top, highlighted.
   static const freshForMs = 120000;
   Timer? freshTimer;
+  late CopyHintStore _copyHintStore;
+  bool _copyHint = false;
+  bool _copiedThisRun = false;
+  Timer? _copiedTimer;
+  Timer? _boundaryTimer;
+  void scheduleBoundaryRepaint() {
+    _boundaryTimer?.cancel();
+    final delay = batch?.nextBoundaryDelayMs;
+    if (delay != null) {
+      _boundaryTimer = Timer(Duration(milliseconds: delay), () {
+        if (mounted) batch?.tick();
+      });
+    }
+  }
+
+  String? _copiedTile;
+
+  Future<void> copyTile(String id, Future<bool> Function() copy) async {
+    try {
+      if (!await copy() || !mounted) return;
+      _copiedTimer?.cancel();
+      setState(() {
+        _copiedTile = id;
+        _copyHint = false;
+        _copiedThisRun = true;
+      });
+      unawaited(
+        _copyHintStore.markCopied().catchError((Object _) {
+          /* Session dismissal still holds if storage is unavailable. */
+        }),
+      );
+      _copiedTimer = Timer(const Duration(milliseconds: 1400), () {
+        if (mounted) setState(() => _copiedTile = null);
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not copy code.')));
+      }
+    }
+  }
+
   bool hadFresh = false;
   MainPageBatchController? batch;
   final _batchKeys = <String, GlobalKey>{};
@@ -189,6 +236,15 @@ class _ProductShellState extends State<ProductShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _copyHintStore = widget.copyHintStore ?? createCopyHintStore();
+    _copyHintStore
+        .copiedBefore()
+        .then((seen) {
+          if (mounted && !_copiedThisRun) setState(() => _copyHint = !seen);
+        })
+        .catchError((Object _) {
+          /* Preference unavailable: no repeated hint. */
+        });
     widget.controller.addListener(changed);
     _batchScroll.addListener(queueBatchSelection);
     final policy = widget.batchPolicy, bridge = widget.controller.bridge;
@@ -225,6 +281,7 @@ class _ProductShellState extends State<ProductShell>
   }
 
   void changed() {
+    scheduleBoundaryRepaint();
     queueBatchSelection();
     if (mounted) setState(() {});
   }
@@ -232,6 +289,8 @@ class _ProductShellState extends State<ProductShell>
   @override
   void dispose() {
     freshTimer?.cancel();
+    _copiedTimer?.cancel();
+    _boundaryTimer?.cancel();
     _batchScroll.dispose();
     batch?.removeListener(changed);
     batch?.dispose();
@@ -249,8 +308,7 @@ class _ProductShellState extends State<ProductShell>
     await widget.pageReload?.call();
   }
 
-  String spaced(String c) =>
-      c.length == 6 ? '${c.substring(0, 3)} ${c.substring(3)}' : c;
+  String spaced(String c) => c;
 
   Widget avatar(String name, [String? serviceId, String? issuer]) =>
       ServiceAvatar(
@@ -261,11 +319,16 @@ class _ProductShellState extends State<ProductShell>
         ink: ink,
       );
 
+  Widget codeSlot(Widget child) => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 160),
+    child: FittedBox(fit: BoxFit.scaleDown, child: child),
+  );
+
   Widget codeTile(
     String title,
     String sub,
     String? code, [
-    VoidCallback? onCopy,
+    Future<bool> Function()? onCopy,
     bool showCodeStatus = true,
     bool fresh = false,
     Widget? trailing,
@@ -274,8 +337,13 @@ class _ProductShellState extends State<ProductShell>
     int? remainingMs,
     int? periodMs,
     Object? barId,
+    bool renewing = false,
+    String? copyId,
+    bool expired = false,
+    bool early = false,
+    int? expectedDigits,
   ]) => Card(
-    clipBehavior: remainingMs == null ? Clip.none : Clip.antiAlias,
+    clipBehavior: Clip.antiAlias,
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
     color: fresh ? const Color(0xffe6f5ec) : null,
     shape: fresh
@@ -284,75 +352,148 @@ class _ProductShellState extends State<ProductShell>
             side: const BorderSide(color: green, width: 1.2),
           )
         : null,
-    child: Stack(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              avatar(title, serviceId, issuer),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    child: Tooltip(
+      message: code != null && onCopy != null && copyId != null
+          ? (early ? 'Copy next code, valid in up to 2 seconds' : 'Copy code')
+          : '',
+      child: InkWell(
+        onTap: code != null && onCopy != null && copyId != null
+            ? () => copyTile(copyId, onCopy)
+            : null,
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 48),
+                child: Row(
                   children: [
-                    Text(
-                      title,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
+                    avatar(title, serviceId, issuer),
+                    const SizedBox(width: 11),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                          ),
+                          if (sub.isNotEmpty)
+                            Text(
+                              sub,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: muted,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                    if (sub.isNotEmpty)
-                      Text(
-                        sub,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12, color: muted),
+                    if (code != null) ...[
+                      const SizedBox(width: 6),
+                      codeSlot(
+                        Stack(
+                          clipBehavior: Clip.none,
+                          alignment: Alignment.center,
+                          children: [
+                            Opacity(
+                              opacity: _copiedTile == copyId && copyId != null
+                                  ? 0
+                                  : (expired ? 0.45 : 1),
+                              child: Text(
+                                spaced(code),
+                                style: TextStyle(
+                                  fontFamily: 'CodeMono',
+                                  fontFeatures: [FontFeature.tabularFigures()],
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  color: expired ? muted : ink,
+                                ),
+                              ),
+                            ),
+                            if (expired)
+                              const Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: -10,
+                                child: Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: Text(
+                                    'Updating',
+                                    style: TextStyle(fontSize: 9, color: muted),
+                                  ),
+                                ),
+                              ),
+                            if (_copiedTile == copyId && copyId != null)
+                              Semantics(
+                                liveRegion: true,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.check, size: 16, color: green),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'Copied',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: green,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
+                    ] else if (showCodeStatus) ...[
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        height: 48,
+                        child: Center(
+                          child: codeSlot(
+                            Text(
+                              '-' * (expectedDigits ?? 6),
+                              semanticsLabel: renewing
+                                  ? 'Updating code'
+                                  : 'No active code',
+                              style: const TextStyle(
+                                fontFamily: 'CodeMono',
+                                fontSize: 22,
+                                fontWeight: FontWeight.w600,
+                                color: muted,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (trailing != null) ...[
+                      const SizedBox(width: 4),
+                      trailing,
+                    ],
                   ],
                 ),
               ),
-              if (code != null) ...[
-                const SizedBox(width: 6),
-                Text(
-                  spaced(code),
-                  style: const TextStyle(
-                    fontFamily: 'Figtree',
-                    fontFeatures: [FontFeature.tabularFigures()],
-                    fontSize: 22,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filledTonal(
-                  tooltip: 'Copy code',
-                  onPressed: onCopy,
-                  icon: const Icon(Icons.copy_outlined, size: 18),
-                ),
-              ] else if (showCodeStatus) ...[
-                const SizedBox(width: 12),
-                const Text(
-                  'No active code',
-                  style: TextStyle(fontSize: 12, color: muted),
-                ),
-              ],
-              if (trailing != null) ...[const SizedBox(width: 4), trailing],
-            ],
-          ),
-        ),
-        if (remainingMs != null && periodMs != null && code != null)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: RefreshBar(
-              key: ValueKey(barId ?? 'refresh-$title'),
-              remainingMs: remainingMs,
-              periodMs: periodMs,
             ),
-          ),
-      ],
+            if (remainingMs != null && periodMs != null && code != null)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: RefreshBar(
+                  key: ValueKey(barId ?? 'refresh-$title'),
+                  remainingMs: remainingMs,
+                  periodMs: periodMs,
+                ),
+              ),
+          ],
+        ),
+      ),
     ),
   );
 
@@ -489,9 +630,21 @@ class _ProductShellState extends State<ProductShell>
                   'Unassigned code',
                   'Only you',
                   c.value,
-                  () => widget.onCopyPrivate(c),
+                  () async {
+                    if (!widget.controller.canCopyPrivate(c)) return false;
+                    await widget.onCopyPrivate(c);
+                    return true;
+                  },
                   true,
                   true,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  false,
+                  'private/${c.sourceId}/${c.eventId}',
                 ),
               ),
             for (final e in freshEntries)
@@ -501,12 +654,22 @@ class _ProductShellState extends State<ProductShell>
                   e.service,
                   e.account,
                   codes[e.id]!.value,
-                  () => widget.onCopyAssigned(codes[e.id]!),
+                  () async {
+                    final c = codes[e.id]!;
+                    if (!widget.controller.canCopyAssigned(c)) return false;
+                    await widget.onCopyAssigned(c);
+                    return true;
+                  },
                   true,
                   true,
                   null,
                   e.catalogId,
                   e.issuer,
+                  null,
+                  null,
+                  null,
+                  false,
+                  'entry/${e.id}/${codes[e.id]!.receivedAt}',
                 ),
               ),
             for (final e in withCode)
@@ -516,12 +679,22 @@ class _ProductShellState extends State<ProductShell>
                   e.service,
                   e.account,
                   codes[e.id]?.value,
-                  () => widget.onCopyAssigned(codes[e.id]!),
+                  () async {
+                    final c = codes[e.id]!;
+                    if (!widget.controller.canCopyAssigned(c)) return false;
+                    await widget.onCopyAssigned(c);
+                    return true;
+                  },
                   true,
                   false,
                   null,
                   e.catalogId,
                   e.issuer,
+                  null,
+                  null,
+                  null,
+                  false,
+                  'entry/${e.id}/${codes[e.id]!.receivedAt}',
                 ),
               ),
             for (final e in rest)
@@ -530,37 +703,30 @@ class _ProductShellState extends State<ProductShell>
                     ? _batchKeys.putIfAbsent(e.id, () => GlobalKey())
                     : null,
                 padding: const EdgeInsets.only(bottom: 10),
-                child: InkWell(
-                  onTap:
-                      e.totp && widget.controller.bridge is TotpManagementBridge
-                      ? () => showDialog<void>(
-                          context: context,
-                          builder: (_) => TotpEntryDialog(
-                            bridge: widget.controller.bridge,
-                            entryId: e.id,
-                          ),
-                        )
-                      : null,
-                  child: Builder(
-                    builder: (_) {
-                      // One clock read for value, bar and copy state.
-                      final v = e.totp ? batch?.current(e.id) : null;
-                      return codeTile(
-                        e.service,
-                        e.account,
-                        v?.value,
-                        v != null ? () => batch!.copy(e.id) : null,
-                        true,
-                        false,
-                        null,
-                        e.catalogId,
-                        e.issuer,
-                        v?.remainingMs,
-                        v == null ? null : v.period * 1000,
-                        v == null ? null : '${e.id}/${v.periodStartMs}',
-                      );
-                    },
-                  ),
+                child: Builder(
+                  builder: (_) {
+                    // One clock read for value, bar and copy state.
+                    final v = e.totp ? batch?.tileCurrent(e.id) : null;
+                    return codeTile(
+                      e.service,
+                      e.account,
+                      v?.value,
+                      v != null && v.copyable ? () => batch!.copy(e.id) : null,
+                      true,
+                      false,
+                      null,
+                      e.catalogId,
+                      e.issuer,
+                      v?.remainingMs,
+                      v == null ? null : v.period * 1000,
+                      v == null ? null : '${e.id}/${v.periodStartMs}',
+                      e.totp && (batch?.awaitingBoundary(e.id) ?? false),
+                      v == null ? null : 'totp/${e.id}/${v.periodStartMs}',
+                      v != null && !v.copyable,
+                      v?.early ?? false,
+                      batch?.expectedDigits(e.id) ?? e.expectedDigits,
+                    );
+                  },
                 ),
               ),
             if (entries.isEmpty && freshPrivate.isEmpty)
@@ -623,7 +789,11 @@ class _ProductShellState extends State<ProductShell>
                   'Unassigned code',
                   'Only you',
                   c.value,
-                  () => widget.onCopyPrivate(c),
+                  () async {
+                    if (!widget.controller.canCopyPrivate(c)) return false;
+                    await widget.onCopyPrivate(c);
+                    return true;
+                  },
                   true,
                   false,
                   canAssign
@@ -635,6 +805,13 @@ class _ProductShellState extends State<ProductShell>
                           icon: const Icon(Icons.drive_file_move_outline),
                         )
                       : null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  false,
+                  'private/${c.sourceId}/${c.eventId}',
                 ),
               ),
           ],
@@ -848,6 +1025,14 @@ class _ProductShellState extends State<ProductShell>
           30,
         ),
         children: [
+          if (_copyHint && (tab == 0 || tab == 2) && phase == _Phase.loaded)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: Text(
+                'Tap a code card to copy it.',
+                style: TextStyle(fontSize: 12, color: muted),
+              ),
+            ),
           body(),
           const SizedBox(height: 20),
           if (widget.controller.connectionLost) ...[

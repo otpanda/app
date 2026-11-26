@@ -33,6 +33,7 @@ class ManagedEntry {
   final String id, service, account;
   final bool manage;
   final bool totp;
+  final int? expectedDigits;
 
   /// The catalogue service id the server stores (its primary domain), kept
   /// for cosmetic logo identity only. Null for custom entries.
@@ -48,6 +49,7 @@ class ManagedEntry {
     this.totp = false,
     this.catalogId,
     this.issuer,
+    this.expectedDigits,
   ]);
   factory ManagedEntry.fromJson(Map<String, dynamic> json) {
     final capabilities = json['capabilities'];
@@ -76,6 +78,9 @@ class ManagedEntry {
           : null,
       json['issuer'] is String && (json['issuer'] as String).trim().isNotEmpty
           ? json['issuer'] as String
+          : null,
+      json['digits'] is int && json['digits'] >= 4 && json['digits'] <= 32
+          ? json['digits'] as int
           : null,
     );
   }
