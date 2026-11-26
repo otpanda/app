@@ -14,3 +14,10 @@ out=$("$apksigner" verify --verbose --print-certs "$apk" 2>&1)
 status=$?
 echo "$out" | grep -E 'Verifies|Signer #1 certificate (SHA-256|DN)|ERROR|DOES NOT' || true
 [ "$status" -eq 0 ] || { echo "::error::apksigner verify failed (exit $status)"; echo "$out" | head -20; exit 1; }
+
+[ -n "${EXPECTED_CERT_SHA256:-}" ] || { echo '::error::Expected signing certificate is required'; exit 1; }
+if true; then
+  actual=$(printf '%s\n' "$out" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+  expected=$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+  [ "$actual" = "$expected" ] || { echo '::error::APK signing certificate does not match the configured signing key'; exit 1; }
+fi
