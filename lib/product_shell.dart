@@ -274,6 +274,7 @@ class _ProductShellState extends State<ProductShell>
     int? remainingMs,
     int? periodMs,
     Object? barId,
+    bool renewing = false,
   ]) => Card(
     clipBehavior: remainingMs == null ? Clip.none : Clip.antiAlias,
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
@@ -332,9 +333,14 @@ class _ProductShellState extends State<ProductShell>
                 ),
               ] else if (showCodeStatus) ...[
                 const SizedBox(width: 12),
-                const Text(
-                  'No active code',
-                  style: TextStyle(fontSize: 12, color: muted),
+                SizedBox(
+                  height: renewing ? 48 : null,
+                  child: Center(
+                    child: Text(
+                      renewing ? 'Renewing code...' : 'No active code',
+                      style: const TextStyle(fontSize: 12, color: muted),
+                    ),
+                  ),
                 ),
               ],
               if (trailing != null) ...[const SizedBox(width: 4), trailing],
@@ -558,6 +564,7 @@ class _ProductShellState extends State<ProductShell>
                         v?.remainingMs,
                         v == null ? null : v.period * 1000,
                         v == null ? null : '${e.id}/${v.periodStartMs}',
+                        e.totp && (batch?.awaitingBoundary(e.id) ?? false),
                       );
                     },
                   ),

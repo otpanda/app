@@ -453,8 +453,11 @@ void main() {
       final tLow = 5400 + (boundary - serverNow); // if stamped at arrival
       final tHigh = 5000 + (boundary - serverNow); // if stamped at send
       tick = tHigh - 1;
+      expect(store.awaitingBoundary('a'), false);
       expect(store.current('a')!.value, code('a', 0, 6));
       tick = tHigh + 1;
+      expect(store.awaitingBoundary('a'), true);
+      expect(store.awaitingBoundary('missing'), false);
       expect(
         store.current('a'),
         isNull,
@@ -463,8 +466,48 @@ void main() {
       tick = tLow - 1;
       expect(store.current('a'), isNull, reason: 'still ambiguous');
       tick = tLow;
+      expect(store.awaitingBoundary('a'), false);
       expect(store.current('a')!.value, code('a', 1, 6));
     });
+
+    test(
+      'renewing status agrees with strict validity across RTT intervals',
+      () {
+        for (final latency in [1, 20, 400, 1500]) {
+          for (final period in [20, 30, 60, 300]) {
+            tick = 5000;
+            final subject = BatchCodeStore(monotonicMilliseconds: () => tick);
+            final r = subject.begin({'a'});
+            tick += latency;
+            subject.accept(r, body({'a': (period, 6)}), policy: policy);
+            final start = (nowSec ~/ period) * period;
+            final boundary = (start + period) * 1000;
+            final at = 5000 + boundary - serverNow;
+            for (final delta in [
+              -1,
+              0,
+              1,
+              latency ~/ 2,
+              latency - 1,
+              latency,
+              latency + 1,
+            ]) {
+              final next = at + delta;
+              if (next < tick) continue;
+              tick = next;
+              final renewing = subject.awaitingBoundary('a');
+              final value = subject.current('a');
+              if (renewing) expect(value, isNull);
+              if (subject.hasCoverage('a') && value == null) {
+                expect(renewing, isTrue);
+              }
+            }
+            subject.clear();
+            expect(subject.awaitingBoundary('a'), isFalse);
+          }
+        }
+      },
+    );
 
     test('hasNextCode is true only when a later code is held', () {
       final r = begin({'a'});

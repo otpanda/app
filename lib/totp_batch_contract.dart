@@ -416,6 +416,25 @@ final class BatchCodeStore {
     );
   }
 
+  /// True only when authenticated held codes cover both sides of an uncertain
+  /// boundary. Neither code is safe to show or copy yet. This is not an empty
+  /// account or a failed request, and never grants access to either value.
+  bool awaitingBoundary(String id) {
+    try {
+      final h = _held[id];
+      if (h == null) return false;
+      final t = _tick(), e = h.entry;
+      final start = e.validFrom * 1000, period = e.period * 1000;
+      final low = t + h.loOffset, high = t + h.hiOffset;
+      if (low < start || high >= h.coverageUntil) return false;
+      final first = (low - start) ~/ period, last = (high - start) ~/ period;
+      return first != last && first >= 0 && last < e.codes.length;
+    } catch (_) {
+      clear();
+      return false;
+    }
+  }
+
   /// True when a code after the current one is held for [id], so the tile can
   /// change at the next boundary without a request.
   bool hasNextCode(String id) {

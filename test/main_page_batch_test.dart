@@ -16,6 +16,8 @@ import 'package:material_ui/material_ui.dart';
 
 import 'product_shell_test.dart' show FakeTransport;
 
+bool _fontsLoaded = false;
+
 class BatchBridge extends FakeTransport implements TotpBatchBridge {
   BatchBridge(super.routes);
   int batches = 0;
@@ -629,7 +631,7 @@ void main() {
   testWidgets(
     'main page automatically requests a batch and shows padded generated code with copy control',
     (tester) async {
-      if (Platform.isLinux) {
+      if (Platform.isLinux && !_fontsLoaded) {
         for (final family in ['Figtree', 'BricolageGrotesque']) {
           final loader = FontLoader(family);
           for (final weight
@@ -656,6 +658,7 @@ void main() {
             ),
           );
         await icons.load();
+        _fontsLoaded = true;
       }
       final bridge = BatchBridge({
         '/v1/manage/session': SessionResponse(
@@ -822,7 +825,7 @@ void main() {
   testWidgets(
     'viewport batching advances beyond first cap and scrolls to later entries without duplicate keys',
     (tester) async {
-      if (Platform.isLinux) {
+      if (Platform.isLinux && !_fontsLoaded) {
         for (final family in ['Figtree', 'BricolageGrotesque']) {
           final loader = FontLoader(family);
           for (final weight
@@ -849,6 +852,7 @@ void main() {
             ),
           );
         await icons.load();
+        _fontsLoaded = true;
       }
       final bridge = BatchBridge({
         '/v1/manage/session': SessionResponse(
@@ -1222,6 +1226,127 @@ void main() {
       controller.dispose();
     },
   );
+  testWidgets(
+    'ambiguous boundary shows renewing without false empty state or height jump; copy waits for validity',
+    (tester) async {
+      if (Platform.isLinux && !_fontsLoaded) {
+        for (final family in ['Figtree', 'BricolageGrotesque']) {
+          final loader = FontLoader(family);
+          for (final weight
+              in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+            final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+                ),
+              ),
+            );
+          }
+          await loader.load();
+        }
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File(
+                  '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
+              ),
+            ),
+          );
+        await icons.load();
+        _fontsLoaded = true;
+      }
+      var t = 0;
+      final bridge = DelayedBatchBridge(() => t = 400, {
+        '/v1/manage/session': SessionResponse(
+          200,
+          jsonEncode({'ownerId': 'owner', 'expiresAt': 9999999}),
+        ),
+        '/v1/manage/entries': SessionResponse(
+          200,
+          jsonEncode({
+            'entries': [
+              {
+                'entry_id': 'a',
+                'label': 'Test',
+                'service_id': 'custom-totp',
+                'capabilities': {'manage': true},
+                'account_name': 'me',
+                'totp': true,
+              },
+            ],
+          }),
+        ),
+        '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+        '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+        '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+      });
+      final controller = ReadWorkspaceController(
+        bridge: bridge,
+        clock: () => 45000,
+      );
+      await controller.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: controller,
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+            clock: () => 45000,
+            onSignedOut: () {},
+            batchClock: () => t,
+            batchPolicy: const BatchPolicy(
+              maxEntries: 1,
+              maxTotalCodes: 32,
+              minPeriodSeconds: 20,
+              maxPeriodSeconds: 86400,
+              maxWindowSeconds: 600,
+              minRemainingMs: 1000,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('0000001'), findsOneWidget);
+      final before = tester.getSize(find.byType(Card).last).height;
+      t = 15001;
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Renewing code...'), findsOneWidget);
+      expect(find.text('No active code'), findsNothing);
+      expect(find.text('0000001'), findsNothing);
+      expect(find.byTooltip('Copy code'), findsNothing);
+      expect(tester.getSize(find.byType(Card).last).height, before);
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/batch-renewing.png'),
+        );
+      }
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Renewing code...'), findsOneWidget);
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/batch-renewing-mobile.png'),
+        );
+      }
+      await tester.binding.setSurfaceSize(null);
+      await tester.pump();
+      t = 15401;
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Renewing code...'), findsNothing);
+      expect(find.text('0000001'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
 
   test('long period entering its last 15 s on a current-only server: time-gated, at most 3 s spacing, and does not touch the normal entry budget', () async {
     var time = 0;
@@ -1255,4 +1380,18 @@ void main() {
     }
     c.dispose();
   });
+}
+
+class DelayedBatchBridge extends BatchBridge {
+  DelayedBatchBridge(this.arrive, super.routes);
+  final void Function() arrive;
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    final response = await super.totpBatch(ids, windowSeconds: windowSeconds);
+    arrive();
+    return response;
+  }
 }

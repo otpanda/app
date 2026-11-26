@@ -207,6 +207,7 @@ class MainPageBatchController extends ChangeNotifier {
   }
 
   BatchCode? current(String id) => _safe ? store.current(id) : null;
+  bool awaitingBoundary(String id) => _safe && store.awaitingBoundary(id);
   Future<void> copy(String id) async {
     final code = current(id);
     if (code == null) return;
