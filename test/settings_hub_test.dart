@@ -398,10 +398,10 @@ void main() {
     expect(b.paths.where((p) => p == '/v1/manage/account').length, before + 1);
   });
 
-  testWidgets('identity reset drops a pending appearance read credit', (
+  testWidgets('identity reset plus failed refresh cannot reuse old credit', (
     t,
   ) async {
-    final b = CountingBridge()
+    final b = FlakyOverviewBridge()
       ..status = 'restored'
       ..clockNow = 100000;
     await pump(t, b, navigation: 'settings');
@@ -409,13 +409,38 @@ void main() {
     state.applyRoute('settings/account-security', direct: true);
     await state.refresh();
     state.resetIdentity();
+    b.failWith = 503;
     await state.refresh();
+    // Real navigation mounts Account, then leaves it before reentry.
+    state.setState(() {});
+    await t.pumpAndSettle();
+    await t.tap(find.byTooltip('Back to settings'));
+    await t.pumpAndSettle();
     final before = b.paths.where((p) => p == '/v1/manage/account').length;
-    await state.ensureOverview(); // consumes only this identity's restore
-    expect(b.paths.where((p) => p == '/v1/manage/account').length, before);
-    await state.ensureOverview(); // next genuine appearance must read
+    b.failWith = null;
+    await t.tap(find.text('Account & security'));
+    await t.pumpAndSettle();
     expect(b.paths.where((p) => p == '/v1/manage/account').length, before + 1);
   });
+
+  testWidgets(
+    'direct Passkeys restoration gives no later Account read credit',
+    (t) async {
+      final b = CountingBridge()
+        ..status = 'restored'
+        ..clockNow = 100000;
+      await pump(t, b, navigation: 'settings/account-security/passkeys');
+      final dynamic state = t.state(find.byType(BrowserAccountPage));
+      state.applyRoute('settings', direct: true);
+      state.applyRoute('settings/account-security', direct: true);
+      final before = b.paths.where((p) => p == '/v1/manage/account').length;
+      await state.ensureOverview();
+      expect(
+        b.paths.where((p) => p == '/v1/manage/account').length,
+        before + 1,
+      );
+    },
+  );
 
   testWidgets('Account page reads the overview each time it shows', (t) async {
     final b = CountingBridge()
