@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:otpanda_client/copy_hint.dart';
 
 import 'dart:convert';
+import 'dart:io';
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
@@ -150,6 +151,45 @@ Future<void> pump(
 }
 
 void main() {
+  setUpAll(() async {
+    if (Platform.isLinux) {
+      for (final family in ['Figtree', 'BricolageGrotesque']) {
+        final loader = FontLoader(family);
+        for (final weight
+            in (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])) {
+          final name = family == 'Figtree' ? 'Figtree' : 'BricolageGrotesque';
+          loader.addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/$name-$weight.ttf').readAsBytesSync(),
+              ),
+            ),
+          );
+        }
+        await loader.load();
+      }
+      final icons = FontLoader('MaterialIcons')
+        ..addFont(
+          Future.value(
+            ByteData.sublistView(
+              File(
+                '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+              ).readAsBytesSync(),
+            ),
+          ),
+        );
+      await icons.load();
+      final mono = FontLoader('CodeMono')
+        ..addFont(
+          Future.value(
+            ByteData.sublistView(
+              File('assets/fonts/CodeMono-Regular.ttf').readAsBytesSync(),
+            ),
+          ),
+        );
+      await mono.load();
+    }
+  });
   testWidgets(
     '32-character code and placeholder fit narrow screen without changing length',
     (t) async {
@@ -223,6 +263,66 @@ void main() {
     },
   );
 
+  testWidgets(
+    'wide copy button and whole tile both copy, mobile alone has hint',
+    (t) async {
+      final pref = TestCopyHint();
+      final tr = FakeTransport(
+        routes(
+          entries: [
+            {
+              'entry_id': 'e',
+              'service_name': 'Acme',
+              'account_name': 'me',
+              'capabilities': {'manage': true},
+            },
+          ],
+          codes: [
+            {
+              'entryId': 'e',
+              'code': '123456',
+              'receivedAt': now - 1000,
+              'expiresAt': now + 60000,
+            },
+          ],
+        ),
+      );
+      await pump(t, tr, copyHintStore: pref);
+      expect(find.byIcon(Icons.copy_outlined), findsNothing);
+      expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/responsive-copy-mobile.png'),
+        );
+      }
+      t.view.physicalSize = const Size(1200, 900);
+      await t.pumpAndSettle();
+      expect(find.byIcon(Icons.copy_outlined), findsOneWidget);
+      expect(find.text('Tap a code card to copy it.'), findsNothing);
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(ProductShell),
+          matchesGoldenFile('goldens/responsive-copy-desktop.png'),
+        );
+      }
+      await t.tap(find.byIcon(Icons.copy_outlined));
+      await t.pump();
+      expect(find.text('Copied'), findsOneWidget);
+      expect(pref.seen, true);
+      await t.pump(const Duration(seconds: 2));
+      await t.tap(find.text('Acme'));
+      await t.pump();
+      expect(find.text('Copied'), findsOneWidget);
+      t.view.physicalSize = const Size(390, 844);
+      await t.pumpAndSettle();
+      expect(find.byIcon(Icons.copy_outlined), findsNothing);
+      expect(find.text('Tap a code card to copy it.'), findsNothing);
+      await t.pumpWidget(const SizedBox());
+      await pump(t, tr, copyHintStore: TestCopyHint());
+      expect(find.text('Tap a code card to copy it.'), findsOneWidget);
+    },
+  );
   testWidgets(
     'hint refresh failure retains visible code without transient warning',
     (t) async {

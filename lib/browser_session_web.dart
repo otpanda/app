@@ -98,6 +98,7 @@ extension type _Session(JSObject _) implements JSObject {
   external JSPromise<_ReadResponse> totpBatch(
     JSString entries,
     JSNumber window,
+    JSNumber from,
   );
   external JSPromise<_ReadResponse> read(JSString path);
   external JSPromise<_ReadResponse> organize(JSString method, JSString body);
@@ -131,7 +132,7 @@ class _Browser
         PasskeyLabelBridge,
         ProfileCacheBridge,
         TotpManagementBridge,
-        TotpBatchBridge,
+        FutureTotpBatchBridge,
         GmailSourceBridge,
         GoogleLinkBridge,
         GoogleConnectBridge,
@@ -224,9 +225,20 @@ class _Browser
   Future<SessionResponse> totpBatch(
     List<String> entryIds, {
     required int windowSeconds,
+  }) => totpBatchFrom(entryIds, windowSeconds: windowSeconds, fromSeconds: 0);
+
+  @override
+  Future<SessionResponse> totpBatchFrom(
+    List<String> entryIds, {
+    required int windowSeconds,
+    required int fromSeconds,
   }) async {
     final r = await _session
-        .totpBatch(jsonEncode(entryIds).toJS, windowSeconds.toJS)
+        .totpBatch(
+          jsonEncode(entryIds).toJS,
+          windowSeconds.toJS,
+          fromSeconds.toJS,
+        )
         .toDart;
     return SessionResponse(r.status.toDartInt, r.body.toDart);
   }

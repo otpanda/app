@@ -66,6 +66,7 @@ class MainPageBatchController extends ChangeNotifier {
   /// entry, or a long-period one, never spends another entry's quota, and a
   /// new period or generation starts at zero.
   final _warmAttempts = <String, int>{};
+  final _futureFallback = <String>{};
   static const _warmHorizonMs = 15000;
   String? _warmKey(String id) {
     final c = store.current(id);
@@ -113,11 +114,29 @@ class MainPageBatchController extends ChangeNotifier {
     }
   }
 
+  /// Reconcile an authenticated workspace refresh without blanking still-valid
+  /// generated codes. The caller separately invalidates on owner/session loss.
+  Set<String> _authorized = {};
+  void retainAuthorized(Set<String> ids, {Set<String> changed = const {}}) {
+    final removed = _authorized.difference(ids);
+    _authorized = Set.of(ids);
+    if (removed.isEmpty && changed.isEmpty) return;
+    _generation++;
+    busy = false;
+    store.retainAuthorized(ids.difference(changed));
+    _ids = _ids.where(ids.contains).toList();
+    _warmAttempts.removeWhere(
+      (key, _) => !ids.any((id) => key.startsWith('$id/')),
+    );
+  }
+
   void invalidate({bool notify = true}) {
     _generation++;
     _successAt = 0;
     _warmAttempts.clear();
+    _futureFallback.clear();
     _ids = [];
+    _authorized = {};
     store.clear();
     busy = false;
     error = null;
@@ -164,21 +183,35 @@ class MainPageBatchController extends ChangeNotifier {
     }
     if (_warmAttempts.length > 128) _warmAttempts.clear();
     final generation = _generation;
+    var attemptedFuture = false;
     busy = true;
     _notify();
     try {
       _lastRequest = _mono();
-      final request = store.begin(selected.toSet());
-      final response = await bridge.totpBatch(
-        selected,
-        windowSeconds: policy.maxWindowSeconds,
-      );
+      final from =
+          bridge is FutureTotpBatchBridge &&
+              !selected.any(_futureFallback.contains)
+          ? store.futureStartSeconds(selected.toSet())
+          : 0;
+      attemptedFuture = from > 0;
+      final request = store.begin(selected.toSet(), fromSeconds: from);
+      final response = from > 0
+          ? await (bridge as FutureTotpBatchBridge).totpBatchFrom(
+              selected,
+              windowSeconds: policy.maxWindowSeconds,
+              fromSeconds: from,
+            )
+          : await bridge.totpBatch(
+              selected,
+              windowSeconds: policy.maxWindowSeconds,
+            );
       if (_disposed || generation != _generation) return;
       if (response.status != 200) throw StateError('Codes unavailable');
       if (utf8.encode(response.body).length > 131072) {
         throw const FormatException();
       }
       store.accept(request, jsonDecode(response.body), policy: policy);
+      _futureFallback.removeAll(selected);
       error = null;
       _retryAt = 0;
       _successAt =
@@ -191,10 +224,12 @@ class MainPageBatchController extends ChangeNotifier {
                 )).clamp(3000, _msToWarmHorizon().clamp(3000, 15000)));
     } catch (e) {
       if (generation == _generation) {
+        if (attemptedFuture) _futureFallback.addAll(selected);
         error = 'Generated codes are waiting for your connection.';
         _retryAt =
             _mono() +
-            (e is FormatException && e.message == 'Expired on arrival'
+            (attemptedFuture ||
+                    e is FormatException && e.message == 'Expired on arrival'
                 ? 3000
                 : 15000);
       }

@@ -172,6 +172,8 @@ class CodeStore {
   final SessionTransport transport;
   int _generation = 0;
   int? _sessionExpiresAt;
+  String? _ownerId;
+  String? get ownerId => _ownerId;
   void updateSessionExpiry(int expiresAt, int now) {
     if (_sessionExpiresAt != null && expiresAt > now) {
       _sessionExpiresAt = expiresAt;
@@ -208,6 +210,7 @@ class CodeStore {
                 e.totp,
                 e.catalogId,
                 e.issuer,
+                e.expectedDigits,
               )
             : e,
     ];
@@ -216,6 +219,7 @@ class CodeStore {
   void clear() {
     _generation++;
     _sessionExpiresAt = null;
+    _ownerId = null;
     _entries = const [];
     _codes = const [];
     _sources = const [];
@@ -245,7 +249,7 @@ class CodeStore {
     final generation = _generation;
     try {
       final session = await _get('/v1/manage/session');
-      _text(session, 'ownerId');
+      final owner = _text(session, 'ownerId');
       final expires = session['expiresAt'];
       if (expires is! int || expires <= clock()) {
         throw const ClientFailure(401);
@@ -303,6 +307,7 @@ class CodeStore {
         }
       }
       if (expires <= clock()) throw const ClientFailure(401);
+      _ownerId = owner;
       _sessionExpiresAt = expires;
       _sources = sources;
       _unassigned = unassigned;

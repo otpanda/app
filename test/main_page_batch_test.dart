@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -417,6 +418,106 @@ MainPageBatchController _controller(
 
 void main() {
   test(
+    'unchanged authoritative entries preserve pending initial request',
+    () async {
+      final gate = Completer<SessionResponse>();
+      final bridge = PendingRetentionBridge(gate);
+      var t = 0;
+      final c = MainPageBatchController(
+        bridge: bridge,
+        policy: const BatchPolicy(
+          maxEntries: 1,
+          maxTotalCodes: 32,
+          minPeriodSeconds: 20,
+          maxPeriodSeconds: 86400,
+          maxWindowSeconds: 600,
+          minRemainingMs: 1,
+        ),
+        active: () => true,
+        wallMilliseconds: () => 1000 + t,
+        monotonicMilliseconds: () => t,
+      );
+      c.retainAuthorized({'a'});
+      c.select(['a']);
+      expect(c.busy, true);
+      c.retainAuthorized({'a'});
+      expect(c.busy, true);
+      gate.complete(await BatchBridge({}).totpBatch(['a'], windowSeconds: 600));
+      await Future<void>.delayed(Duration.zero);
+      expect(c.tileCurrent('a')?.value, '0000001');
+      t = 16000;
+      expect(c.tileCurrent('a')?.periodStartMs, 60000);
+      c.retainAuthorized({'a'}, changed: {'a'});
+      expect(c.tileCurrent('a'), isNull);
+      c.dispose();
+    },
+  );
+  test(
+    'warm refresh requests future batch and retains current until next period',
+    () async {
+      var t = 0;
+      final bridge = FutureWarmBridge(() => t);
+      final c = MainPageBatchController(
+        bridge: bridge,
+        policy: const BatchPolicy(
+          maxEntries: 1,
+          maxTotalCodes: 32,
+          minPeriodSeconds: 20,
+          maxPeriodSeconds: 86400,
+          maxWindowSeconds: 600,
+          minRemainingMs: 1,
+        ),
+        active: () => true,
+        wallMilliseconds: () => 1000000 + t,
+        monotonicMilliseconds: () => t,
+      );
+      c.retainAuthorized({'a'});
+      c.select(['a']);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.tileCurrent('a')?.value, '1111111');
+      t = 3000;
+      c.tick();
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.offsets, [12]);
+      expect(c.tileCurrent('a')?.value, '1111111');
+      t = 13000;
+      expect(c.tileCurrent('a')?.value, '2222222');
+      c.dispose();
+    },
+  );
+  test('failed future response retries current before held expiry', () async {
+    var t = 0;
+    final bridge = FutureWarmBridge(() => t)..failFuture = true;
+    final c = MainPageBatchController(
+      bridge: bridge,
+      policy: const BatchPolicy(
+        maxEntries: 1,
+        maxTotalCodes: 32,
+        minPeriodSeconds: 20,
+        maxPeriodSeconds: 86400,
+        maxWindowSeconds: 600,
+        minRemainingMs: 1,
+      ),
+      active: () => true,
+      wallMilliseconds: () => 1000000 + t,
+      monotonicMilliseconds: () => t,
+    );
+    c.select(['a']);
+    await Future<void>.delayed(Duration.zero);
+    t = 3000;
+    c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.offsets, [12]);
+    expect(c.tileCurrent('a')?.value, '1111111');
+    t = 6000;
+    c.tick();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.offsets, [12]);
+    expect(bridge.currentCalls, 2);
+    expect(c.tileCurrent('a')?.value, '1111111');
+    c.dispose();
+  });
+  test(
     'sleep divergence clears held codes and stale copy, background clears',
     () async {
       var wall = 0, mono = 0;
@@ -751,7 +852,7 @@ void main() {
           return null;
         },
       );
-      expect(find.byIcon(Icons.copy_outlined), findsNothing);
+      expect(find.byIcon(Icons.copy_outlined), findsOneWidget);
       final tileBefore = tester.getRect(find.byType(Card).last);
       // Tap the identity area, not the code or a former button.
       await tester.tap(find.text('Test'));
@@ -1746,9 +1847,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('0000001'), findsOneWidget);
-    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
     await tester.binding.setSurfaceSize(const Size(390, 844));
     await tester.pump();
+    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
     if (Platform.isLinux) {
       await expectLater(
         find.byType(ProductShell),
@@ -1853,9 +1954,9 @@ void main() {
     expect(find.text('-------'), findsOneWidget);
     expect(tester.getSize(find.text('-------')).width, width);
     expect(find.byTooltip('Copy code'), findsNothing);
-    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
     await tester.binding.setSurfaceSize(const Size(390, 844));
     await tester.pump();
+    expect(find.text('Tap a code card to copy it.'), findsOneWidget);
     if (Platform.isLinux) {
       await expectLater(
         find.byType(ProductShell),
@@ -1899,6 +2000,102 @@ void main() {
     }
     c.dispose();
   });
+  testWidgets(
+    'unchanged workspace refresh never blanks a still-valid batch tile',
+    (tester) async {
+      var wall = 45000;
+      final bridge = BatchBridge({
+        '/v1/manage/session': const SessionResponse(
+          200,
+          '{"ownerId":"owner","expiresAt":9999999}',
+        ),
+        '/v1/manage/entries': const SessionResponse(
+          200,
+          '{"entries":[{"entry_id":"a","label":"Test","service_id":"custom-totp","capabilities":{"manage":true},"account_name":"me"}]}',
+        ),
+        '/v1/manage/active-codes': const SessionResponse(200, '{"records":[]}'),
+        '/v1/manage/sources': const SessionResponse(200, '{"sources":[]}'),
+        '/v1/manage/unassigned': const SessionResponse(200, '{"records":[]}'),
+      });
+      final c = ReadWorkspaceController(bridge: bridge, clock: () => wall);
+      await c.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: c,
+            copyHintStore: TestCopyHint(),
+            batchClock: () => 0,
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+            clock: () => wall,
+            onSignedOut: () {},
+            batchPolicy: const BatchPolicy(
+              maxEntries: 1,
+              maxTotalCodes: 32,
+              minPeriodSeconds: 20,
+              maxPeriodSeconds: 86400,
+              maxWindowSeconds: 600,
+              minRemainingMs: 1000,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('0000001'), findsOneWidget);
+      final before = bridge.batches;
+      wall =
+          60000; // open workspace read gate; batch monotonic clock is unchanged
+      await c.refresh();
+      await tester.pump();
+      await tester.pump();
+      // Post-frame reconciliation must not clear the code or request duplicates.
+      expect(find.text('0000001'), findsOneWidget);
+      expect(bridge.batches, before);
+      c.applyEntryEdit('a', service: 'Renamed');
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('0000001'), findsOneWidget);
+      expect(bridge.batches, before);
+      bridge.routes['/v1/manage/entries'] = const SessionResponse(
+        200,
+        '{"entries":[{"entry_id":"a","label":"Test","service_id":"custom-totp","capabilities":{"manage":true},"account_name":"me","digits":7}]}',
+      );
+      wall = 75000;
+      await c.refresh();
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.text('0000001'),
+        findsOneWidget,
+      ); // null metadata becomes known, same held shape
+      bridge.routes['/v1/manage/session'] = const SessionResponse(
+        200,
+        '{"ownerId":"owner2","expiresAt":9999999}',
+      );
+      wall = 90000;
+      await c.refresh();
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.text('0000001'),
+        findsNothing,
+      ); // same entry id, different owner
+      // A freshly authenticated list no longer authorizes the removed entry.
+      bridge.routes['/v1/manage/entries'] = const SessionResponse(
+        200,
+        '{"entries":[]}',
+      );
+      wall = 105000;
+      await c.refresh();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('0000001'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      c.dispose();
+    },
+  );
 }
 
 class DelayedBatchBridge extends BatchBridge {
@@ -1974,6 +2171,77 @@ class TimerCodesBridge extends BatchBridge {
                 ...List.filled(17, '4444444'),
               ],
             },
+        ],
+        'omitted': [],
+      }),
+    );
+  }
+}
+
+class PendingRetentionBridge extends BatchBridge {
+  PendingRetentionBridge(this.pending) : super({});
+  final Completer<SessionResponse> pending;
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) => pending.future;
+}
+
+class FutureWarmBridge extends BatchBridge implements FutureTotpBatchBridge {
+  FutureWarmBridge(this.time) : super({});
+  final int Function() time;
+  final offsets = <int>[];
+  bool failFuture = false;
+  int currentCalls = 0;
+  @override
+  Future<SessionResponse> totpBatch(
+    List<String> ids, {
+    required int windowSeconds,
+  }) async {
+    currentCalls++;
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 45000 + time(),
+        'coverageUntil': 60000,
+        'totalCodes': 1,
+        'entries': [
+          {
+            'entryId': 'a',
+            'period': 30,
+            'digits': 7,
+            'validFrom': 30,
+            'codes': ['1111111'],
+          },
+        ],
+        'omitted': [],
+      }),
+    );
+  }
+
+  @override
+  Future<SessionResponse> totpBatchFrom(
+    List<String> ids, {
+    required int windowSeconds,
+    required int fromSeconds,
+  }) async {
+    offsets.add(fromSeconds);
+    if (failFuture) return const SessionResponse(200, '{}');
+    return SessionResponse(
+      200,
+      jsonEncode({
+        'serverNow': 45000 + time(),
+        'coverageUntil': 90000,
+        'totalCodes': 1,
+        'entries': [
+          {
+            'entryId': 'a',
+            'period': 30,
+            'digits': 7,
+            'validFrom': 60,
+            'codes': ['2222222'],
+          },
         ],
         'omitted': [],
       }),
