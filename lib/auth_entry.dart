@@ -270,10 +270,9 @@ class _AuthEntryState extends State<AuthEntry> {
                     onPressed: widget.busy || pendingAction != null
                         ? null
                         : onTap,
-                    icon: pendingIcon(
-                      label == 'Sign in with a passkey' ? 'passkey' : 'signup',
-                      icon,
-                    ),
+                    icon: label == 'Sign in with a passkey'
+                        ? pendingIcon('passkey', icon)
+                        : Icon(icon, size: 20),
                     label: Text(label),
                   ),
                   const SizedBox(height: 12),
