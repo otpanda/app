@@ -14,7 +14,7 @@ import java.security.Signature
 import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
 
-class MainActivity : FlutterActivity() {
+open class MainActivity : FlutterActivity() {
     private var channel: MethodChannel? = null
     private var pendingLink: String? = null
     private val prefs get() = getSharedPreferences("otpanda_native", Context.MODE_PRIVATE)

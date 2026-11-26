@@ -18,6 +18,7 @@ import io.flutter.plugin.common.MethodChannel
 import org.otpanda.recovery.AssertionResult
 import org.otpanda.recovery.Cancellable
 import org.otpanda.recovery.HttpsLockApi
+import org.otpanda.recovery.LockApi
 import org.otpanda.recovery.LockEffects
 import org.otpanda.recovery.LockEnv
 import org.otpanda.recovery.LockIntent
@@ -53,7 +54,7 @@ object LocalLockRecoveryHost {
     }
 
     /** Idempotent: a second call (activity recreation, engine reconfiguration) disposes the previous registration first. Call on the main thread. */
-    fun register(activity: Activity, messenger: BinaryMessenger) {
+    fun register(activity: Activity, messenger: BinaryMessenger, api: LockApi = HttpsLockApi()) {
         dispose()
         disposed = false
         val thread = Executors.newSingleThreadExecutor { r -> Thread(r, "otpanda-lock-recovery").apply { isDaemon = true } }
@@ -61,7 +62,7 @@ object LocalLockRecoveryHost {
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         // Posts to the main looper. Never runs inline and never touches a destroyed activity: after dispose it drops the work.
         val main = java.util.concurrent.Executor { task -> if (!disposed) handler.post { if (!disposed) task.run() } }
-        val rec = LocalLockRecovery(HttpsLockApi(), Passkeys(activity), Effects(activity), Env(activity), thread, main)
+        val rec = LocalLockRecovery(api, Passkeys(activity), Effects(activity), Env(activity), thread, main)
         recovery = rec
         val ch = MethodChannel(messenger, "app.otpanda/lock-recovery")
         channel = ch

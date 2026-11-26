@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Runtime qualification of the real Credential Manager prompt against the composed lifecycle (UNRUN until a booted API 34 emulator executes it).
-# Debug-only synthetic fixture: fake begin transport, no network, no server, no real key, no account. Evidence lands under OUT:
-#   fixture.log (marks + LOCKFX events per scenario), shots/*.png (UI), window-*.txt (focus dumps), logcat-crash.txt, build.log
+# Runtime qualification of the real Credential Manager prompt against the repo's real MainActivity lifecycle (UNRUN until a booted API 34 emulator executes it).
+# Debug-only. A debug Activity EXTENDS the real MainActivity; the real LocalLockRecoveryHost runs with a FAKE LockApi (fake begin/finish, real wire shapes) and a
+# SYNTHETIC debug credential provider that answers with a throwaway-key assertion. No network, server, real key or account. Evidence under OUT:
+#   fixture.log, shots/*.png, ui-*.xml (uiautomator dumps), window-*.txt (focus), credential_service.txt, logcat-*.txt, build.log
 # Usage (repo root, after tool/bootstrap.sh, one booted emulator): tool/android-lock-prompt-qualification.sh OUT
-# Env: EXPECT_API (34), DEVICE (adb serial), PKG (app.otpanda), APK (skip the build), REQUIRE_NO_SELF_STOP=1 (gate on the prompt-caused stop).
-# Pass/fail comes ONLY from tool/android-lock-prompt/verify-log.py. A build/install/launch failure is a HARNESS failure, not evidence.
+# Env: EXPECT_API (34), DEVICE, PKG (app.otpanda), APK (skip the build), REQUIRE_NO_SELF_STOP=1 (CI), RELEASE_APK (also run the release-artifact negative check).
+# Pass/fail comes ONLY from tool/android-lock-prompt/verify-log.py. Build/install/enable/launch failures are HARNESS failures, never evidence or a pass.
 set -uo pipefail
 OUT="${1:?usage: $0 OUT}"; mkdir -p "$OUT/shots"
 root=$(cd "$(dirname "$0")/.." && pwd); fx="$root/tool/android-lock-prompt"
@@ -14,47 +15,77 @@ A=(adb); [ -n "${DEVICE:-}" ] && A=(adb -s "$DEVICE")
 api=$("${A[@]}" shell getprop ro.build.version.sdk | tr -d '\r\n')
 [ "$api" = "$EXPECT_API" ] || { echo "HARNESS FAIL: emulator API $api != $EXPECT_API"; exit 3; }
 cd "$root"
+python3 "$fx/check.py" || { echo 'HARNESS FAIL: source guard'; exit 4; }
 python3 "$fx/install-fixture.py" || exit 4
 if [ -z "${APK:-}" ]; then
-  flutter build apk --debug --flavor google > "$OUT/build.log" 2>&1 || { tail -30 "$OUT/build.log"; echo 'HARNESS FAIL: build'; exit 5; }
+  flutter build apk --debug --flavor google -t tool/android-lock-prompt/lock_fixture_main.dart > "$OUT/build.log" 2>&1 || { tail -30 "$OUT/build.log"; echo 'HARNESS FAIL: build'; exit 5; }
   APK=build/app/outputs/flutter-apk/app-google-debug.apk
 fi
+python3 "$fx/check-release-artifact.py" --expect-present "$APK" > "$OUT/debug-apk-contains-fixture.txt" 2>&1 || { cat "$OUT/debug-apk-contains-fixture.txt"; echo 'HARNESS FAIL: debug APK lacks the fixture classes'; exit 5; }
+[ -z "${RELEASE_APK:-}" ] || python3 "$fx/check-release-artifact.py" "$RELEASE_APK" || { echo 'FAIL: release APK contains fixture classes'; exit 5; }
 "${A[@]}" uninstall "$PKG" >/dev/null 2>&1 || true
 "${A[@]}" install -t -r "$APK" > "$OUT/install.txt" 2>&1 || { cat "$OUT/install.txt"; echo 'HARNESS FAIL: install'; exit 6; }
 "${A[@]}" shell input keyevent KEYCODE_WAKEUP; "${A[@]}" shell wm dismiss-keyguard; sleep 1
-"${A[@]}" logcat -b crash -c; : > "$OUT/fixture.log"; echo "API=$api" >> "$OUT/fixture.log"
-comp="$PKG/app.otpanda.fixture.LockPromptFixtureActivity"
+comp="$PKG/app.otpanda.fixture.SyntheticProviderService"
+cur=$("${A[@]}" shell settings get secure credential_service | tr -d '\r\n')
+case "$cur" in null|"") new="$comp";; *"$comp"*) new="$cur";; *) new="$cur:$comp";; esac
+"${A[@]}" shell settings put secure credential_service "$new"
+back=$("${A[@]}" shell settings get secure credential_service | tr -d '\r\n')
+{ echo "before=$cur"; echo "after=$back"; echo "primary=$("${A[@]}" shell settings get secure credential_service_primary | tr -d '\r\n')"; } > "$OUT/credential_service.txt"
+case "$back" in *"$comp"*) ;; *) echo 'HARNESS FAIL: provider enablement readback does not contain the synthetic provider'; cat "$OUT/credential_service.txt"; exit 7;; esac
+"${A[@]}" logcat -b crash -c; : > "$OUT/fixture.log"; echo "API=$api" >> "$OUT/fixture.log"; echo 'ENABLE=OK' >> "$OUT/fixture.log"
+hostact="$PKG/app.otpanda.fixture.LockPromptHostActivity"
 mark(){ "${A[@]}" shell log -t LOCKFX "ev=mark scenario=$1 name=$2 $3"; }
-focus(){ # scenario label
-  local f="$OUT/window-$1-$2.txt"
+dump_ui(){ # scenario label -> OUT/ui-s-l.xml
+  "${A[@]}" shell uiautomator dump /sdcard/lockfx-ui.xml >/dev/null 2>&1; "${A[@]}" pull /sdcard/lockfx-ui.xml "$OUT/ui-$1-$2.xml" >/dev/null 2>&1 || : > "$OUT/ui-$1-$2.xml"
+}
+idle(){
+  local s="$1"; local f="$OUT/window-$s-idle.txt"
   "${A[@]}" shell dumpsys window 2>&1 | tr -d '\r' > "$f"
   local v; v=$(grep -m1 'mCurrentFocus' "$f" | sed 's/.*{[^ ]* [^ ]* //; s/}.*//' | tr -c 'A-Za-z0-9._/\n' '_')
-  [ -n "$v" ] && mark "$1" "FOCUS_$2" "value=$v" || mark "$1" FOCUS_ERROR ""
+  [ -n "$v" ] && mark "$s" FOCUS_IDLE "value=$v" || mark "$s" FOCUS_ERROR ""
+  dump_ui "$s" idle
+  python3 "$fx/tap-entry.py" "$OUT/ui-$s-idle.xml" 'Synthetic fixture passkey' 'synthetic-fixture-user' >/dev/null && mark "$s" ENTRY_VISIBLE value=yes || mark "$s" ENTRY_VISIBLE value=no
+  local p="$OUT/shots/$s-idle.png"; "${A[@]}" exec-out screencap -p > "$p"
+  [ "$(head -c4 "$p" | tail -c3)" = PNG ] && [ "$(stat -c%s "$p")" -gt 2000 ] && mark "$s" SHOT_OK "file=$s-idle.png"
 }
-shot(){ local p="$OUT/shots/$1-$2.png"; "${A[@]}" exec-out screencap -p > "$p"; [ "$(head -c4 "$p" | tail -c3)" = PNG ] && [ "$(stat -c%s "$p")" -gt 2000 ] && mark "$1" SHOT_OK "file=$1-$2.png"; }
-run(){ # scenario mimic actions...
-  local s="$1" m="$2"; shift 2
-  "${A[@]}" shell am force-stop "$PKG"; "${A[@]}" logcat -c; sleep 1
+select_entry(){
+  local s="$1" xy
+  xy=$(python3 "$fx/tap-entry.py" "$OUT/ui-$s-idle.xml" 'Synthetic fixture passkey' 'synthetic-fixture-user') || return 0
+  mark "$s" TAP_ENTRY ""; "${A[@]}" shell input tap $xy; sleep 3
+  for n in 1 2 3; do  # a confirm step may follow: tap Continue/Use when present
+    dump_ui "$s" "after$n"
+    xy=$(python3 "$fx/tap-entry.py" "$OUT/ui-$s-after$n.xml" 'Continue' 'Use passkey' 'Use this passkey' 'Sign in') || break
+    mark "$s" TAP_CONFIRM "n=$n"; "${A[@]}" shell input tap $xy; sleep 3
+  done
+  local p="$OUT/shots/$s-after.png"; "${A[@]}" exec-out screencap -p > "$p"
+}
+run(){ # scenario action steps...
+  local s="$1" act="$2"; shift 2
+  "${A[@]}" shell am force-stop "$PKG"; "${A[@]}" shell run-as "$PKG" rm -f no_backup/local-app-lock-v1; "${A[@]}" logcat -b all -c; sleep 1
   mark "$s" BEGIN ""
-  "${A[@]}" shell am start -W -n "$comp" --es scenario "$s" --ei mimic "$m" > "$OUT/start-$s.txt" 2>&1
-  for act in "$@"; do
-    case "$act" in
-      wait*) sleep "${act#wait}";;
-      idle) focus "$s" IDLE; shot "$s" idle;;
+  "${A[@]}" shell am start -W -n "$hostact" --es scenario "$s" --es action "$act" > "$OUT/start-$s.txt" 2>&1
+  for step in "$@"; do
+    case "$step" in
+      wait*) sleep "${step#wait}";;
+      idle) idle "$s";;
       home) mark "$s" HOME ""; "${A[@]}" shell input keyevent KEYCODE_HOME;;
       back) mark "$s" BACK ""; "${A[@]}" shell input keyevent KEYCODE_BACK;;
-      return) mark "$s" RETURN ""; "${A[@]}" shell am start -n "$comp" --es scenario "$s" --ei mimic "$m" >/dev/null 2>&1;;
+      select) select_entry "$s";;
     esac
   done
   echo "== scenario $s" >> "$OUT/fixture.log"
-  "${A[@]}" logcat -d -v threadtime -s LOCKFX:I | tr -d '\r' | grep 'ev=' >> "$OUT/fixture.log"
+  "${A[@]}" logcat -d -b all -v threadtime | tr -d '\r' > "$OUT/logcat-$s.txt"
+  grep 'LOCKFX' "$OUT/logcat-$s.txt" | grep 'ev=' >> "$OUT/fixture.log"
+  grep -q 'does not have the required capabilities' "$OUT/logcat-$s.txt" && echo "PROVIDER_REJECTED=yes scenario=$s" >> "$OUT/fixture.log"
 }
-run observe_idle 0 wait10 idle back wait3
-run observe_home 0 wait10 idle home wait4 return wait3 back wait2
-run mimic_idle 1 wait10 idle wait3
-run mimic_back 1 wait10 idle back wait3
-run mimic_home 1 wait10 idle home wait4
+run unlock_idle unlock wait12 idle wait3
+run unlock_back unlock wait12 idle back wait3
+run unlock_home unlock wait12 idle home wait4
+run unlock_select unlock wait12 idle select wait4
+run disable_select disable wait12 idle select wait4
 "${A[@]}" logcat -d -b crash 2>&1 | tr -d '\r' > "$OUT/logcat-crash.txt"
 grep -qi 'FATAL\|ANR\|not responding' "$OUT/logcat-crash.txt" && echo 'CRASH=yes' >> "$OUT/fixture.log"
+if [ "$cur" = null ] || [ -z "$cur" ]; then "${A[@]}" shell settings delete secure credential_service >/dev/null 2>&1; else "${A[@]}" shell settings put secure credential_service "$cur" >/dev/null 2>&1; fi
 "${A[@]}" shell am force-stop "$PKG"; "${A[@]}" uninstall "$PKG" >/dev/null 2>&1 || true
 python3 "$fx/verify-log.py" "$OUT/fixture.log" "$EXPECT_API"
