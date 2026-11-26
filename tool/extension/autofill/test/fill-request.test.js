@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { handleFillRequest, FRESH_MS } from '../src/fill-request.js';
 const NOW=1_800_000_000_000,ID='ext-id',entries=async()=>[{entryId:'gh',domains:['github.com']},{entryId:'gh2',domains:['github.com']},{entryId:'x',domains:['example.com']}];
-const sender=(o={})=>({id:ID,tab:{id:1},url:'https://github.com/sessions/two-factor',frameId:0,...o}),msg={type:'otpanda-fill-request'};
+const sender=(o={})=>({id:ID,tab:{id:1,active:true},url:'https://github.com/sessions/two-factor',frameId:0,...o}),msg={type:'otpanda-fill-request'};
 const code=(entryId,o={})=>({entryId,code:'123456',receivedAt:NOW-1000,expiresAt:NOW+60000,...o});
 const run=(codes,o={})=>handleFillRequest({message:msg,sender:sender(),entries,codes,clock:()=>NOW,extensionId:ID,...o});
 test('one eligible entry with a fresh code releases it to the requesting frame only',async()=>{
@@ -19,3 +19,10 @@ test('stale, future, expired, mismatched or malformed codes are never released; 
  const r=await run(async id=>code(id));assert.deepEqual(r,{status:'ambiguous',count:2});assert.equal(r.code,undefined);
  assert.equal((await run(async()=>{throw new Error('x');})).status,'none');
 });
+
+test('a background tab or a non-active document (prerender, cached) gets nothing',async()=>{
+ for(const s of [sender({tab:{id:1,active:false}}),sender({tab:{id:1}}),sender({documentLifecycle:'prerender'}),sender({documentLifecycle:'cached'})]){
+  let read=0;const r=await handleFillRequest({message:msg,sender:s,entries:async()=>{read++;return[]},codes:async()=>{read++},clock:Date.now,extensionId:ID});assert.deepEqual(r,{status:'none'});assert.equal(read,0);
+ }
+});
+test('network delay or another candidate read cannot release a code after its expiry',async()=>{let t=NOW;const r=await run(async id=>{if(id==='gh'){t=NOW+70000;return code('gh');}return undefined;},{clock:()=>t});assert.deepEqual(r,{status:'none'});t=NOW;const r2=await run(async id=>{if(id==='gh')return code('gh');t=NOW+70000;return undefined;},{clock:()=>t});assert.deepEqual(r2,{status:'none'});});
