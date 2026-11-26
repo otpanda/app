@@ -1906,7 +1906,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 semanticLabel: 'OTPanda',
               ),
               const SizedBox(width: 10),
-              const Text('OTPanda'),
+              const Flexible(
+                child: Text('OTPanda', overflow: TextOverflow.ellipsis),
+              ),
             ],
           ),
         ),
@@ -1945,7 +1947,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 semanticLabel: 'OTPanda',
               ),
               const SizedBox(width: 10),
-              const Text('OTPanda'),
+              const Flexible(
+                child: Text('OTPanda', overflow: TextOverflow.ellipsis),
+              ),
             ],
           ),
           actions: [
