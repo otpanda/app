@@ -38,7 +38,7 @@ jobs:
           script: |
             export PATH="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1):$PATH"
             bash tool/android-applink-lifecycle.sh candidate/otpanda-android-fdroid-native-candidate.apk applink-out
-            aapt dump badging candidate/otpanda-android-google-native-candidate.apk > applink-out/google-package.txt
+            "$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)" dump badging candidate/otpanda-android-google-native-candidate.apk > applink-out/google-package.txt
             adb install -r candidate/otpanda-android-google-native-candidate.apk > applink-out/google-install.txt
             adb shell am force-stop app.otpanda
             adb shell am start -W -n app.otpanda/.MainActivity > applink-out/google-launch.txt
