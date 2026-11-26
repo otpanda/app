@@ -94,6 +94,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   bool passkeysOpen = false;
   bool securityRequested = false;
   bool securityLoading = false;
+  bool securityFailed = false;
   // Live updates for the security status: one shared-socket subscription while an
   // Account & security page is shown. A hint carries no data; it only asks for the
   // ordinary authenticated status read, coalesced to one in flight plus one trailing.
@@ -143,7 +144,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       if (!direct) {
         workspace.suspend(preserve: true);
         rememberView(4);
-        unawaited(refresh());
+        // The restored workspace already holds session/header identity.
+        // Each category owns its reads when shown; the hub needs none.
       }
     }
   }
@@ -168,7 +170,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       passkeysOpen = false;
     });
     navigated(settingsHubRoute);
-    refresh();
   }
 
   void leaveSettings() {
@@ -543,12 +544,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     if (overview != null && status == 'restored' && mounted) {
       // Already held but possibly old: the Account page shows security
       // status, so read it again without the loading bar.
-      final at = overviewFetchedAt;
+      if (overviewInFlightRevision == revision) return;
       overviewFetchedAt = null;
-      if (at != null &&
-          DateTime.now().difference(at) < const Duration(seconds: 5)) {
-        return;
-      }
       final attempt = revision;
       try {
         await fetchOverview(attempt);
@@ -659,12 +656,17 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     // a copy older than a day. A fresh cached header needs no request.
     // Security status (passkeys, Google, recovery) is read live whenever the
     // Account page shows, so a copy already held needs no read on open.
+    final categoryDoesNotNeedOverview =
+        widget.navigation != null &&
+        (accountOpen || !widget.workspaceEnabled) &&
+        settingsCategory != SettingsCategory.account;
     final skip =
+        categoryDoesNotNeedOverview ||
         !forceOverview &&
-        accountPagesShown == 0 &&
-        (overview != null ||
-            cachedProfile?.isFresh(DateTime.now().millisecondsSinceEpoch) ==
-                true);
+            accountPagesShown == 0 &&
+            (overview != null ||
+                cachedProfile?.isFresh(DateTime.now().millisecondsSinceEpoch) ==
+                    true);
     if (!skip) {
       if (widget.workspaceEnabled && !accountOpen) {
         try {
@@ -676,7 +678,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         await fetchOverview(attempt);
       }
     }
-    forceOverview = false;
+    if (!skip) forceOverview = false;
     if (!mounted || attempt != revision || status != 'restored') return;
     // Entries and organization are only shown by the Organization category,
     // so the settings hub loads them there, not on every open.
@@ -834,6 +836,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       listenSecurity(catchUp: false);
     }
     securityLoading = true;
+    securityFailed = false;
     try {
       final value = jsonDecode(
         await (bridge as AuthEntryBridge).security('status'),
@@ -851,9 +854,15 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       }
       setState(() {
         securityInfo = value;
+        securityFailed = false;
         securityOpen = true;
         rememberView(5);
       });
+    } catch (_) {
+      if (mounted && epoch == organizationEpoch && status == 'restored') {
+        setState(() => securityFailed = true);
+      }
+      rethrow;
     } finally {
       securityLoading = false;
       if (securityTrailing) drainSecurityHint();
@@ -935,6 +944,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     resetIdentity();
     securityInfo = null;
     securityRequested = false;
+    securityFailed = false;
     stopSecurityListening();
     settingChange = null;
     organizationEpoch++;
@@ -1397,19 +1407,18 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
 
   List<Widget> protectionItems() {
     if (bridge is! AuthEntryBridge) return const [];
-    if (securityInfo == null && !securityRequested) {
-      securityRequested = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!mounted) return;
-        try {
-          await loadSecurity();
-        } catch (_) {
-          /* The automatic check retries. */
-        }
-      });
-    }
     return [
-      if (securityInfo == null)
+      if (securityInfo == null && securityFailed)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Extra verification on new devices'),
+          subtitle: const Text('Verification settings could not load.'),
+          trailing: TextButton(
+            onPressed: securityLoading ? null : refreshSecurity,
+            child: const Text('Retry'),
+          ),
+        )
+      else if (securityInfo == null)
         const SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: Text('Extra verification on new devices'),
@@ -1418,6 +1427,16 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
           onChanged: null,
         )
       else ...[
+        if (securityFailed)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Verification settings could not refresh.'),
+            subtitle: const Text('The last checked state is shown.'),
+            trailing: TextButton(
+              onPressed: securityLoading ? null : refreshSecurity,
+              child: const Text('Retry'),
+            ),
+          ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Extra verification on new devices'),
@@ -1737,8 +1756,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       onShown: () {
                         accountPagesShown++;
                         ensureOverview();
-                        // Coming back to the page re-reads the status now; the
-                        // very first visit is loaded by protectionItems.
+                        if (!securityRequested) {
+                          securityRequested = true;
+                          unawaited(refreshSecurity());
+                        }
+                        // The first status read starts above only when shown.
+                        // Returning listens and catches up without a second first read.
                         listenSecurity();
                         if (securityInfo != null &&
                             status == 'restored' &&

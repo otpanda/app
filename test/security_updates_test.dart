@@ -109,6 +109,32 @@ Future<void> open(
 
 void main() {
   testWidgets(
+    'first security read failure leaves a retry state, not a loading skeleton',
+    (t) async {
+      final b = SecurityBridge()
+        ..status = 'restored'
+        ..clockNow = 100000
+        ..fail = true;
+      await open(t, b);
+      expect(
+        find.text('Verification settings could not load.'),
+        findsOneWidget,
+      );
+      final before = b.checks;
+      b.fail = false;
+      await t.tap(find.text('Retry'));
+      await t.pumpAndSettle();
+      expect(b.checks, before + 1);
+      expect(find.text('Verification settings could not load.'), findsNothing);
+      expect(
+        t.widget<SwitchListTile>(find.byType(SwitchListTile).first).value,
+        isTrue,
+      );
+      await t.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
     'security hints update the page at once; the 30s fallback is unchanged',
     (t) async {
       final b = SecurityBridge()
@@ -138,6 +164,10 @@ void main() {
       await t.pump(const Duration(seconds: 2));
       await t.pumpAndSettle();
       expect(find.text('New-device sign-in request'), findsOneWidget);
+      expect(
+        find.text('Verification settings could not refresh.'),
+        findsOneWidget,
+      );
       b.fail = false;
       b.pending = [];
       b.hint('connect'); // reconnect closes the gap
