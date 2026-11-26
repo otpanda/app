@@ -69,20 +69,33 @@ void main() {
     }
   });
 
-  test(
-    '7 digits cannot even be constructed, so it can never reach the encoder',
-    () {
-      expect(
-        () => OtpAccount(
-          issuer: null,
-          accountName: 'x',
-          secret: Uint8List(20),
-          digits: 7,
-        ),
-        fails(OtpFormatError.unsupportedDigits),
-      );
-    },
-  );
+  test('7 digits are valid, but only an otpauth/Aegis/Bitwarden export can carry them', () {
+    final a = OtpAccount(
+      issuer: null,
+      accountName: 'x',
+      secret: Uint8List(20)..[0] = 1,
+      digits: 7,
+    );
+    expect(a.digits, 7);
+    expect(isMigrationRepresentable(a), isFalse);
+    final plan = planMigrationExport([a]);
+    expect(plan.google, isEmpty);
+    expect(plan.otpauthOnly, [a]);
+    expect(
+      () => encodeMigrationUris([a], batchId: 1),
+      fails(OtpFormatError.notRepresentable),
+    );
+    expect(parseOtpauthUri(encodeOtpauthUri(a)).digits, 7);
+    expect(
+      () => OtpAccount(
+        issuer: null,
+        accountName: 'x',
+        secret: Uint8List(20),
+        digits: 9,
+      ),
+      fails(OtpFormatError.unsupportedDigits),
+    );
+  });
 
   test(
     'an unspecified entry type is skipped as unsupported, not read as TOTP',

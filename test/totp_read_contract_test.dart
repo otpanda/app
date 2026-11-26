@@ -30,11 +30,16 @@ void main() {
     final c = GeneratedTotp.fromJson(record());
     expect(c.value, '001234');
     expect(c.serverNow, 59000);
+    expect(
+      GeneratedTotp.fromJson({...record(), 'code': '0000001'}).value,
+      '0000001',
+    );
     expect(c.toString(), 'GeneratedTotp(redacted)');
     for (final change in <Map<String, dynamic>>[
       {'entryId': ''},
       {'entryId': 'bad id'},
-      {'code': '1234567'},
+      {'code': '12345'},
+      {'code': '123456789'},
       {'code': null},
       {'period': '30'},
       {'period': 30.5},

@@ -7,7 +7,7 @@ import 'otp_account.dart';
 /// Google Authenticator "otpauth-migration://offline?data=BASE64_PROTOBUF"
 /// transfer format (MigrationPayload). Accounts only; TOTP only.
 ///
-/// The format cannot carry a period or 7 digits. Import therefore maps to the
+/// The format cannot carry a period or 7 digits (6 and 8 only). Import therefore maps to the
 /// standard 30 s period, and export REFUSES accounts it cannot represent
 /// exactly instead of silently changing them. HOTP and MD5 entries are refused.
 const maxMigrationUriLength = 16384, maxAccountsPerBatch = 50;

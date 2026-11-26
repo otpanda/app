@@ -90,7 +90,7 @@ final class OtpAccount {
     if (secret.length < minSecretBytes || secret.length > maxSecretBytes) {
       throw const OtpFormatException(OtpFormatError.badSecret);
     }
-    if (digits != 6 && digits != 8) {
+    if (digits < 6 || digits > 8) {
       throw const OtpFormatException(OtpFormatError.unsupportedDigits);
     }
     if (period < 1 || period > 86400) {

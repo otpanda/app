@@ -147,7 +147,7 @@ void main() {
       final cases = <String, OtpFormatError>{
         'otpauth://hotp/X:a?secret=$rfcB32&counter=1':
             OtpFormatError.unsupportedType,
-        'otpauth://totp/X:a?secret=$rfcB32&digits=7':
+        'otpauth://totp/X:a?secret=$rfcB32&digits=9':
             OtpFormatError.unsupportedDigits,
         'otpauth://totp/X:a?secret=$rfcB32&algorithm=MD5':
             OtpFormatError.unsupportedAlgorithm,
@@ -183,7 +183,7 @@ void main() {
       expect(a.toString(), isNot(contains('GEZD')));
       expect('$a', 'OtpAccount(redacted)');
       try {
-        parseOtpauthUri('otpauth://totp/X:a?secret=$rfcB32&digits=7');
+        parseOtpauthUri('otpauth://totp/X:a?secret=$rfcB32&digits=9');
       } catch (e) {
         expect(e.toString(), isNot(contains('GEZD')));
       }
