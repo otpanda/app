@@ -360,6 +360,63 @@ void main() {
     expect(b.organizationReads, 2);
   });
 
+  testWidgets('failed initial restore then two Account entries each read', (
+    t,
+  ) async {
+    final b = FlakyOverviewBridge()
+      ..status = 'restored'
+      ..clockNow = 100000
+      ..failWith = 503;
+    await pump(t, b, navigation: 'settings/account-security');
+    int reads() => b.paths.where((p) => p == '/v1/manage/account').length;
+    expect(reads(), 1);
+    for (var visit = 1; visit <= 2; visit++) {
+      await t.tap(find.byTooltip('Back to settings'));
+      await t.pumpAndSettle();
+      b.failWith = null;
+      await t.tap(find.text('Account & security'));
+      await t.pumpAndSettle();
+      expect(reads(), visit + 1);
+    }
+  });
+
+  testWidgets('category change drops a pending appearance read credit', (
+    t,
+  ) async {
+    final b = CountingBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings');
+    final dynamic state = t.state(find.byType(BrowserAccountPage));
+    // Model the exact gap between restoration completion and onShown.
+    state.applyRoute('settings/account-security', direct: true);
+    await state.refresh();
+    final before = b.paths.where((p) => p == '/v1/manage/account').length;
+    state.applyRoute('settings', direct: true);
+    state.applyRoute('settings/account-security', direct: true);
+    await state.ensureOverview();
+    expect(b.paths.where((p) => p == '/v1/manage/account').length, before + 1);
+  });
+
+  testWidgets('identity reset drops a pending appearance read credit', (
+    t,
+  ) async {
+    final b = CountingBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await pump(t, b, navigation: 'settings');
+    final dynamic state = t.state(find.byType(BrowserAccountPage));
+    state.applyRoute('settings/account-security', direct: true);
+    await state.refresh();
+    state.resetIdentity();
+    await state.refresh();
+    final before = b.paths.where((p) => p == '/v1/manage/account').length;
+    await state.ensureOverview(); // consumes only this identity's restore
+    expect(b.paths.where((p) => p == '/v1/manage/account').length, before);
+    await state.ensureOverview(); // next genuine appearance must read
+    expect(b.paths.where((p) => p == '/v1/manage/account').length, before + 1);
+  });
+
   testWidgets('Account page reads the overview each time it shows', (t) async {
     final b = CountingBridge()
       ..status = 'restored'
