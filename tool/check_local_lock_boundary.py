@@ -21,3 +21,10 @@ assert 'final saved = await platform.enabled();' in dart
 assert 'java.net.CookieHandler.getDefault() != null' in transport
 assert transport.index('sent = true') < transport.index('output.use')
 print('PASS native local-lock composed source boundary guard (not OS evidence)')
+# Test-only root injection must never become a production entry point.
+import re
+for path in (root / 'lib').rglob('*.dart'):
+    if path.name == 'native_root_io.dart':
+        continue
+    assert not re.search(r'buildAndroidNativeRootForTest|sessionOverride|requestOverride', path.read_text()), str(path)
+print('PASS test-only root injection excluded from other production sources')
