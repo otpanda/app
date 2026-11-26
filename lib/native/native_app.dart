@@ -20,7 +20,9 @@ class NativeApp extends StatelessWidget {
     this.signedInBuilder,
     this.authBridge,
     this.appWrapper,
+    this.navigatorObservers = const [],
   });
+  final List<NavigatorObserver> navigatorObservers;
   final Widget Function(BuildContext, Widget)? appWrapper;
   final NativeSessionController controller;
   final bool googleAvailable;
@@ -36,6 +38,7 @@ class NativeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'OTPanda',
+    navigatorObservers: navigatorObservers,
     debugShowCheckedModeBanner: false,
     theme: otpandaTheme(),
     builder: (context, child) => appWrapper?.call(context, child!) ?? child!,

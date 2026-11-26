@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/native/native_app_lock.dart';
+import 'package:otpanda_client/native/native_navigation.dart';
 
 class Fake implements LocalLockPlatform {
   bool saved = false, allow = true, fail = false;
@@ -28,6 +29,68 @@ class Fake implements LocalLockPlatform {
 }
 
 void main() {
+  testWidgets(
+    'actual MaterialApp builder lock blocks hidden dialog and account history Back',
+    (t) async {
+      final p = Fake()..saved = true;
+      final c = LocalLockController(p);
+      final h = NativeNavigationHistory();
+      final observer = LockNavigationObserver(c);
+      c.addListener(() => h.blocked = !c.ready || c.locked);
+      final nav = GlobalKey<NavigatorState>();
+      await t.pumpWidget(
+        MaterialApp(
+          navigatorKey: nav,
+          navigatorObservers: [observer],
+          builder: (context, child) =>
+              NativeAppLock(controller: c, child: child!),
+          home: NativeNavigation(
+            history: h,
+            builder: (context, route, navigate) => Scaffold(body: Text(route)),
+          ),
+        ),
+      );
+      await t.pump();
+      await c.unlock();
+      await t.pump();
+      h.navigate('settings');
+      await t.pump();
+      showDialog<void>(
+        context: nav.currentContext!,
+        builder: (_) => const AlertDialog(content: Text('hidden-dialog')),
+      );
+      await t.pumpAndSettle();
+      c.background();
+      await t.pump();
+      await t.binding.handlePopRoute();
+      await t.pump();
+      expect(h.route, 'settings');
+      expect(nav.currentState!.canPop(), true);
+      c.resume();
+      await c.unlock();
+      await t.pumpAndSettle();
+      expect(find.text('hidden-dialog'), findsOneWidget);
+      await t.binding.handlePopRoute();
+      await t.pumpAndSettle();
+      expect(h.route, 'settings');
+      c.background();
+      await t.pump();
+      await t.binding.handlePopRoute();
+      await t.pump();
+      expect(h.route, 'settings');
+      c.resume();
+      await c.unlock();
+      await t.pump();
+      await t.binding.handlePopRoute();
+      await t.pumpAndSettle();
+      expect(h.route, 'codes');
+      await t.pumpWidget(const SizedBox());
+      observer.dispose();
+      h.dispose();
+      c.dispose();
+    },
+  );
+
   test(
     'OS prompt may pause app and finish before resumed without deadlock',
     () async {
@@ -102,12 +165,14 @@ void main() {
     (t) async {
       final p = Fake()..saved = true;
       final c = LocalLockController(p);
+      final observer = LockNavigationObserver(c);
+      addTearDown(observer.dispose);
       await t.pumpWidget(
         MaterialApp(
-          home: NativeAppLock(
-            controller: c,
-            child: const Scaffold(body: Text('private-code')),
-          ),
+          navigatorObservers: [observer],
+          builder: (context, child) =>
+              NativeAppLock(controller: c, child: child!),
+          home: const Scaffold(body: Text('private-code')),
         ),
       );
       await t.pump();

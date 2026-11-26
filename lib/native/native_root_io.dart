@@ -64,6 +64,11 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   final passkeys = AndroidPasskeySource();
   bool ready = false;
   final localLock = LocalLockController(ChannelLocalLock());
+  late final lockNavigation = LockNavigationObserver(localLock);
+  void _lockChanged() {
+    navigationHistory.blocked = !localLock.ready || localLock.locked;
+  }
+
   final navigationHistory = NativeNavigationHistory();
   late final NativeStartupRecovery startup;
   late final NativeDevicesService devices;
@@ -72,6 +77,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    localLock.addListener(_lockChanged);
     WidgetsBinding.instance.addObserver(this);
     controller = NativeSessionController(
       NativeAuth(
@@ -180,6 +186,8 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     devices.dispose();
     bridge.disposeRealtime();
     navigationHistory.dispose();
+    localLock.removeListener(_lockChanged);
+    lockNavigation.dispose();
     localLock.dispose();
     super.dispose();
   }
@@ -187,6 +195,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) => ready
       ? NativeApp(
+          navigatorObservers: [lockNavigation],
           appWrapper: (context, child) =>
               NativeAppLock(controller: localLock, child: child),
           controller: controller,

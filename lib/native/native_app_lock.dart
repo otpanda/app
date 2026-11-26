@@ -169,33 +169,30 @@ class _NativeAppLockState extends State<NativeAppLock>
             Offstage(offstage: hide, child: widget.child),
             if (hide)
               Positioned.fill(
-                child: PopScope(
-                  canPop: false,
-                  child: Material(
-                    color: const Color(0xfff3f7f5),
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.lock_outline, size: 44),
-                          const SizedBox(height: 16),
-                          const Text('OTPanda is locked'),
-                          if (c.error != null) Text(c.error!),
-                          const SizedBox(height: 16),
-                          FilledButton(
-                            onPressed: c.busy
-                                ? null
-                                : () => c.ready ? c.unlock() : c.load(),
-                            child: Text(
-                              c.busy
-                                  ? 'Checking...'
-                                  : c.ready
-                                  ? 'Device unlock'
-                                  : 'Retry',
-                            ),
+                child: Material(
+                  color: const Color(0xfff3f7f5),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.lock_outline, size: 44),
+                        const SizedBox(height: 16),
+                        const Text('OTPanda is locked'),
+                        if (c.error != null) Text(c.error!),
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: c.busy
+                              ? null
+                              : () => c.ready ? c.unlock() : c.load(),
+                          child: Text(
+                            c.busy
+                                ? 'Checking...'
+                                : c.ready
+                                ? 'Device unlock'
+                                : 'Retry',
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -229,4 +226,64 @@ class LocalLockSetting extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// Registers a veto on every actual Navigator route, including dialogs. The
+/// visual curtain lives above Navigator and cannot own a PopScope itself.
+class LockNavigationObserver extends NavigatorObserver {
+  LockNavigationObserver(this.controller) {
+    controller.addListener(_changed);
+  }
+  final LocalLockController controller;
+  final entries = <Route<dynamic>, _LockPopEntry>{};
+  bool get blocked => !controller.ready || controller.locked;
+  void _changed() {
+    for (final e in entries.values) {
+      e.canPopNotifier.value = !blocked;
+    }
+  }
+
+  void _add(Route<dynamic> route) {
+    if (route is ModalRoute<dynamic>) {
+      final e = _LockPopEntry(!blocked);
+      entries[route] = e;
+      route.registerPopEntry(e);
+    }
+  }
+
+  void _remove(Route<dynamic> route) {
+    final e = entries.remove(route);
+    if (e != null) {
+      if (route is ModalRoute<dynamic>) route.unregisterPopEntry(e);
+      e.canPopNotifier.dispose();
+    }
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _add(route);
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _remove(route);
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _remove(route);
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    if (oldRoute != null) _remove(oldRoute);
+    if (newRoute != null) _add(newRoute);
+  }
+
+  void dispose() {
+    controller.removeListener(_changed);
+    for (final r in entries.keys.toList()) {
+      _remove(r);
+    }
+  }
+}
+
+class _LockPopEntry extends PopEntry<dynamic> {
+  _LockPopEntry(bool allowed) : canPopNotifier = ValueNotifier(allowed);
+  @override
+  final ValueNotifier<bool> canPopNotifier;
 }
