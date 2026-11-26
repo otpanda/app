@@ -417,6 +417,7 @@ class _Browser
   @override
   Future<void> start(String mode) async {
     await _session.start(mode.toJS).toDart;
+    // Every non-restore start is an API navigation, not an in-place ceremony.
     if (mode != 'restore') await _session.waitForAuthNavigation().toDart;
   }
 

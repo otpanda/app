@@ -107,10 +107,14 @@ void main() {
         expect(find.byType(GoogleSignInButton), findsOneWidget);
         expect(find.byType(CircularProgressIndicator), findsOneWidget);
         expect(find.byType(LinearProgressIndicator), findsNothing);
-        await expectLater(
-          find.byType(MaterialApp),
-          matchesGoldenFile('goldens/auth_pending_$mode.png'),
-        );
+        // Readable golden rasterization is Linux-specific; functional state
+        // assertions above run unchanged on every supported desktop platform.
+        if (Platform.isLinux) {
+          await expectLater(
+            find.byType(MaterialApp),
+            matchesGoldenFile('goldens/auth_pending_$mode.png'),
+          );
+        }
         b.wait.complete();
         await t.pump();
         await t.pumpWidget(app());
