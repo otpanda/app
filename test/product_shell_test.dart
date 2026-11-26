@@ -792,6 +792,37 @@ void main() {
     );
   });
 
+  testWidgets('desktop top bar aligns the search with the content below', (
+    t,
+  ) async {
+    await pump(t, FakeTransport(routes()));
+    t.view.physicalSize = const Size(1600, 900);
+    await t.pumpAndSettle();
+    final bar = find.byKey(const Key('product-top-bar'));
+    final field = find.descendant(of: bar, matching: find.byType(TextField));
+    expect(field, findsOneWidget);
+    // The body is a centered 1100-wide grid: a 232-wide nav column, the
+    // content column, then a 24-wide right gap. The header mirrors it.
+    const gridLeft = (1600 - 1100) / 2;
+    const gridRight = gridLeft + 1100;
+    // The search fills the content column from its left edge.
+    expect(t.getTopLeft(field).dx, gridLeft + 232);
+    // The brand aligns with the first nav tile below it.
+    final tile = find.widgetWithText(ListTile, 'Codes');
+    final logo = find.descendant(of: bar, matching: find.byType(Image));
+    expect(t.getTopLeft(logo).dx, t.getTopLeft(tile).dx);
+    expect(t.getTopLeft(logo).dx, gridLeft + 24);
+    // The account button ends at the content column's right edge.
+    final account = find.descendant(of: bar, matching: find.byType(IconButton));
+    expect(account, findsOneWidget);
+    expect(t.getTopRight(account).dx, gridRight - 24);
+    // Narrower desktop: the grid stops centering and hugs the left edge.
+    t.view.physicalSize = const Size(800, 900);
+    await t.pumpAndSettle();
+    expect(t.getTopLeft(field).dx, 232);
+    expect(t.getTopLeft(logo).dx, 24);
+  });
+
   // The sources are read from the composed header right after the first
   // frame. No further frame is pumped, so the test never depends on when the
   // test HTTP client fails an image request.

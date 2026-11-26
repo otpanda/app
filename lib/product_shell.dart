@@ -737,6 +737,28 @@ class _ProductShellState extends State<ProductShell> {
       final content = widget.pageReload == null
           ? list
           : PullToRefresh(onRefresh: pull, child: list);
+      final accountButton = IconButton(
+        tooltip: 'Account & security',
+        onPressed: widget.onOpenAccount,
+        icon: widget.profileEmail == null
+            ? const SizedBox(
+                key: ValueKey('home-profile-loading'),
+                width: 32,
+                height: 32,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: line,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              )
+            : ProfileAvatar(
+                key: ValueKey(widget.profileEmail),
+                email: widget.profileEmail!,
+                googlePicture: widget.profilePicture,
+                size: 32,
+              ),
+      );
       return Scaffold(
         floatingActionButton: _canAddTotp
             ? FloatingActionButton.extended(
@@ -754,68 +776,74 @@ class _ProductShellState extends State<ProductShell> {
               Container(
                 key: const Key('product-top-bar'),
                 height: desktop ? 76 : 64,
-                padding: EdgeInsets.symmetric(horizontal: desktop ? 32 : 16),
+                padding: desktop
+                    ? EdgeInsets.zero
+                    : const EdgeInsets.symmetric(horizontal: 16),
                 decoration: const BoxDecoration(
                   color: Colors.white,
                   border: Border(bottom: BorderSide(color: line)),
                 ),
-                child: Row(
-                  children: [
-                    Image.memory(ottyImage, width: 42, height: 42),
-                    if (desktop) ...[
-                      const SizedBox(width: 8),
-                      const Text(
-                        'OTPanda',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontFamily: 'BricolageGrotesque',
-                          fontSize: 23,
-                          letterSpacing: -1,
-                          color: ink,
-                        ),
-                      ),
-                    ],
-                    SizedBox(width: desktop ? 32 : 10),
-                    Expanded(
-                      child: Align(
-                        alignment: desktop
-                            ? Alignment.centerLeft
-                            : Alignment.center,
+                // Desktop mirrors the content grid below: the brand sits over
+                // the 232-wide nav column, the search fills the content
+                // column, and the account button ends at the content column's
+                // right edge.
+                child: desktop
+                    ? Center(
                         child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: desktop ? 560 : double.infinity,
-                          ),
-                          child: phase == _Phase.loaded && searchable
-                              ? searchField(!desktop)
-                              : const SizedBox.shrink(),
-                        ),
-                      ),
-                    ),
-                    SizedBox(width: desktop ? 16 : 6),
-                    IconButton(
-                      tooltip: 'Account & security',
-                      onPressed: widget.onOpenAccount,
-                      icon: widget.profileEmail == null
-                          ? const SizedBox(
-                              key: ValueKey('home-profile-loading'),
-                              width: 32,
-                              height: 32,
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: line,
-                                  shape: BoxShape.circle,
+                          constraints: const BoxConstraints(maxWidth: 1100),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 232,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(left: 24),
+                                  child: Row(
+                                    children: [
+                                      Image.memory(
+                                        ottyImage,
+                                        width: 42,
+                                        height: 42,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        'OTPanda',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontFamily: 'BricolageGrotesque',
+                                          fontSize: 23,
+                                          letterSpacing: -1,
+                                          color: ink,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            )
-                          : ProfileAvatar(
-                              key: ValueKey(widget.profileEmail),
-                              email: widget.profileEmail!,
-                              googlePicture: widget.profilePicture,
-                              size: 32,
-                            ),
-                    ),
-                  ],
-                ),
+                              Expanded(
+                                child: phase == _Phase.loaded && searchable
+                                    ? searchField(false)
+                                    : const SizedBox.shrink(),
+                              ),
+                              const SizedBox(width: 8),
+                              accountButton,
+                              const SizedBox(width: 24),
+                            ],
+                          ),
+                        ),
+                      )
+                    : Row(
+                        children: [
+                          Image.memory(ottyImage, width: 42, height: 42),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: phase == _Phase.loaded && searchable
+                                ? searchField(true)
+                                : const SizedBox.shrink(),
+                          ),
+                          const SizedBox(width: 6),
+                          accountButton,
+                        ],
+                      ),
               ),
               Expanded(
                 child: Center(
