@@ -17,6 +17,8 @@ def write(path, data):
 def icon(path,size): write(path,base64.b64decode(ICONS[size]))
 description='OTPanda development preview. Explore a private code workspace with fictional accounts and codes. Real sign-in and sources are not connected yet.'
 for stale in Path('web').glob('otty-favicon-v2-*.png'): stale.unlink()
+for name in ['social-preview.png','icons/apple-touch-icon.png','icons/Icon-192.png','icons/Icon-512.png','icons/Icon-maskable-192.png','icons/Icon-maskable-512.png']:
+ Path('web',name).unlink(missing_ok=True)
 FAVICONS = _payload['favicons']
 for size,data in FAVICONS.items(): write(f'web/otty-favicon-v3-{size}.png',base64.b64decode(data))
 write('web/favicon.png',base64.b64decode(FAVICONS[32]))
