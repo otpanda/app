@@ -24,6 +24,12 @@ jobs:
             curl -fLsS "https://github.com/otpanda/app/releases/download/v0.1.0-alpha.$version/otpanda-android-google-v0.1.0-alpha.$version.apk" -o "apks/alpha$version.apk"
           done
           sha256sum apks/* | tee upgrade-out/download-sha256.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-android
+          run-id: 45843716589
+          github-token: ${{ github.token }}
+          path: original-alpha6
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

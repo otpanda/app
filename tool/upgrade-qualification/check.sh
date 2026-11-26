@@ -13,3 +13,7 @@ for old in 5 6;do
  adb exec-out screencap -p > "upgrade-out/upgraded-$old-to7.png"
  adb logcat -d > "upgrade-out/logcat-$old-to7.txt"
 done
+
+adb uninstall app.otpanda || true
+adb install original-alpha6/otpanda-android-google-native-candidate.apk 2>&1 | tee upgrade-out/install-original-alpha6.txt
+adb install -r apks/alpha7.apk 2>&1 | tee upgrade-out/original-alpha6-to-alpha7-rejection.txt
