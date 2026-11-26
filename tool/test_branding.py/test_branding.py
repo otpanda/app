@@ -18,8 +18,8 @@ for size in (16,32,64,128,256,512,1024):
  b=Path(f'macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_{size}.png').read_bytes();assert struct.unpack('>II',b[16:24])==(size,size)
 print('Branding metadata and generated image dimensions verified')
 
-assert 'otty-favicon-v2-16.png' in html and 'otty-favicon-v2-32.png' in html
+assert 'otty-favicon-v3-16.png' in html and 'otty-favicon-v3-32.png' in html
 for size in (16,32):
- b=Path(f'web/otty-favicon-v2-{size}.png').read_bytes();assert struct.unpack('>II',b[16:24])==(size,size)
+ b=Path(f'web/otty-favicon-v3-{size}.png').read_bytes();assert struct.unpack('>II',b[16:24])==(size,size)
  # PNG color type6 is RGBA; no opaque canvas is added to favicon art.
  assert b[25]==6
