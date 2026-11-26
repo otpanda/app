@@ -1,0 +1,25 @@
+import { readFile, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+const root = process.argv[2];
+if (!root) throw Error('Candidate directory required');
+const m = JSON.parse(await readFile(path.join(root, 'manifest.json'), 'utf8'));
+const key = (await readFile(new URL('./chromium-public-key.txt', import.meta.url), 'utf8')).trim();
+assert.equal(m.key, key);
+const id = [...createHash('sha256').update(Buffer.from(key, 'base64')).digest('hex').slice(0, 32)].map(h => String.fromCharCode(97 + parseInt(h, 16))).join('');
+assert.equal(id, 'dahkpedanfmbhdocgmcchcdhifkbbien');
+assert.deepEqual(m.permissions, ['identity', 'storage', 'scripting']);
+assert.deepEqual(m.host_permissions, ['https://otpanda-api.abrahammurciano.workers.dev/*']);
+assert.deepEqual(m.optional_host_permissions, ['https://*/*']);
+assert.equal(m.content_scripts, undefined);
+assert.equal(m.externally_connectable, undefined);
+assert.equal(m.web_accessible_resources, undefined);
+assert.equal(m.update_url, undefined);
+assert.equal(m.content_security_policy.extension_pages, "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; connect-src 'self' https://otpanda-api.abrahammurciano.workers.dev https://api.2fa.directory wss://otpanda-api.abrahammurciano.workers.dev; base-uri 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-src 'none'; worker-src 'self'");
+assert.ok((await readFile(path.join(root, 'index.html'), 'utf8')).includes('<base href="./">'));
+await readFile(path.join(root, 'autofill/content.js'));
+async function audit(dir) { for (const e of await readdir(dir, {withFileTypes:true})) { assert.ok(!/^(test|e2e|node_modules)$/.test(e.name) && !/\.test\.[cm]?js$/.test(e.name), 'Test/dependency file in package: '+e.name); if(e.isDirectory()) await audit(path.join(dir,e.name)); } }
+await audit(root);
+assert.ok((await readFile(path.join(root, 'index.html'), 'utf8')).includes('autofill-permission.js'));
+console.log('Verified stable Chromium candidate ' + id + '. This does not enable its production API gate.');
