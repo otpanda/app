@@ -1,14 +1,11 @@
-// Content script (registered only for exact-host patterns). It asks for a code with an argument-free message; the service worker decides from the
-// browser-provided sender URL. It never reads or sends the page URL itself, never stores a code, and fills only when a field is present.
-import { findOtpTargets, fillTarget } from './fields.js';
-let busy=false,lastCode='';
-const visible=el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(el).visibility!=='hidden';};
-async function attempt(){
- if(busy)return;const targets=findOtpTargets(document,{visible});if(!targets.length)return;
- busy=true;
- try{const r=await chrome.runtime.sendMessage({type:'otpanda-fill-request'});
-  if(r?.status==='ok'&&r.code!==lastCode){for(const g of targets)if(fillTarget(g,r.code)){lastCode=r.code;break;}}
- }catch{/* service worker asleep or extension reloaded: do nothing */}finally{busy=false;}
-}
-new MutationObserver(()=>attempt()).observe(document,{childList:true,subtree:true});
-attempt();
+// Content script glue (registered only for exact-host patterns, built into a classic script by build-content.mjs). All decisions live in
+// content-core.js. It asks with an argument-free message, never reads the page URL, never stores a code.
+import { createContentController } from './content-core.js';
+export { MIN_GAP_MS } from './content-core.js';
+const c = createContentController({ doc: document, win: globalThis, send: () => chrome.runtime.sendMessage({ type: 'otpanda-fill-request' }) });
+new MutationObserver(() => c.attempt()).observe(document, { childList: true, subtree: true });
+document.addEventListener('visibilitychange', () => c.attempt());
+globalThis.addEventListener('focus', () => c.attempt());
+globalThis.addEventListener('pagehide', () => c.pagehide());
+globalThis.addEventListener('pageshow', () => c.pageshow());
+c.attempt();

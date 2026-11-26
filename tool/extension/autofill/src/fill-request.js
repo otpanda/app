@@ -6,15 +6,17 @@ export const FRESH_MS = 5 * 60_000;
 export async function handleFillRequest({ message, sender, entries, codes, clock = Date.now, extensionId }) {
  const none = Object.freeze({ status: 'none' });
  if (!message || message.type !== 'otpanda-fill-request' || Object.keys(message).length !== 1) return none;
- if (!sender || sender.id !== extensionId || !sender.tab || typeof sender.url !== 'string' || !Number.isSafeInteger(sender.frameId)) return none;
+ if (!sender || sender.id !== extensionId || !sender.tab || sender.tab.active !== true || (sender.documentLifecycle !== undefined && sender.documentLifecycle !== 'active') || typeof sender.url !== 'string' || !Number.isSafeInteger(sender.frameId)) return none;
  const eligible = eligibleEntries(sender.url, await entries());
  if (!eligible.length) return none;
- const now = clock(), fresh = [];
+ const fresh = [];
  for (const entryId of eligible) {
   let c; try { c = await codes(entryId); } catch { continue; }
+  const now = clock();
   if (c && c.entryId === entryId && typeof c.code === 'string' && /^[0-9A-Za-z]{4,10}$/.test(c.code) && Number.isSafeInteger(c.receivedAt) && Number.isSafeInteger(c.expiresAt) && c.expiresAt > now && c.receivedAt <= now && now - c.receivedAt <= FRESH_MS) fresh.push(c);
  }
- if (fresh.length === 0) return none;
- if (fresh.length > 1) return Object.freeze({ status: 'ambiguous', count: fresh.length });
- return Object.freeze({ status: 'ok', code: fresh[0].code, expiresAt: fresh[0].expiresAt });
+ const stillFresh = fresh.filter(c => c.expiresAt > clock());
+ if (stillFresh.length === 0) return none;
+ if (stillFresh.length > 1) return Object.freeze({ status: 'ambiguous', count: stillFresh.length });
+ return Object.freeze({ status: 'ok', code: stillFresh[0].code, expiresAt: stillFresh[0].expiresAt });
 }

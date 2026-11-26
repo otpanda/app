@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import 'browser_session_contract.dart';
 import 'main.dart' show ink, muted;
 import 'session_contract.dart';
+import 'extension_autofill.dart';
 
 /// Marker for the browser-extension popup bridge. Only that bridge says true.
 /// The popup reads the two routes an extension session is allowed
@@ -309,6 +310,11 @@ class _ExtensionPopupViewState extends State<ExtensionPopupView> {
       appBar: AppBar(
         title: title,
         actions: [
+          if (extensionAutofillAvailable)
+            TextButton(
+              onPressed: () => showExtensionAutofill(context),
+              child: const Text('Autofill'),
+            ),
           TextButton(onPressed: signOut, child: const Text('Sign out')),
         ],
       ),

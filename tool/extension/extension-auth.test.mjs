@@ -203,3 +203,60 @@ test('ticket: a forced renew after a transient failure shares the 10s backoff (n
   await t.auth.ticket(); const n = calls.filter(u => u.endsWith('/challenge')).length; await t.auth.ticket(); await t.auth.ticket();
   assert.equal(calls.filter(u => u.endsWith('/challenge')).length, n, 'no further challenge inside the backoff');
 });
+
+test('fourth GET: the worker reads exactly one strict single-entry totp-code query; the popup allowlist keeps three; no other query form passes', async () => {
+  const { TOTP_READ } = await import('./extension-auth.mjs');
+  const calls = [];
+  const { t } = await signedIn(async (u, o) => { calls.push(u); if (u.endsWith('/exchange')) return R(200, { device_id: 'dev_t', access: 'tok1', access_expires_at: 1e12 + 300000 }); if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_t', nonce: 'n', expires_at: 5 }); if (u.endsWith('/renew')) return R(200, { access: 'tok2', access_expires_at: 1e12 + 600000 }); if (u.includes('/v1/manage/totp-code')) return R(200, { entryId: 'x' }); return R(404); });
+  const before = calls.length;
+  const ok = await t.auth.readInternal('/v1/manage/totp-code?entry=abc_DEF-1');
+  assert.equal(ok.status, 200); assert.ok(calls.slice(before).some(u => u === API + '/v1/manage/totp-code?entry=abc_DEF-1'));
+  const n = calls.length;
+  for (const bad of ['/v1/manage/totp-code', '/v1/manage/totp-code?entry=', '/v1/manage/totp-code?entry=a&x=1', '/v1/manage/totp-code?x=1&entry=a', '/v1/manage/totp-code?entry=a%2Fb', '/v1/manage/totp-code?entry=a b', '/v1/manage/totp-code?entry=' + 'x'.repeat(129), '/v1/manage/totp-code/?entry=a', '/v1/manage/totp?entry=a', '/v1/manage/totp/begin', '/v1/manage/session', '/v1/manage/unassigned', '/v1/manage/sources', 5, null]) {
+    const r = await t.auth.readInternal(bad); assert.equal(r.status, 503, String(bad)); assert.equal(r.unsupported, true);
+  }
+  assert.equal(calls.length, n, 'refused paths make no network call');
+  assert.ok(TOTP_READ.test('/v1/manage/totp-code?entry=A') && !TOTP_READ.test('/v1/manage/totp-code?entry=A\n'));
+  const { READ_PATHS } = await import('./extension-auth.mjs'); assert.equal(READ_PATHS.length, 3);
+});
+test('totp read: a 429 passes Retry-After (seconds, capped at an hour) to the caller and the final 401 never signs out', async () => {
+  const mkNet = f => async (u, o) => { if (u.endsWith('/exchange')) return R(200, { device_id: 'dev_t', access: 'tok1', access_expires_at: 1e12 + 300000 }); if (u.endsWith('/challenge')) return R(200, { device_id: 'dev_t', nonce: 'n', expires_at: 5 }); if (u.endsWith('/renew')) return R(200, { access: 'tok2', access_expires_at: 1e12 + 600000 }); return f(u, o); };
+  let { t } = await signedIn(mkNet(() => ({ status: 429, headers: new Map([['retry-after', '45']]), text: async () => '{}', json: async () => ({}) })));
+  assert.deepEqual(await t.auth.readInternal('/v1/manage/totp-code?entry=a'), { status: 429, body: '{}', retryAfter: 45 });
+  ({ t } = await signedIn(mkNet(() => ({ status: 429, headers: new Map([['retry-after', '999999']]), text: async () => '{}', json: async () => ({}) }))));
+  assert.equal((await t.auth.readInternal('/v1/manage/totp-code?entry=a')).retryAfter, 3600);
+  ({ t } = await signedIn(mkNet(() => ({ status: 429, headers: new Map(), text: async () => '{}', json: async () => ({}) }))));
+  assert.deepEqual(await t.auth.readInternal('/v1/manage/totp-code?entry=a'), { status: 429, body: '{}' });
+  ({ t } = await signedIn(mkNet(() => R(401))));
+  const r = await t.auth.readInternal('/v1/manage/totp-code?entry=a'); assert.equal(r.status, 503); assert.notEqual(r.signedOut, true);
+});
+
+test('popup-facing read stays strictly three paths: the totp-code GET is refused with no network call, and only the worker-internal read has it', async () => {
+  const calls = [];
+  const { t } = await signedIn(async (u, o) => { calls.push(u); if (u.endsWith('/renew')) return R(200, { access: 'tok2', access_expires_at: 1e12 + 600000 }); return R(200, {}); });
+  const n = calls.length;
+  for (const p of ['/v1/manage/totp-code?entry=a', '/v1/manage/totp-code']) { const r = await t.auth.read(p); assert.deepEqual(r, { status: 503, body: '{}', unsupported: true }, p); }
+  assert.equal(calls.length, n);
+  assert.equal(typeof t.auth.readInternal, 'function');
+  const { readFile } = await import('node:fs/promises');
+  const bg = await readFile(new URL('./background.js', import.meta.url), 'utf8'), sess = await readFile(new URL('./extension-session.js', import.meta.url), 'utf8');
+  assert.match(bg, /read: m => auth\.read\(m\.path\),/);
+  const wire = "readInternal: p => ready.then(() => auth.readInternal(p))";
+  assert.equal(bg.split(wire).length, 2, 'the worker passes readInternal in exactly one audited wiring expression (to the autofill source)');
+  for (const f of [bg.replace(wire, ''), sess]) assert.ok(!/readInternal|totp-code|TOTP_READ/.test(f), 'no other reference to the generated read outside extension-auth');
+  const block = bg.match(/const handlers = \{([\s\S]*?)\n\};/)[1], types = [...block.matchAll(/^ {2}(\w+):/gm)].map(m => m[1]);
+  assert.deepEqual(types.sort(), ['autofillOrigins', 'logout', 'maintain', 'read', 'signIn', 'status', 'ticket'], 'message types are exactly the audited set (autofillOrigins returns exact https host patterns only); none carries a generated read');
+});
+test('API source audit: the fourth GET is tied to the totp-read-http route and the edge list, not just the three popup paths (skipped without OTPANDA_API_SRC)', async t => {
+  if (!process.env.OTPANDA_API_SRC) return t.skip('no API checkout');
+  const { readFile } = await import('node:fs/promises');
+  const { TOTP_READ, READ_PATHS } = await import('./extension-auth.mjs'), dir = process.env.OTPANDA_API_SRC;
+  const totp = await readFile(dir + '/src/totp-read-http.js', 'utf8'), edge = await readFile(dir + '/src/identity-edge-host.js', 'utf8'), runtime = await readFile(dir + '/src/identity-runtime.js', 'utf8');
+  const path = totp.match(/PATH='([^']+)'/)[1];
+  assert.ok(TOTP_READ.test(path + '?entry=abc'), 'client path matches the API route');
+  assert.ok(!TOTP_READ.test(path + '?entry=abc&x=1'));
+  assert.match(totp, /createDeviceSessionAuth\(\{sessions,extension:true,extensionOrigins\}\)/, 'route authenticates the extension kind');
+  const ext = edge.match(/const extRead=[^\n]*?\[([^\]]*)\]\.includes\(p\)/)[1].match(/'[^']+'/g).map(x => x.slice(1, -1));
+  assert.deepEqual([...ext].sort(), [...READ_PATHS, path].sort(), 'edge extension read list = popup three + the one generated read');
+  assert.match(runtime, /createTotpReadHttp\(\{[^\n]*extensionOrigins:extensionHttp\?/, 'enabled only when extension auth is');
+});

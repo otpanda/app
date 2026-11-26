@@ -1,5 +1,6 @@
 import {readFile,writeFile,mkdir,cp,rm,readdir,lstat,access,rename,mkdtemp} from 'node:fs/promises';
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 // Package only a previously built fictional preview. This never enables auth.
 const root=path.resolve(import.meta.dirname,'../..');
 const build=path.join(root,'build/web');
@@ -26,7 +27,11 @@ html=html.replace('</head>','<link rel="stylesheet" href="extension-host.css"></
 if(!html.includes('<script src="extension-session.js"></script><script src="flutter_bootstrap.js"'))throw Error('Unsupported bridge injection failed');
 if(html.includes('session-bootstrap')||html.includes('realtime-client'))throw Error('Web session removal failed');
 await writeFile(path.join(out,'index.html'),html);
-if(signin){for(const f of ['extension-auth.mjs','background.js','extension-session.js'])await cp(path.join(import.meta.dirname,f),path.join(out,f));await writeFile(path.join(out,'extension-config.mjs'),'export default Object.freeze('+JSON.stringify({api:SIGNIN_API,webUrl:SIGNIN_WEB,redirectKey:SIGNIN_KEY})+');\n');}else await writeFile(path.join(out,'extension-session.js'),"'use strict';const unsupported=async()=>({status:503,body:JSON.stringify({error:'unsupported'})});Object.defineProperty(globalThis,'OTPandaSession',{value:Object.freeze({ready:Promise.resolve(),status:()=> 'unsupported',start:async()=>{throw Error('unsupported')},passkey:async()=>{throw Error('unsupported')},clear:()=>{},logout:()=>{},read:unsupported,organize:unsupported,copied:unsupported}),writable:false,configurable:false});\n");
+if(signin){for(const f of ['extension-auth.mjs','background.js','extension-session.js'])await cp(path.join(import.meta.dirname,f),path.join(out,f));{const {bundle}=await import(pathToFileURL(path.join(import.meta.dirname,'autofill/build-content.mjs')).href);await mkdir(path.join(out,'autofill/src'),{recursive:true});
+for(const f of ['background.js','code-source.js','domain-union.js','fill-request.js','match.js','wiring.js'])await cp(path.join(import.meta.dirname,'autofill/src',f),path.join(out,'autofill/src',f));
+await writeFile(path.join(out,'autofill/content.js'),bundle());await cp(path.join(import.meta.dirname,'autofill/src/permission.js'),path.join(out,'autofill-permission.js'));
+await writeFile(path.join(out,'index.html'),(await readFile(path.join(out,'index.html'),'utf8')).replace('<script src="extension-session.js"></script>','<script src="extension-session.js"></script><script src="autofill-permission.js"></script>'));}
+await writeFile(path.join(out,'extension-config.mjs'),'export default Object.freeze('+JSON.stringify({api:SIGNIN_API,webUrl:SIGNIN_WEB,redirectKey:SIGNIN_KEY})+');\n');}else await writeFile(path.join(out,'extension-session.js'),"'use strict';const unsupported=async()=>({status:503,body:JSON.stringify({error:'unsupported'})});Object.defineProperty(globalThis,'OTPandaSession',{value:Object.freeze({ready:Promise.resolve(),status:()=> 'unsupported',start:async()=>{throw Error('unsupported')},passkey:async()=>{throw Error('unsupported')},clear:()=>{},logout:()=>{},read:unsupported,organize:unsupported,copied:unsupported}),writable:false,configurable:false});\n");
 await rm(path.join(out,'session-bootstrap.js'),{force:true});
 await rm(path.join(out,'realtime-client.js'),{force:true});
 await rm(path.join(out,'flutter_service_worker.js'),{force:true});
@@ -37,7 +42,7 @@ await writeFile(path.join(out,'flutter_bootstrap.js'),bootstrap);
 for(const icon of ['otty-favicon-v2-16.png','otty-favicon-v2-32.png'])await access(path.join(out,icon));
 await writeFile(path.join(out,'extension-host.css'),'html,body{width:390px;height:600px;min-width:390px;min-height:600px;margin:0;overflow:hidden}\n');
 const manifest={manifest_version:3,name:'OTPanda shared UI preview',version:'0.0.1',description:'Local fictional Flutter preview. Sign-in and browser-page access are not connected.',action:{default_popup:'index.html',default_title:'OTPanda preview'},icons:{16:'otty-favicon-v2-16.png',32:'otty-favicon-v2-32.png'},content_security_policy:{extension_pages:"default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; connect-src 'self'; base-uri 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-src 'none'; worker-src 'self'"}};
-if(signin){manifest.name='OTPanda';manifest.description='OTPanda in your browser.';manifest.permissions=['identity','storage'];manifest.host_permissions=[SIGNIN_API+'/*'];manifest.background={service_worker:'background.js',type:'module'};manifest.content_security_policy.extension_pages=manifest.content_security_policy.extension_pages.replace("connect-src 'self'","connect-src 'self' "+SIGNIN_API+' '+SIGNIN_API.replace(/^https:/,'wss:'));if(MANIFEST_KEY)manifest.key=MANIFEST_KEY;}
+if(signin){manifest.name='OTPanda';manifest.description='OTPanda in your browser.';manifest.permissions=['identity','storage','scripting'];manifest.optional_host_permissions=['https://*/*'];manifest.host_permissions=[SIGNIN_API+'/*'];manifest.background={service_worker:'background.js',type:'module'};manifest.content_security_policy.extension_pages=manifest.content_security_policy.extension_pages.replace("connect-src 'self'","connect-src 'self' "+SIGNIN_API+' https://api.2fa.directory '+SIGNIN_API.replace(/^https:/,'wss:'));if(MANIFEST_KEY)manifest.key=MANIFEST_KEY;}
 await writeFile(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
 await rm(destination,{recursive:true,force:true});await rename(out,destination);
 console.log('Packaged fictional extension preview: '+destination);

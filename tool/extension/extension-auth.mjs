@@ -14,6 +14,9 @@ const CODE = /^[A-Za-z0-9_-]{16,512}$/;
 // Exactly the three GET routes the API lets an extension session read (device-read-http EXT_PATHS and
 // entry-domains-http PATH). Everything else is answered locally as unsupported: no network, no renew, no state change.
 export const READ_PATHS = Object.freeze(['/v1/manage/entries', '/v1/manage/active-codes', '/v1/manage/entry/domains']);
+// The fourth GET, for the autofill worker only (the popup bridge keeps exactly the three above): one entry's generated code, exactly one
+// `entry` query of the strict id shape. Nothing else may carry a query.
+export const TOTP_READ = /^\/v1\/manage\/totp-code\?entry=[A-Za-z0-9_-]{1,128}$/;
 const ACCESS_TTL_MS = 300000; // API contract: access lives 5 minutes from issue. Judged from OUR receipt time, never from the server's absolute value against our clock.
 const MARGIN_MS = 30000;
 const BACKOFF_MIN_MS = 10000, BACKOFF_MAX_MS = 60000; // The API allows 8 outstanding 60s nonces per device; at most 6 attempts a minute stays under it.
@@ -163,17 +166,23 @@ export function createExtensionAuth({ api, webUrl, redirectKey, identity, fetch:
     return (await loadRecord()) ? 'signed-in' : 'signed-out';
   }
 
-  /** {status, body, signedOut?}. signedOut is true only when the record is actually gone. */
-  async function read(path, retried = false) {
-    if (!READ_PATHS.includes(path)) return { status: 503, body: '{}', unsupported: true };
+  /** {status, body, signedOut?}. signedOut is true only when the record is actually gone.
+   * `read` is the POPUP-facing read (the message handler in background.js calls only this): the three READ_PATHS and nothing else.
+   * `readInternal` adds the fourth GET (one generated code) for the autofill CodeSource inside the worker. It is never a message type. */
+  const read = (path, retried = false) => doRead(path, retried, false);
+  const readInternal = (path, retried = false) => doRead(path, retried, true);
+  async function doRead(path, retried, internal) {
+    if (!READ_PATHS.includes(path) && !(internal && typeof path === 'string' && TOTP_READ.test(path))) return { status: 503, body: '{}', unsupported: true };
     const t = await getAccess(retried);
     if (!t.token) return t.state === 'signed-out' ? { status: 401, body: '{}', signedOut: true } : { status: 503, body: '{}' };
     let r;
     try { r = await doFetch(api + path, opts({ method: 'GET', headers: { Authorization: 'Bearer ' + t.token } })); } catch { return { status: 503, body: '{}' }; }
     // A 401 gets one forced renew. The final 401 is never passed on as "signed out": only a cleared record is.
-    if (r.status === 401) return retried ? { status: 503, body: '{}' } : read(path, true);
+    if (r.status === 401) return retried ? { status: 503, body: '{}' } : doRead(path, true, internal);
     let body = '{}';
     try { body = await r.text(); if (body.length > 524288) return { status: 503, body: '{}' }; } catch { return { status: 503, body: '{}' }; }
+    // A 429 hands its Retry-After (seconds) to the caller, which must not retry sooner.
+    if (r.status === 429) { const ra = Number(r.headers?.get?.('retry-after')); return { status: 429, body, ...(Number.isSafeInteger(ra) && ra > 0 ? { retryAfter: Math.min(ra, 3600) } : {}) }; }
     return { status: r.status, body };
   }
 
@@ -213,7 +222,7 @@ export function createExtensionAuth({ api, webUrl, redirectKey, identity, fetch:
   /** Worker start: a pending flow cannot survive a worker restart (its window promise is gone). */
   async function recover() { await session.remove('pending'); }
 
-  return Object.freeze({ signIn: async () => { active++; try { return await signIn(); } finally { active--; } }, read, maintain, ticket, logout, status, recover, getAccess });
+  return Object.freeze({ signIn: async () => { active++; try { return await signIn(); } finally { active--; } }, read, maintain, ticket, logout, status, recover, getAccess, readInternal });
 }
 
 /** IndexedDB record store: extension-private origin, non-extractable CryptoKey stored by structured clone. */
