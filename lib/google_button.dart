@@ -11,10 +11,12 @@ import 'google_g.dart';
 class GoogleSignInButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final String label;
+  final bool loading;
   const GoogleSignInButton({
     super.key,
     required this.onPressed,
     this.label = 'Continue with Google',
+    this.loading = false,
   });
 
   @override
@@ -32,12 +34,22 @@ class GoogleSignInButton extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.only(left: 12, right: 12),
             child: Opacity(
-              opacity: onPressed == null ? 0.38 : 1,
+              opacity: onPressed == null && !loading ? 0.38 : 1,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Image.memory(googleGImage, width: 20, height: 20),
+                  if (loading)
+                    const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        semanticsLabel: 'Signing in with Google',
+                      ),
+                    )
+                  else
+                    Image.memory(googleGImage, width: 20, height: 20),
                   const SizedBox(width: 10),
                   Flexible(
                     child: Text(

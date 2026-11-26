@@ -34,6 +34,31 @@ class _AuthEntryState extends State<AuthEntry> {
   final email = TextEditingController(), proof = TextEditingController();
   bool emailOpen = false, remember = true, googleCodeSent = false;
   String? error;
+  String? pendingAction;
+  Future<void> runAction(
+    String action,
+    Future<void> Function() operation,
+  ) async {
+    if (pendingAction != null || widget.busy) return;
+    setState(() => pendingAction = action);
+    try {
+      await widget.run(operation);
+    } finally {
+      if (mounted) setState(() => pendingAction = null);
+    }
+  }
+
+  Widget pendingIcon(String action, IconData icon) => pendingAction == action
+      ? SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            semanticsLabel: 'Signing in',
+          ),
+        )
+      : Icon(icon, size: 20);
+
   @override
   void initState() {
     super.initState();
@@ -170,31 +195,43 @@ class _AuthEntryState extends State<AuthEntry> {
               ),
             ),
             const SizedBox(height: 28),
-            if (widget.busy || authenticating) const LinearProgressIndicator(),
-            if (authenticating)
+            if ((widget.busy || authenticating) && pendingAction == null)
+              const LinearProgressIndicator(),
+            if (authenticating && pendingAction == null)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 16),
                 child: Text('Complete the passkey prompt on your device.'),
               ),
             if (passkey)
               FilledButton(
-                onPressed: widget.busy
+                onPressed: widget.busy || pendingAction != null
                     ? null
-                    : () => widget.run(widget.bridge.passkey),
-                child: Text(
-                  signup ? 'Create my passkey' : 'Continue with passkey',
+                    : () => runAction('passkey', widget.bridge.passkey),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (pendingAction == 'passkey') ...[
+                      pendingIcon('passkey', Icons.key_outlined),
+                      const SizedBox(width: 10),
+                    ],
+                    Text(
+                      signup ? 'Create my passkey' : 'Continue with passkey',
+                    ),
+                  ],
                 ),
               ),
             if (!passkey &&
                 !google &&
                 !protected &&
                 status != 'unsupported' &&
-                !authenticating) ...[
+                (!authenticating || pendingAction != null)) ...[
               if (!form) ...[
                 GoogleSignInButton(
-                  onPressed: widget.busy
+                  loading: pendingAction == 'google',
+                  onPressed: widget.busy || pendingAction != null
                       ? null
-                      : () => widget.run(
+                      : () => runAction(
+                          'google',
                           () => widget.bridge is AuthEntryBridge
                               ? (widget.bridge as AuthEntryBridge).googleStart(
                                   remember,
@@ -207,7 +244,10 @@ class _AuthEntryState extends State<AuthEntry> {
                   (
                     'Sign in with a passkey',
                     Icons.key_outlined,
-                    () => widget.run(() => widget.bridge.start('login')),
+                    () => runAction(
+                      'passkey',
+                      () => widget.bridge.start('login'),
+                    ),
                   ),
                   (
                     'Create account with a passkey',
@@ -221,8 +261,13 @@ class _AuthEntryState extends State<AuthEntry> {
                       shape: const StadiumBorder(),
                       side: const BorderSide(color: Color(0xff747775)),
                     ),
-                    onPressed: widget.busy ? null : onTap,
-                    icon: Icon(icon, size: 20),
+                    onPressed: widget.busy || pendingAction != null
+                        ? null
+                        : onTap,
+                    icon: pendingIcon(
+                      label == 'Sign in with a passkey' ? 'passkey' : 'signup',
+                      icon,
+                    ),
                     label: Text(label),
                   ),
                   const SizedBox(height: 12),
