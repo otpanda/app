@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'browser_session_contract.dart';
 import 'assignment_dialog.dart';
@@ -18,6 +19,8 @@ import 'main.dart' show green;
 import 'pull_to_refresh.dart';
 import 'service_logo.dart';
 import 'session_contract.dart';
+import 'totp_batch.dart';
+import 'totp_tile_code.dart';
 
 /// Read-only everyday shell for a signed-in account, backed by [CodeStore].
 /// Loading, failure and a successfully loaded empty account are distinct
@@ -69,7 +72,97 @@ class ProductShell extends StatefulWidget {
 
 enum _Phase { loading, loaded, cleared, failed, rateLimited, signedOut }
 
-class _ProductShellState extends State<ProductShell> {
+class _ProductShellState extends State<ProductShell>
+    with WidgetsBindingObserver {
+  /// Upcoming authenticator codes for the entries on screen, in memory only.
+  /// Null when the bridge cannot batch (then one code is requested at a time).
+  late final TotpBatchStore? batch = _makeBatch();
+  final _batchWatch = Stopwatch()..start();
+  Timer? _batchTimer;
+
+  /// Hidden by the app lifecycle, or by the browser's real page visibility
+  /// (document.visibilityState). Either one pauses batch requests and repaints.
+  bool _lifecycleHidden = false, _pageHidden = false;
+  void Function()? _removePageListener;
+  Timer? _searchTick;
+  bool get _hidden => _lifecycleHidden || _pageHidden;
+
+  TotpBatchStore? _makeBatch() {
+    final bridge = widget.controller.bridge;
+    if (bridge is! TotpBatchBridge || bridge is! TotpManagementBridge) {
+      return null;
+    }
+    return TotpBatchStore(
+      fetch: (bridge as TotpBatchBridge).totpCodes,
+      monotonicMilliseconds: () => _batchWatch.elapsedMilliseconds,
+      sessionExpiresAt: () async {
+        final r = await widget.controller.bridge.read('/v1/manage/session');
+        final v = r.status == 200 ? jsonDecode(r.body) : null;
+        final at = v is Map ? v['expiresAt'] : null;
+        if (at is! int) throw const ClientFailure(401);
+        return at;
+      },
+    );
+  }
+
+  /// At most 20 TOTP entries (fetched 5 per request). Entries the Codes tab is
+  /// showing for the current search come first, then ones with a received-code
+  /// tile, then the rest in list order. The cap and scope are unchanged.
+  List<String> _batchIds() {
+    final store = widget.controller.store;
+    final shown = {
+      for (final c in store.visibleCodes(widget.clock())) c.entryId,
+    };
+    final totp = store.entries.where((e) => e.totp).toList();
+    final q = tab == 0 ? query.trim().toLowerCase() : '';
+    bool visible(ManagedEntry e) =>
+        q.isNotEmpty && '${e.service} ${e.account}'.toLowerCase().contains(q);
+    final first = totp.where(visible).toList();
+    final rest = totp.where((e) => !visible(e)).toList();
+    return [
+      ...first,
+      ...rest.where((e) => shown.contains(e.id)),
+      ...rest.where((e) => !shown.contains(e.id)),
+    ].map((e) => e.id).take(totpBatchMaxTracked).toList();
+  }
+
+  /// Local check only. A request goes out only when a held response is about
+  /// to expire or an entry has no usable code, never on a fixed schedule.
+  void _batchTick() {
+    final b = batch;
+    if (b == null || _hidden || !mounted || phase != _Phase.loaded) return;
+    b.retain({for (final e in widget.controller.store.entries) e.id});
+    final ids = _batchIds();
+    if (ids.isEmpty || !b.needsFetch(ids)) return;
+    // Repaint when a fetch lands, so tiles show the codes now and not at their
+    // next one-second tick. Failures leave the tiles as they are.
+    b.ensure(ids).then((_) {
+      if (mounted) setState(() {});
+    }, onError: (_) {});
+  }
+
+  /// The page became hidden or visible again. Hidden: no batch request and no
+  /// repaint. Visible: repaint now (expired codes disappear at once) and check
+  /// whether a refresh is due.
+  void _pageVisibility(bool hidden) {
+    if (!mounted) return;
+    _pageHidden = hidden;
+    if (!hidden) {
+      setState(() {});
+      _batchTick();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) batch?.clear();
+    _lifecycleHidden =
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached;
+    if (!_hidden) _batchTick();
+  }
+
   bool get _canAddTotp =>
       widget.controller.bridge is TotpManagementBridge &&
       (widget.controller.bridge is! TotpCreationCapability ||
@@ -118,6 +211,20 @@ class _ProductShellState extends State<ProductShell> {
   void initState() {
     super.initState();
     widget.controller.addListener(changed);
+    if (batch != null) {
+      final bridge = widget.controller.bridge;
+      if (bridge is PageVisibilityBridge) {
+        final v = bridge as PageVisibilityBridge;
+        _pageHidden = v.pageHidden;
+        _removePageListener = v.onPageVisibility(_pageVisibility);
+      }
+      WidgetsBinding.instance.addObserver(this);
+      _batchTimer = Timer.periodic(
+        const Duration(seconds: 5),
+        (_) => _batchTick(),
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) => _batchTick());
+    }
     // Lets the highlight fade on its own without any refresh.
     freshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (mounted && hadFresh) setState(() {});
@@ -134,12 +241,20 @@ class _ProductShellState extends State<ProductShell> {
   }
 
   void changed() {
+    if (!widget.controller.signedIn) batch?.clear();
     if (mounted) setState(() {});
+    _batchTick();
   }
 
   @override
   void dispose() {
     freshTimer?.cancel();
+    _batchTimer?.cancel();
+    _searchTick?.cancel();
+    _removePageListener?.call();
+    _removePageListener = null;
+    batch?.clear();
+    WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(changed);
     searchController.dispose();
     super.dispose();
@@ -420,6 +535,7 @@ class _ProductShellState extends State<ProductShell> {
                           builder: (_) => TotpEntryDialog(
                             bridge: widget.controller.bridge,
                             entryId: e.id,
+                            batch: batch,
                           ),
                         )
                       : null,
@@ -428,9 +544,18 @@ class _ProductShellState extends State<ProductShell> {
                     e.account,
                     null,
                     null,
-                    true,
+                    !(e.totp && batch != null),
                     false,
-                    null,
+                    // Native and extension have no batch store: unchanged.
+                    e.totp && batch != null
+                        ? TotpTileCode(
+                            key: Key('totp-tile-${e.id}'),
+                            batch: batch!,
+                            entryId: e.id,
+                            hidden: () => _hidden,
+                            muted: muted,
+                          )
+                        : null,
                     e.catalogId,
                     e.issuer,
                   ),
@@ -664,8 +789,11 @@ class _ProductShellState extends State<ProductShell> {
     if (id != null && mounted) {
       await showDialog<void>(
         context: context,
-        builder: (_) =>
-            TotpEntryDialog(bridge: widget.controller.bridge, entryId: id),
+        builder: (_) => TotpEntryDialog(
+          bridge: widget.controller.bridge,
+          entryId: id,
+          batch: batch,
+        ),
       );
       widget.controller.resume();
       await widget.controller.refresh();
@@ -702,7 +830,12 @@ class _ProductShellState extends State<ProductShell> {
           borderSide: BorderSide(color: green, width: 1.5),
         ),
       ),
-      onChanged: (v) => setState(() => query = v),
+      onChanged: (v) {
+        setState(() => query = v);
+        // Typing filters at once; the batch check waits for a pause.
+        _searchTick?.cancel();
+        _searchTick = Timer(const Duration(milliseconds: 350), _batchTick);
+      },
     ),
   );
 
