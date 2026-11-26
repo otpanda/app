@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import 'browser_session_contract.dart' show RealtimeBridge;
 import 'session_contract.dart';
 
 /// A separate capability. Native clients do not inherit browser source consent.
@@ -65,7 +66,9 @@ class _GmailSourceConnectState extends State<GmailSourceConnect>
   bool checking = true, ready = false, busy = false, passkey = false;
   bool blocked = false;
   bool inFlight = false;
-  Timer? refresh;
+  void Function()? unsubscribe;
+  Timer? spacing;
+  bool again = false;
   String error = '';
 
   /// The return marker is only a hint from the URL. It is shown as success only once status says ready AND the
@@ -79,17 +82,36 @@ class _GmailSourceConnectState extends State<GmailSourceConnect>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     start();
-    refresh = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (WidgetsBinding.instance.lifecycleState == null ||
-          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
-        check();
+    // Live hints replace the 30s poll. 'connect' closes any gap after a
+    // reconnect; resume still checks. A burst runs one read, spaced 1s apart.
+    final b = widget.bridge;
+    if (b is RealtimeBridge) {
+      unsubscribe = (b as RealtimeBridge).realtimeSubscribe((reason) {
+        if (reason == 'connect' || reason == 'changed') hint();
+      });
+    }
+  }
+
+  void hint() {
+    if (!mounted) return;
+    if (spacing != null || inFlight) {
+      again = true;
+      return;
+    }
+    check();
+    spacing = Timer(const Duration(seconds: 1), () {
+      spacing = null;
+      if (again && !inFlight) {
+        again = false;
+        hint();
       }
     });
   }
 
   @override
   void dispose() {
-    refresh?.cancel();
+    unsubscribe?.call();
+    spacing?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -161,6 +183,12 @@ class _GmailSourceConnectState extends State<GmailSourceConnect>
       if (++unproven >= 2) claim = false;
     }
     if (mounted) setState(() => checking = false);
+    // A hint that arrived while this read was in flight gets exactly one
+    // trailing read, never an overlapping one.
+    if (again && spacing == null && mounted) {
+      again = false;
+      hint();
+    }
   }
 
   Future<void> connect() async {

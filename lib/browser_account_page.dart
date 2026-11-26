@@ -89,6 +89,13 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   bool passkeysOpen = false;
   bool securityRequested = false;
   bool securityLoading = false;
+  // Live updates for the security status: one shared-socket subscription while an
+  // Account & security page is shown. A hint carries no data; it only asks for the
+  // ordinary authenticated status read, coalesced to one in flight plus one trailing.
+  void Function()? securityUnsubscribe;
+  bool securityTrailing = false;
+  Timer? securitySpacing;
+  bool securityCooling = false;
   int securityTicks = 0;
   static const productRoutes = ['codes', 'sources', 'unassigned', 'entries'];
 
@@ -290,6 +297,13 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
           unawaited(refresh());
         }
       }
+      // Local state check, no network: subscribe once the page is restored and
+      // an account page is showing; drop the subscription when it is not.
+      if (mounted && status == 'restored' && accountPagesShown > 0) {
+        listenSecurity();
+      } else if (securityUnsubscribe != null) {
+        stopSecurityListening();
+      }
       if (mounted && status == 'restored') {
         // The extension popup owns its single live socket; the hidden workspace
         // controller must not open a second one.
@@ -398,7 +412,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       status = bridge.status;
       message = 'Could not complete that request. Try again.';
     } finally {
-      if (mounted && attempt == revision) setState(() => busy = false);
+      if (mounted && attempt == revision) {
+        setState(() => busy = false);
+        // A hint that landed while this action ran gets one catch-up read.
+        if (overviewAgain) {
+          overviewAgain = false;
+          unawaited(refreshOverviewQuietly());
+        }
+      }
     }
   }
 
@@ -690,6 +711,102 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
+  void listenSecurity({bool catchUp = true}) {
+    if (securityUnsubscribe != null ||
+        !mounted ||
+        status != 'restored' ||
+        bridge is! AuthEntryBridge ||
+        bridge is! RealtimeBridge) {
+      return;
+    }
+    securityUnsubscribe = (bridge as RealtimeBridge).realtimeSubscribe(
+      onSecurityHint,
+    );
+    // An already-open socket sends no new 'connect', so close the gap between
+    // the entry read and this subscription with one coalesced catch-up.
+    if (catchUp && (securityLoading || securityInfo != null)) {
+      securityTrailing = true;
+      drainSecurityHint();
+    }
+  }
+
+  void stopSecurityListening() {
+    final stop = securityUnsubscribe;
+    securityUnsubscribe = null;
+    securitySpacing?.cancel();
+    securitySpacing = null;
+    securityCooling = false;
+    securityTrailing = false;
+    stop?.call();
+  }
+
+  /// 'connect' (after every socket open) closes the gap while disconnected;
+  /// 'changed' is a server hint. Nothing is fetched on a timer.
+  void onSecurityHint(String reason) {
+    if (!mounted || accountPagesShown <= 0 || status != 'restored') return;
+    if (reason != 'connect' && reason != 'changed') return;
+    securityTrailing = true;
+    drainSecurityHint();
+  }
+
+  bool overviewAgain = false;
+
+  /// Hint-driven overview read. It never sets busy and never overlaps a user
+  /// action (run() reloads the account itself) or another overview read; a hint
+  /// that lands meanwhile earns one trailing read.
+  Future<void> refreshOverviewQuietly() async {
+    if (!mounted || status != 'restored') return;
+    if (busy || overviewInFlightRevision != -1) {
+      overviewAgain = true;
+      return;
+    }
+    try {
+      await fetchOverview(revision);
+      if (mounted) setState(() {});
+    } catch (_) {
+      // Keep the last view; the next hint or entry retries.
+    }
+    if (overviewAgain && mounted && !busy) {
+      overviewAgain = false;
+      unawaited(refreshOverviewQuietly());
+    }
+  }
+
+  void drainSecurityHint() {
+    if (!securityTrailing || !mounted) return;
+    if (accountPagesShown <= 0 || status != 'restored') {
+      securityTrailing = false;
+      return;
+    }
+    if (securityLoading) return; // loadSecurity drains again when it finishes
+    if (securityCooling) return; // the spacing timer drains again
+    securityCooling = true;
+    securitySpacing = Timer(const Duration(seconds: 1), () {
+      securitySpacing = null;
+      securityCooling = false;
+      drainSecurityHint();
+    });
+    securityTrailing = false;
+    // A hint also means the overview or organization may have changed. The
+    // overview reload is quiet: no busy state, no disabled controls.
+    unawaited(refreshOverviewQuietly());
+    if (accountOpen &&
+        !organizationReady &&
+        !organizationBusy &&
+        (widget.navigation == null ||
+            settingsCategory == SettingsCategory.organization)) {
+      unawaited(loadOrganizationSection());
+    }
+    unawaited(refreshSecurity().then((_) => drainSecurityHint()));
+  }
+
+  /// Rows of the security status that have not reached their own expiresAt. The
+  /// server writes nothing at expiry, so the page hides them by the clock.
+  List<Map> liveSecurityRows(String key) => [
+    for (final raw in (securityInfo?[key] as List? ?? const []))
+      if (raw is Map && (raw['expiresAt'] is! int || (raw['expiresAt'] as int) > now())) raw,
+  ];
+
   Future<void> refreshSecurity() async {
     try {
       await loadSecurity();
@@ -704,6 +821,11 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       return;
     }
     final epoch = organizationEpoch;
+    // The very first read subscribes before it starts, so a hint during it is
+    // not lost and the later entry subscription needs no duplicate catch-up.
+    if (securityInfo == null || accountPagesShown > 0) {
+      listenSecurity(catchUp: false);
+    }
     securityLoading = true;
     try {
       final value = jsonDecode(
@@ -727,6 +849,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       });
     } finally {
       securityLoading = false;
+      if (securityTrailing) drainSecurityHint();
     }
   }
 
@@ -805,6 +928,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     resetIdentity();
     securityInfo = null;
     securityRequested = false;
+    stopSecurityListening();
     settingChange = null;
     organizationEpoch++;
     organizationRequest++;
@@ -887,7 +1011,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         unawaited(workspace.refresh());
       }
       unawaited(maintainSession());
-      if (securityRequested && status == 'restored') {
+      if (securityRequested && accountPagesShown > 0 && status == 'restored') {
         unawaited(refreshSecurity());
       }
     }
@@ -901,6 +1025,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     workspace.removeListener(workspaceChanged);
     workspace.dispose();
     expiryTick?.cancel();
+    stopSecurityListening();
     clearOrganization();
     store.clear();
     WidgetsBinding.instance.removeObserver(this);
@@ -1322,8 +1447,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                   }),
             child: const Text('Check approval for security change'),
           ),
-        for (final raw in securityInfo!['pending'] as List)
-          if (raw is Map && raw['pendingId'] is String)
+        for (final raw in liveSecurityRows('pending'))
+          if (raw['pendingId'] is String)
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -1379,8 +1504,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
               ),
             ),
         if (clientApprovalAvailable)
-          for (final raw in securityInfo!['changes'] as List)
-            if (raw is Map && raw['changeId'] is String)
+          for (final raw in liveSecurityRows('changes'))
+            if (raw['changeId'] is String)
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -1602,8 +1727,19 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       onShown: () {
                         accountPagesShown++;
                         ensureOverview();
+                        // Coming back to the page re-reads the status now; the
+                        // very first visit is loaded by protectionItems.
+                        listenSecurity();
+                        if (securityInfo != null &&
+                            status == 'restored' &&
+                            securityUnsubscribe == null) {
+                          unawaited(refreshSecurity());
+                        }
                       },
-                      onHidden: () => accountPagesShown--,
+                      onHidden: () {
+                        accountPagesShown--;
+                        if (accountPagesShown <= 0) stopSecurityListening();
+                      },
                       child: passkeysOpen
                           ? passkeysPage()
                           : accountSecurityPage(),
