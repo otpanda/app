@@ -109,8 +109,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   /// nothing. [direct] sets state only, for use before the first load.
   void applyRoute(String? id, {bool direct = false}) {
     if (id == null) return;
-    if (settingsCategoryForRoute(id) != SettingsCategory.account &&
-        id != settingsPasskeysRoute) {
+    if (settingsCategoryForRoute(id) != SettingsCategory.account ||
+        id == settingsPasskeysRoute) {
       overviewPreparedRevision = null;
     }
     final tab = productRoutes.indexOf(id);
@@ -694,7 +694,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         if (mounted &&
             attempt == revision &&
             accountPagesShown == 0 &&
-            settingsCategory == SettingsCategory.account) {
+            settingsCategory == SettingsCategory.account &&
+            !passkeysOpen) {
           overviewPreparedRevision = overview != null && !overviewStale
               ? attempt
               : null;
