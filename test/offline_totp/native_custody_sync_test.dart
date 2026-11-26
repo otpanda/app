@@ -45,6 +45,9 @@ final class DelayedCustody implements NativeSeedCustody {
   Future<PurgeOwnerResult> purgeOwner(String ownerId, {required int epoch}) =>
       fake.purgeOwner(ownerId, epoch: epoch);
   @override
+  Future<CustodyOwnerState> readOwnerState(String ownerId) =>
+      fake.readOwnerState(ownerId);
+  @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
