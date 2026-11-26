@@ -34,7 +34,7 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
     private fun Map<*, *>.idLongs(k: String): Map<String, Long> =
         map(k).entries.associate { (key, v) -> (key as? String ?: throw Bad()) to (when (v) { is Long -> v; is Int -> v.toLong(); else -> throw Bad() }) }
 
-    private val known = setOf("readOwnerState", "capability", "provision", "generate", "delete", "clearOwner", "enableOwner", "purgePending", "sweepOrphans", "reconcile")
+    private val known = setOf("readOwnerState", "capability", "provision", "generate", "delete", "clearOwner", "purgeOwner", "readCatalog", "enableOwner", "purgePending", "sweepOrphans", "reconcile")
     fun handle(method: String, arguments: Any?): ChannelReply {
         if (method !in known) { ((arguments as? Map<*, *>)?.get("seed") as? ByteArray)?.fill(0); return ChannelReply.NotImplemented }
         val seed = (arguments as? Map<*, *>)?.get("seed") as? ByteArray
@@ -42,11 +42,11 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
             val a = arguments as? Map<*, *> ?: if (method == "capability" || method == "purgePending" || method == "sweepOrphans") emptyMap<Any, Any>() else throw Bad()
             when (method) {
                 "capability", "purgePending", "sweepOrphans" -> a.exact()
-                "readOwnerState" -> a.exact("owner")
+                "readOwnerState", "readCatalog" -> a.exact("owner")
                 "provision" -> a.exact("owner", "entry", "seedVersion", "algorithm", "digits", "periodSeconds", "seed", "epoch")
                 "generate" -> a.exact("owner", "entry", "seedVersion", "unixSeconds")
                 "delete" -> a.exact("owner", "entry", "seedVersion")
-                "clearOwner", "enableOwner" -> a.exact("owner", "epoch")
+                "clearOwner", "purgeOwner", "enableOwner" -> a.exact("owner", "epoch")
                 "reconcile" -> { a.exact("owner", "snapshot"); a.map("snapshot").exact("epoch", "revision", "complete", "versions", "tombstones") }
             }
             when (method) {
@@ -56,6 +56,13 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
                 "generate" -> ChannelReply.Ok(core.generate(a.str("owner"), a.str("entry"), a.long("seedVersion"), a.long("unixSeconds")))
                 "delete" -> { core.delete(a.str("owner"), a.str("entry"), a.long("seedVersion")); ChannelReply.Ok(null) }
                 "clearOwner" -> ChannelReply.Ok(mapOf("denied" to true, "purged" to core.clearOwner(a.str("owner"), a.long("epoch")).purged))
+                "purgeOwner" -> core.purgeOwner(a.str("owner"), a.long("epoch")).let { ChannelReply.Ok(mapOf("purged" to it.purged, "epoch" to it.epoch)) }
+                "readCatalog" -> core.readCatalog(a.str("owner")).let { c ->
+                    ChannelReply.Ok(mapOf("epoch" to c.epoch, "enabled" to c.enabled, "pendingPurge" to c.pendingPurge, "entries" to c.entries.map {
+                        mapOf("entry" to it.entry, "seedVersion" to it.version, "epoch" to it.epoch, "algorithm" to it.algorithm.name.lowercase(), "digits" to it.digits.toLong(),
+                            "periodSeconds" to it.period.toLong(), "protection" to it.level, "floor" to it.floor, "minAcceptedVersion" to it.minAccept)
+                    }))
+                }
                 "enableOwner" -> { core.enableOwner(a.str("owner"), a.long("epoch")); ChannelReply.Ok(null) }
                 "purgePending" -> ChannelReply.Ok(core.purgePending())
                 "sweepOrphans" -> ChannelReply.Ok(core.sweepOrphans().size)

@@ -42,10 +42,44 @@ final class DelayedCustody implements NativeSeedCustody {
   Future<ClearOwnerResult> clearOwner(String ownerId, {required int epoch}) =>
       fake.clearOwner(ownerId, epoch: epoch);
   @override
+  Future<PurgeOwnerResult> purgeOwner(String ownerId, {required int epoch}) =>
+      fake.purgeOwner(ownerId, epoch: epoch);
+  @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
 void main() {
+  test(
+    'purge preserves default and optout, rejects future epoch without change',
+    () async {
+      final f = FakeSeedCustody();
+      final first = await f.purgeOwner('o', epoch: 0);
+      expect(first.epoch, 1);
+      expect((await f.readOwnerState('o')).enabled, true);
+      await expectLater(
+        f.purgeOwner('o', epoch: 5),
+        throwsA(isA<CustodyException>()),
+      );
+      await expectLater(
+        f.clearOwner('o', epoch: 5),
+        throwsA(isA<CustodyException>()),
+      );
+      expect((await f.readOwnerState('o')).epoch, 1);
+      await f.clearOwner('o', epoch: 1);
+      expect((await f.readOwnerState('o')).enabled, false);
+      final older = await f.purgeOwner('o', epoch: 0);
+      expect(older.epoch, 2);
+      expect((await f.readOwnerState('o')).enabled, false);
+      expect((await f.readCatalog('o')).entries, isEmpty);
+      final sync = await NativeCustodySync.open(
+        custody: f,
+        ownerId: 'o',
+        deviceId: 'd',
+      );
+      await sync.purge();
+      expect((await f.readOwnerState('o')).enabled, false);
+    },
+  );
   test(
     'restart state keeps disabled owner disabled and guard unready',
     () async {

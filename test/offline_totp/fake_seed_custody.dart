@@ -295,6 +295,9 @@ final class FakeSeedCustody implements NativeSeedCustody {
       throw const CustodyException(CustodyError.invalidInput);
     }
     _meta();
+    if (epoch > (_epoch[ownerId] ?? 0)) {
+      throw const CustodyException(CustodyError.epochMismatch);
+    }
     final next = epoch + 1;
     if (next > (_epoch[ownerId] ?? 0)) {
       _disabled.add(ownerId);
@@ -311,6 +314,62 @@ final class FakeSeedCustody implements NativeSeedCustody {
       purged: !_records.entries.any(
         (e) => e.key.startsWith('$ownerId\u0000') && e.value.epoch <= epoch,
       ),
+    );
+  }
+
+  @override
+  Future<PurgeOwnerResult> purgeOwner(
+    String ownerId, {
+    required int epoch,
+  }) async {
+    if (!validCustodyId(ownerId) || epoch < 0 || epoch >= custodyMaxSafeInt) {
+      throw const CustodyException(CustodyError.invalidInput);
+    }
+    _meta();
+    if (epoch > (_epoch[ownerId] ?? 0)) {
+      throw const CustodyException(CustodyError.epochMismatch);
+    }
+    if (epoch + 1 > (_epoch[ownerId] ?? 0)) _advance(ownerId, epoch + 1);
+    for (final k in [
+      for (final e in _records.entries)
+        if (e.key.startsWith('$ownerId\u0000') && e.value.epoch <= epoch) e.key,
+    ]) {
+      if (!_tryRemove(k)) _pending.add(k);
+    }
+    return PurgeOwnerResult(
+      purged: !_pending.any((k) => k.startsWith('$ownerId\u0000')),
+      epoch: _epoch[ownerId] ?? 0,
+    );
+  }
+
+  @override
+  Future<CustodyCatalog> readCatalog(String ownerId) async {
+    final state = await readOwnerState(ownerId);
+    return CustodyCatalog(
+      epoch: state.epoch,
+      enabled: state.enabled,
+      entries: [
+        if (state.enabled)
+          for (final e in _records.entries)
+            if (e.key.startsWith('$ownerId\u0000') &&
+                !_pending.contains(e.key) &&
+                !_denied(ownerId, e.value, e.key.split('\u0000')[1]))
+              CustodyCatalogEntry(
+                entryId: e.key.split('\u0000')[1],
+                seedVersion: e.value.version,
+                epoch: e.value.epoch,
+                algorithm: e.value.algorithm,
+                digits: e.value.digits,
+                period: e.value.period,
+                protection: 'software',
+                floor: _floor[e.key] ?? 0,
+                minAcceptedVersion: _minAccept[e.key] ?? 0,
+              ),
+      ],
+      pendingPurge: [
+        for (final k in _pending)
+          if (k.startsWith('$ownerId\u0000')) k.split('\u0000')[1],
+      ],
     );
   }
 

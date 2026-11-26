@@ -15,6 +15,7 @@ final class NativeCustodySync {
     required String deviceId,
     required int epoch,
   }) : _owner = ownerId,
+       _device = deviceId,
        _guard = NativeSeedSyncGuard(
          ownerId: ownerId,
          deviceId: deviceId,
@@ -56,6 +57,7 @@ final class NativeCustodySync {
   final NativeSeedCustody _custody;
   final NativeSeedSyncGuard _guard;
   String _owner;
+  String _device = '';
   Future<void> _tail = Future<void>.value();
 
   Future<T> _serial<T>(Future<T> Function() run) {
@@ -159,13 +161,22 @@ final class NativeCustodySync {
     _guard.enable(localEpoch);
   });
 
+  /// Invalidates tickets immediately; leaves durable opt-out unchanged.
+  Future<PurgeOwnerResult> purge() => _serial(() async {
+    _guard.disable();
+    final result = await _custody.purgeOwner(_owner, epoch: _guard.epoch);
+    _guard.switchOwner(ownerId: _owner, deviceId: _device, epoch: result.epoch);
+    _guard.disable();
+    return result;
+  });
+
   Future<void> switchOwner({
     required String ownerId,
     required String deviceId,
   }) => _serial(() async {
     // Invalidate old tickets even when durable cleanup fails.
     _guard.disable();
-    await _custody.clearOwner(_owner, epoch: _guard.epoch);
+    await _custody.purgeOwner(_owner, epoch: _guard.epoch);
     final state = await _custody.readOwnerState(ownerId);
     _guard.switchOwner(
       ownerId: ownerId,
@@ -174,5 +185,6 @@ final class NativeCustodySync {
     );
     if (!state.enabled) _guard.disable();
     _owner = ownerId;
+    _device = deviceId;
   });
 }

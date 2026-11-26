@@ -51,6 +51,83 @@ fun main() {
     val expected = "0000001d6f7470616e64612d6e61746976652d736565642d7265636f72642d7631000000076f776e6572203100000008656e7472792fc3a900000001370000000673686132353600000001370000000236300000000133"
     check(hexOf(custodyAad("owner 1", "entry/\u00e9", 7, TotpCalculator.Algorithm.SHA256, 7, 60, 3)) == expected) { "AAD differs from Dart" }
 
+
+    // Sign-out/owner-switch purge versus persistent opt-out; default ON and explicit opt-out are each preserved; durable catalog survives restart.
+    run {
+        val t = Env(); t.prov(); t.prov(e = "f", v = 3, d = 6, p = 60, alg = TotpCalculator.Algorithm.SHA256)
+        check(t.c.readCatalog("o").enabled && t.c.readCatalog("o").epoch == 0L)
+        val before = t.store.docs.toMap()
+        val cat = t.c.readCatalog("o")
+        check(cat.entries.map { it.entry } == listOf("e", "f") && cat.entries[1] == CatalogEntry("f", 3, 0, TotpCalculator.Algorithm.SHA256, 6, 60, "secure_hardware", 3, 0))
+        check(t.store.docs == before) // read-only
+        check(cat.toString().none { it == '\u0000' } && !cat.toString().contains("otpanda.totp.v2."))
+        // restart: a fresh core over the same durable store returns the same catalog without touching the vault
+        val restarted = NativeSeedCustodyCore(object : KeyVault by t.vault { override fun key(alias: String): SecretKey? = error("vault touched") }, t.store)
+        check(restarted.readCatalog("o") == cat)
+        // marks from a snapshot show in the catalog and survive restart
+        t.c.reconcile("o", Snapshot(0, 1, false, mapOf("e" to 1L, "f" to 3L), emptyMap()))
+        check(NativeSeedCustodyCore(t.vault, t.store).readCatalog("o").entries.first { it.entry == "f" }.minAccept == 3L)
+        // ordinary purge: keys gone, preference stays default ON, epoch advances so a stale provision is refused
+        check(t.c.purgeOwner("o", 0).purged)
+        check(t.vault.keys.isEmpty())
+        check(t.c.readOwnerState("o") == CustodyOwnerState(1, true)); check(t.c.readCatalog("o").entries.isEmpty())
+        want(CustodyError.STALE_EPOCH) { t.prov(ep = 0) }
+        t.prov(ep = 1) // sign back in: no enableOwner needed
+        check(t.gen() == "94287082")
+        // explicit opt-out survives an ordinary purge and still refuses provisioning
+        t.c.clearOwner("o", 1); check(t.c.readOwnerState("o") == CustodyOwnerState(2, false))
+        check(t.c.purgeOwner("o", 2).purged)
+        check(t.c.readOwnerState("o") == CustodyOwnerState(3, false) && !t.c.readCatalog("o").enabled)
+        want(CustodyError.DISABLED) { t.prov(ep = 3) }
+        t.c.enableOwner("o", 3); t.prov(ep = 3)
+        // clearOwner is still the persistent opt-out
+        t.c.clearOwner("o", 3); check(!t.c.readCatalog("o").enabled)
+        // purging one owner never touches another owner's keys or preference
+        val u = Env(); u.prov(o = "a"); u.prov(o = "b"); u.c.clearOwner("b", 0); u.c.purgeOwner("a", 0)
+        check(u.c.readOwnerState("a").enabled && !u.c.readOwnerState("b").enabled && u.vault.keys.isEmpty())
+        // purge is idempotent and a failed physical delete keeps the entry pending and visible in the catalog; a stale lower epoch never touches a newer key
+        val w = Env(); w.prov(); w.vault.deleteDown = true
+        check(!w.c.purgeOwner("o", 0).purged); check(w.c.readCatalog("o").pendingPurge == listOf("e")); check(w.c.readCatalog("o").entries.isEmpty())
+        want(CustodyError.DENIED) { w.gen() }
+        w.vault.deleteDown = false; check(w.c.purgePending().isEmpty()); check(w.vault.keys.isEmpty())
+        check(w.c.purgeOwner("o", 0).purged && w.c.readOwnerState("o").epoch == 1L)
+        w.prov(ep = 1); w.c.purgeOwner("o", 0); check(w.c.readCatalog("o").entries.size == 1) // older epoch purge cannot remove a newer-epoch key
+        // fail closed
+        w.store.writeDown = true; want(CustodyError.METADATA_UNAVAILABLE) { w.c.purgeOwner("o", 1) }; w.store.writeDown = false
+        w.store.down = true; want(CustodyError.METADATA_UNAVAILABLE) { w.c.readCatalog("o") }; w.store.down = false
+        val doc = w.store.docs.getValue(ownerKey("o")); w.store.docs[ownerKey("o")] = "corrupt"
+        want(CustodyError.METADATA_UNAVAILABLE) { w.c.readCatalog("o") }; w.store.docs[ownerKey("o")] = doc
+        want(CustodyError.INVALID_INPUT) { w.c.purgeOwner("o", -1) }; want(CustodyError.INVALID_INPUT) { w.c.readCatalog("") }
+        // channel
+        val h = NativeCustodyChannelHandler(w.c)
+        val r = h.handle("readCatalog", mapOf("owner" to "o")) as ChannelReply.Ok
+        val m = r.value as Map<*, *>
+        check(m["enabled"] == true && m["epoch"] == 1L && (m["entries"] as List<*>).size == 1 && (m["entries"] as List<*>)[0].let { (it as Map<*, *>)["entry"] == "e" && it["seedVersion"] == 1L && !it.containsKey("alias") && !it.containsKey("seed") })
+        check((h.handle("purgeOwner", mapOf("owner" to "o", "epoch" to 1L)) as ChannelReply.Ok).value == mapOf("purged" to true, "epoch" to 2L))
+        check((h.handle("readCatalog", mapOf("owner" to "o", "x" to 1)) as ChannelReply.Err).code == "INVALID_INPUT")
+        check((h.handle("purgeOwner", mapOf("owner" to "o")) as ChannelReply.Err).code == "INVALID_INPUT")
+        // effective epoch is returned; native may be ahead of the caller. Too-high epochs are refused without any state change.
+        run {
+            val x = Env(); x.prov(); x.c.purgeOwner("o", 0); x.c.purgeOwner("o", 1)
+            val ahead = x.c.purgeOwner("o", 0); check(ahead.epoch == 2L && x.c.readOwnerState("o").epoch == 2L) // caller behind: no regress, no burn
+            val snap = x.store.docs.toMap()
+            want(CustodyError.EPOCH_MISMATCH) { x.c.purgeOwner("o", 3) }; want(CustodyError.EPOCH_MISMATCH) { x.c.clearOwner("o", 3) }
+            check(x.store.docs == snap && x.c.readOwnerState("o") == CustodyOwnerState(2, true))
+            check(x.c.purgeOwner("o", 2).epoch == 3L)
+            val fresh = Env(); want(CustodyError.EPOCH_MISMATCH) { fresh.c.purgeOwner("n", 1) }; check(fresh.store.docs.isEmpty())
+            // disabled + pending purge: catalog entries are empty, the pending entry is still reported, and nothing is generated
+            val d = Env(); d.prov(); d.vault.deleteDown = true
+            check(!d.c.clearOwner("o", 0).purged)
+            val cd = d.c.readCatalog("o"); check(!cd.enabled && cd.entries.isEmpty() && cd.pendingPurge == listOf("e") && cd.epoch == 1L)
+            want(CustodyError.DENIED) { d.gen() }
+            val dh = NativeCustodyChannelHandler(d.c)
+            check((dh.handle("purgeOwner", mapOf("owner" to "o", "epoch" to 5L)) as ChannelReply.Err).code == "EPOCH_MISMATCH")
+            check((dh.handle("clearOwner", mapOf("owner" to "o", "epoch" to 5L)) as ChannelReply.Err).code == "EPOCH_MISMATCH")
+            check((dh.handle("purgeOwner", mapOf("owner" to "o", "epoch" to 0L)) as ChannelReply.Ok).value == mapOf("purged" to false, "epoch" to 1L))
+            d.vault.deleteDown = false; d.c.purgePending(); check(d.c.readCatalog("o").pendingPurge.isEmpty())
+        }
+        println("PASS purge versus opt-out separation and durable catalog (JVM fakes only)")
+    }
     // Owner metadata reads neither touch the vault nor mutate durable state.
     run {
         val store = V2Store()

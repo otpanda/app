@@ -184,12 +184,54 @@ final class CustodyOwnerState {
   final bool enabled;
 }
 
+/// Logical durable metadata only. Generation may still fail locked/missing/tamper.
+final class CustodyCatalogEntry {
+  const CustodyCatalogEntry({
+    required this.entryId,
+    required this.seedVersion,
+    required this.epoch,
+    required this.algorithm,
+    required this.digits,
+    required this.period,
+    required this.protection,
+    required this.floor,
+    required this.minAcceptedVersion,
+  });
+  final String entryId, protection;
+  final int seedVersion, epoch, digits, period, floor, minAcceptedVersion;
+  final OtpAlgorithm algorithm;
+}
+
+final class CustodyCatalog {
+  const CustodyCatalog({
+    required this.epoch,
+    required this.enabled,
+    required this.entries,
+    required this.pendingPurge,
+  });
+  final int epoch;
+  final bool enabled;
+  final List<CustodyCatalogEntry> entries;
+  final List<String> pendingPurge;
+}
+
+final class PurgeOwnerResult {
+  const PurgeOwnerResult({required this.purged, required this.epoch});
+  final bool purged;
+  final int epoch;
+}
+
 abstract interface class NativeSeedCustody {
   /// Read-only. A never-seen owner starts at epoch 0, enabled by default.
   /// Unreadable metadata fails closed; it is never treated as a new owner.
   Future<CustodyOwnerState> readOwnerState(String ownerId);
 
   Future<CustodyCapability> capability();
+  Future<CustodyCatalog> readCatalog(String ownerId);
+
+  /// Ordinary lifecycle purge, not persistent opt-out. Use returned epoch.
+  /// A caller epoch above native truth fails epochMismatch without mutation.
+  Future<PurgeOwnerResult> purgeOwner(String ownerId, {required int epoch});
 
   /// Stores [seed] for the owner and entry. [seedVersion] must be greater than
   /// any stored version for that entry, so an old response cannot overwrite a
@@ -241,6 +283,7 @@ abstract interface class NativeSeedCustody {
   /// or unavailable store leaves the purge pending (see
   /// [ClearOwnerResult.purged]); there is no plaintext fallback. Needs durable
   /// metadata (throws [CustodyError.metadataUnavailable] and changes nothing).
+  /// A caller epoch above native truth fails epochMismatch without mutation.
   Future<ClearOwnerResult> clearOwner(String ownerId, {required int epoch});
 
   /// Explicit re-enable after [clearOwner]. [epoch] must be at least the

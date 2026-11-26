@@ -37,6 +37,17 @@ data class ReconcileOutcome(
     val removed: List<String>, val superseded: List<String>, val needsProvision: List<String>, val pendingPurge: List<String>,
 )
 
+/** One live entry's non-secret metadata. No seed, no key alias. [floor] and [minAccept] are the entry's persisted version marks for the current epoch. */
+data class CatalogEntry(
+    val entry: String, val version: Long, val epoch: Long, val algorithm: TotpCalculator.Algorithm, val digits: Int, val period: Int, val level: String,
+    val floor: Long, val minAccept: Long,
+)
+/** Durable read-only catalog of one owner: the local preference (enabled is the default until an explicit opt-out) plus live entries and entries whose physical delete is pending. */
+data class CustodyCatalog(val epoch: Long, val enabled: Boolean, val entries: List<CatalogEntry>, val pendingPurge: List<String>)
+
+/** Outcome of an ordinary sign-out or owner-switch purge. It never changes the opt-out preference. */
+data class PurgeOutcome(val purged: Boolean, val epoch: Long)
+
 /** [denied] is always true once the call returns. [purged] is false while a physical delete is still pending. */
 data class ClearOutcome(val purged: Boolean) { val denied: Boolean get() = true }
 
@@ -257,12 +268,43 @@ class NativeSeedCustodyCore(private val vault: KeyVault, private val store: Owne
     fun clearOwner(owner: String, epoch: Long): ClearOutcome = synchronized(lock) {
         checkIds(owner); checkEpoch(epoch)
         val state = load(owner)
+        if (epoch > state.epoch) fail(CustodyError.EPOCH_MISMATCH) // same bound as purgeOwner
         if (epoch + 1 > state.epoch) { state.disabled = true; state.advance(epoch + 1) }
         for (r in state.records.values.filter { it.epoch <= epoch }) state.retire(r) // never a newer epoch
         save(state)
         val before = state.pending.size
         purge(state)
         ClearOutcome(purged = state.pending.isEmpty() || before == 0)
+    }
+
+    /** Ordinary sign-out or owner switch: removes this owner's local keys and denies every older epoch, but is NOT an opt-out. The persisted preference
+     * (default enabled, or an explicit opt-out) is left exactly as it was, so a later sign-in needs no enableOwner and an explicit opt-out is not lost.
+     * Contrast [clearOwner], which is the persistent opt-out. Same epoch rule: provisions after this call must use the returned owner epoch. */
+    fun purgeOwner(owner: String, epoch: Long): PurgeOutcome = synchronized(lock) {
+        checkIds(owner); checkEpoch(epoch)
+        val state = load(owner)
+        if (epoch > state.epoch) fail(CustodyError.EPOCH_MISMATCH) // a caller cannot burn the epoch ahead of the real owner state
+        state.advance(epoch + 1) // no-op when the owner is already past it
+        for (r in state.records.values.filter { it.epoch <= epoch }) state.retire(r) // never a newer epoch
+        save(state)
+        val before = state.pending.size
+        purge(state)
+        PurgeOutcome(purged = state.pending.isEmpty() || before == 0, epoch = state.epoch)
+    }
+
+    /** Durable read-only per-entry metadata and version marks, for restart. Does not touch the vault, create keys, mutate state or authorize sync.
+     * Unreadable or non-canonical state fails closed with METADATA_UNAVAILABLE. */
+    fun readCatalog(owner: String): CustodyCatalog = synchronized(lock) {
+        checkIds(owner)
+        val state = load(owner)
+        CustodyCatalog(
+            state.epoch, !state.disabled,
+            if (state.disabled) emptyList() else state.records.toSortedMap().values.map { r -> // an opted-out owner exposes no entries, even if a delete is pending
+                val m = state.marks[r.entry]
+                CatalogEntry(r.entry, r.version, r.epoch, r.algorithm, r.digits, r.period, r.level, m?.floor ?: 0L, m?.minAccept ?: 0L)
+            },
+            state.pending.map { it.entry }.distinct().sorted(),
+        )
     }
 
     fun enableOwner(owner: String, epoch: Long) = synchronized(lock) {

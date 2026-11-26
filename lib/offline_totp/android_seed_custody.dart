@@ -57,7 +57,10 @@ final class AndroidSeedCustody implements NativeSeedCustody {
   }
 
   List<String> _ids(Object? v) {
-    if (v is! List || v.any((e) => e is! String || !validCustodyId(e))) {
+    if (v is! List ||
+        v.length > 5000 ||
+        v.toSet().length != v.length ||
+        v.any((e) => e is! String || !validCustodyId(e))) {
       _invalid();
     }
     return List<String>.from(v);
@@ -80,6 +83,102 @@ final class AndroidSeedCustody implements NativeSeedCustody {
       _invalid();
     }
     return CustodyOwnerState(epoch: epoch, enabled: v['enabled'] as bool);
+  }
+
+  int _number(Object? v, {int min = 0, int max = custodyMaxSafeInt}) {
+    if (v is! int || v < min || v > max) _invalid();
+    return v;
+  }
+
+  @override
+  Future<PurgeOwnerResult> purgeOwner(
+    String ownerId, {
+    required int epoch,
+  }) async {
+    if (!validCustodyId(ownerId) || epoch < 0 || epoch >= custodyMaxSafeInt) {
+      throw const CustodyException(CustodyError.invalidInput);
+    }
+    final v = _map(
+      await _call('purgeOwner', {'owner': ownerId, 'epoch': epoch}),
+      {'purged', 'epoch'},
+    );
+    if (v['purged'] is! bool) _invalid();
+    final effective = _number(
+      v['epoch'],
+      min: epoch,
+      max: custodyMaxSafeInt - 1,
+    );
+    return PurgeOwnerResult(purged: v['purged'] as bool, epoch: effective);
+  }
+
+  @override
+  Future<CustodyCatalog> readCatalog(String ownerId) async {
+    if (!validCustodyId(ownerId)) {
+      throw const CustodyException(CustodyError.invalidInput);
+    }
+    final v = _map(await _call('readCatalog', {'owner': ownerId}), {
+      'epoch',
+      'enabled',
+      'entries',
+      'pendingPurge',
+    });
+    final epoch = _number(v['epoch'], max: custodyMaxSafeInt - 1);
+    if (v['enabled'] is! bool || v['entries'] is! List) _invalid();
+    final entries = v['entries'] as List;
+    if (entries.length > 5000 || v['enabled'] == false && entries.isNotEmpty) {
+      _invalid();
+    }
+    final seen = <String>{};
+    final result = <CustodyCatalogEntry>[];
+    for (final value in entries) {
+      final e = _map(value, {
+        'entry',
+        'seedVersion',
+        'epoch',
+        'algorithm',
+        'digits',
+        'periodSeconds',
+        'protection',
+        'floor',
+        'minAcceptedVersion',
+      });
+      final id = e['entry'];
+      final protection = e['protection'];
+      if (id is! String ||
+          !validCustodyId(id) ||
+          !seen.add(id) ||
+          protection is! String ||
+          !RegExp(r'^[a-z0-9_-]{1,32}$').hasMatch(protection)) {
+        _invalid();
+      }
+      final alg = switch (e['algorithm']) {
+        'sha1' => OtpAlgorithm.sha1,
+        'sha256' => OtpAlgorithm.sha256,
+        'sha512' => OtpAlgorithm.sha512,
+        _ => _invalid(),
+      };
+      final entryEpoch = _number(e['epoch'], max: custodyMaxSafeInt - 1);
+      if (entryEpoch != epoch) _invalid();
+      result.add(
+        CustodyCatalogEntry(
+          entryId: id,
+          seedVersion: _number(e['seedVersion'], min: 1),
+          epoch: entryEpoch,
+          algorithm: alg,
+          digits: _number(e['digits'], min: 6, max: 8),
+          period: _number(e['periodSeconds'], min: 1, max: 86400),
+          protection: protection,
+          floor: _number(e['floor']),
+          minAcceptedVersion: _number(e['minAcceptedVersion']),
+        ),
+      );
+    }
+    return CustodyCatalog(
+      epoch: epoch,
+      enabled: v['enabled'] as bool,
+      entries: List.unmodifiable(result),
+      pendingPurge: List.unmodifiable(_ids(v['pendingPurge'])),
+    );
   }
 
   @override

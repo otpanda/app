@@ -60,6 +60,118 @@ void main() {
       );
     }
   });
+  test(
+    'catalog strict nested shape and lifecycle purge effective epoch',
+    () async {
+      Map<String, Object?> row() => {
+        'entry': 'entry',
+        'seedVersion': 3,
+        'epoch': 4,
+        'algorithm': 'sha256',
+        'digits': 7,
+        'periodSeconds': 30,
+        'protection': 'software',
+        'floor': 3,
+        'minAcceptedVersion': 2,
+      };
+      Map<String, Object?> catalog() => {
+        'epoch': 4,
+        'enabled': true,
+        'entries': [row()],
+        'pendingPurge': ['old'],
+      };
+      Object? reply = catalog();
+      messenger.setMockMethodCallHandler(channel, (c) async => reply);
+      final result = await custody.readCatalog('owner');
+      expect(result.entries.single.seedVersion, 3);
+      expect(result.pendingPurge, ['old']);
+      for (final bad in [
+        {...catalog(), 'extra': 0},
+        {
+          ...catalog(),
+          'entries': [row(), row()],
+        },
+        {
+          ...catalog(),
+          'pendingPurge': ['old', 'old'],
+        },
+        {
+          ...catalog(),
+          'entries': [
+            {...row(), 'extra': 0},
+          ],
+        },
+        {
+          ...catalog(),
+          'entries': [
+            {...row(), 'algorithm': 'md5'},
+          ],
+        },
+        {
+          ...catalog(),
+          'entries': [
+            {...row(), 'epoch': 3},
+          ],
+        },
+        {
+          ...catalog(),
+          'entries': [
+            {...row(), 'protection': 'OS ENCRYPTED'},
+          ],
+        },
+        {
+          ...catalog(),
+          'entries': [
+            {...row(), 'periodSeconds': 0},
+          ],
+        },
+        {
+          ...catalog(),
+          'entries': [
+            {...row(), 'digits': 9},
+          ],
+        },
+        {...catalog(), 'enabled': false},
+        {...catalog(), 'pendingPurge': List.filled(5001, 'x')},
+      ]) {
+        reply = bad;
+        await expectLater(
+          custody.readCatalog('owner'),
+          throwsA(isA<CustodyException>()),
+        );
+      }
+      reply = {'purged': false, 'epoch': 7};
+      final purge = await custody.purgeOwner('owner', epoch: 4);
+      expect(purge.epoch, 7);
+      expect(purge.purged, false);
+      for (final bad in [
+        {'purged': true, 'epoch': 3},
+        {'purged': true, 'epoch': 4, 'extra': 0},
+        {'purged': 'true', 'epoch': 4},
+        {'purged': true, 'epoch': custodyMaxSafeInt},
+      ]) {
+        reply = bad;
+        await expectLater(
+          custody.purgeOwner('owner', epoch: 4),
+          throwsA(isA<CustodyException>()),
+        );
+      }
+      messenger.setMockMethodCallHandler(
+        channel,
+        (c) async => throw PlatformException(code: 'EPOCH_MISMATCH'),
+      );
+      await expectLater(
+        custody.clearOwner('owner', epoch: 9),
+        throwsA(
+          isA<CustodyException>().having(
+            (e) => e.error,
+            'error',
+            CustodyError.epochMismatch,
+          ),
+        ),
+      );
+    },
+  );
   test('measured software protection is not upgraded to hardware', () async {
     messenger.setMockMethodCallHandler(
       channel,
