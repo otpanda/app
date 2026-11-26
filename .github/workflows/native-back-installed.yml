@@ -23,7 +23,7 @@ jobs:
           channel: stable
           cache: true
       - run: bash tool/bootstrap.sh
-      - run: flutter build apk --debug --flavor fdroid -t tool/native-back-fixture/main.dart
+      - run: flutter build apk --debug --flavor fdroid -t tool/native-back-fixture/main.dart --dart-define=OTPANDA_BATCH_ENABLED=true --dart-define=OTPANDA_BATCH_ENTRY_CAP=3 --dart-define=OTPANDA_BATCH_CODE_BUDGET=100 --dart-define=OTPANDA_BATCH_MIN_PERIOD=20
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
