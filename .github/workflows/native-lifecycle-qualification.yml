@@ -43,10 +43,14 @@ jobs:
           target: google_apis
           profile: pixel_6
           disable-animations: true
-          script: API_DIR="$GITHUB_WORKSPACE/api-fixture" bash tool/android-signed-in-ui.sh native-lifecycle-out
+          script: |
+            API_DIR="$GITHUB_WORKSPACE/api-fixture" bash tool/android-signed-in-ui.sh native-lifecycle-out
+            API_DIR="$GITHUB_WORKSPACE/api-fixture" bash tool/android-native-root.sh native-root-out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: native-authenticated-lifecycle-evidence
-          path: native-lifecycle-out
+          path: |
+            native-lifecycle-out
+            native-root-out
           retention-days: 7
