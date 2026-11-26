@@ -47,9 +47,12 @@ class _LoggingRecovery implements LocalRecoveryPlatform {
   }
 }
 
+AppLifecycleState? _lifecycle;
+
 class _Life with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycle = state;
     _log('lifecycle', {'state': state.name});
   }
 }
@@ -134,4 +137,31 @@ Future<void> main() async {
   try {
     await _driver.invokeMethod('flagPresent');
   } catch (_) {}
+  // Settled checkpoint: the controller applies an unlock grant when the app resumes (a grant earned while the app is inactive shows locked=true until then).
+  // Wait (up to 30 s) until the real lifecycle is resumed, then until the controller state has been unchanged for 600 ms, and log what it settled to.
+  var resumed = false;
+  final settleTries = ((cfg['settleMaxMs'] as int?) ?? 30000) ~/ 100;
+  for (var i = 0; i <= settleTries; i++) {
+    resumed = (_lifecycle ?? WidgetsBinding.instance.lifecycleState) == AppLifecycleState.resumed;
+    if (resumed) break;
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+  if (resumed) {
+    String snap() => '${c.enabled}/${c.locked}/${c.busy}/${c.error == null}';
+    var seen = snap();
+    var stable = 0;
+    for (var i = 0; i < 100 && stable < 6; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      final now = snap();
+      stable = now == seen ? stable + 1 : 0;
+      seen = now;
+    }
+  }
+  await _log('settled', {
+    'resumed': resumed,
+    'enabled': c.enabled,
+    'locked': c.locked,
+    'busy': c.busy,
+    'error': c.error == null ? 'none' : 'set',
+  });
 }

@@ -164,6 +164,9 @@ def analyze_dart(sc, require_no_self_stop):
             if hm is not None and not any(x['ev'] == 'dart_lifecycle' and x.get('state') == 'paused' and i > hm for i, x in enumerate(e)): errs.append(f'{name}: Dart never saw lifecycle paused after HOME')
             if rm is not None and not any(x['ev'] == 'dart_lifecycle' and x.get('state') == 'resumed' and i > rm for i, x in enumerate(e)): errs.append(f'{name}: Dart never saw lifecycle resumed after RETURN')
             if not done_is('true', 'true'): errs.append(f'{name}: expected recover_done enabled=true locked=true busy=false error=none, got {done}')
+            for k in ('RETURN_FOCUS', 'FOCUS_AFTER_RESUME', 'BACK_AFTER_RETURN'):
+                fv = [x.get('value', 'yes') for x in e if x['ev'] == 'mark' and x.get('name') == k]
+                if fv: facts.append(f'{name}: {k.lower()}={fv[0]} (reported fact)')
             if len(outs) != 1: errs.append(f'{name}: expected exactly one Dart outcome (value is a reported fact), got {outs}')
         if name in ('dart_unlock_select', 'dart_disable_select'):
             sel = name == 'dart_unlock_select'
@@ -173,11 +176,25 @@ def analyze_dart(sc, require_no_self_stop):
             if not ff or any(x.get('ok') != '1' or x.get('challenge_match') != '1' for x in ff): errs.append(f'{name}: fake finish not served with a matching challenge')
             exp = 'UNLOCK_GRANTED' if sel else 'DISABLED'
             if outs != [exp]: errs.append(f'{name}: expected {exp} once, got {outs}')
-            if not done_is('true' if sel else 'false', 'false'): errs.append(f'{name}: recover_done must be enabled={"true" if sel else "false"} locked=false busy=false error=none, got {done}')
+            # An unlock grant earned while the app is inactive is applied when the app resumes, so recover_done may still say locked=true. The gate is the settled checkpoint after resume.
+            if sel:
+                if not (len(done) == 1 and done[0].get('enabled') == 'true' and done[0].get('busy') == 'false' and done[0].get('error') == 'none'): errs.append(f'{name}: recover_done must be enabled=true busy=false error=none, got {done}')
+            elif not done_is('false', 'false'): errs.append(f'{name}: recover_done must be enabled=false locked=false busy=false error=none, got {done}')
             want = 'true' if sel else 'false'
             fa = [x for x in e if x['ev'] == 'flag_after']; aa = vals(e, 'dart_app_lock_enabled', 'value')
             if len(fa) != 1 or fa[0].get('present') != want: errs.append(f'{name}: lock flag present must be {want} after the outcome (actual native read)')
             if aa != [want]: errs.append(f'{name}: real ChannelLocalLock.enabled() must be {want} after the outcome, got {aa}')
+        if name in ('dart_home', 'dart_unlock_select', 'dart_disable_select'):
+            st = [x for x in e if x['ev'] == 'dart_settled']
+            want = {'dart_home': ('true', 'true'), 'dart_unlock_select': ('true', 'false'), 'dart_disable_select': ('false', 'false')}[name]
+            if len(st) != 1: errs.append(f'{name}: no single dart_settled checkpoint')
+            else:
+                g = st[0]
+                if g.get('resumed') != 'true': errs.append(f'{name}: app never resumed before the settled checkpoint')
+                if (g.get('enabled'), g.get('locked')) != want or g.get('busy') != 'false' or g.get('error') != 'none': errs.append(f'{name}: settled state must be enabled={want[0]} locked={want[1]} busy=false error=none, got {g}')
+                ri = idx(e, 'dart_settled'); rs = [i for i, x in enumerate(e) if x['ev'] == 'dart_lifecycle' and x.get('state') == 'resumed']
+                after = mark(e, 'RETURN') if name == 'dart_home' else mark(e, 'TAP_ENTRY')
+                if not any(i > (after or 0) and i < ri for i in rs): errs.append(f'{name}: no lifecycle resumed between the user action and the settled checkpoint')
         if sel_c(name):
             if vals(e, 'dart_consume', 'value') != ['true']: errs.append(f'{name}: consumeUnlock via the real channel must return true once')
         facts.append(f'{name}: selector_focus={"yes" if provider_focus(focus) else "NO"} focus={focus} self_stop_before_any_user_action={"YES" if self_stop else "no"} outcomes={outs or "none"} '

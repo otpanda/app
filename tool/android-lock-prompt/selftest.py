@@ -37,7 +37,7 @@ DS = ['dart_unlock_idle', 'dart_back', 'dart_cancel', 'dart_home', 'dart_unlock_
 DOUT = {'dart_back': 'USER_CANCELLED', 'dart_cancel': 'ABORTED', 'dart_home': 'ABORTED', 'dart_unlock_select': 'UNLOCK_GRANTED', 'dart_disable_select': 'DISABLED'}
 def de(e, s, **k): return ev('dart_' + e, s, **k)
 def dscen(s, host='api=fake loopback=0 realMessenger=1 realHost=1 flag=true', loaded=('true', 'true', 'true'), outcome=None, done=True, done_vals=None, focus=CM, entry='yes', early=False, busy=True,
-          lifecycle=True, resumed=True, consume='true', flag_after=None, real_enabled=None, cancel_call=True, chan_cancel=True, home_stop=True, chan_start=1, selected=True, taps=0, extra_stop=False, ret=True):
+          lifecycle=True, resumed=True, consume='true', flag_after=None, real_enabled=None, cancel_call=True, chan_cancel=True, home_stop=True, chan_start=1, selected=True, taps=0, extra_stop=False, ret=True, settled=True, settled_vals=None, settled_resumed=True, resume_before_settle=True):
     L = [f'== scenario {s}', mk(s, 'BEGIN'), ev('onCreate', s), f'I LOCKFX : ev=host_ready t=0 scenario={s} pid=1 {host}',
          de('loaded', s, ready=loaded[0], enabled=loaded[1], locked=loaded[2]), de('recover_start', s, disable='disable' in s)]
     for _ in range(chan_start): L.append(de('channel_start', s, intent='x'))
@@ -58,6 +58,7 @@ def dscen(s, host='api=fake loopback=0 realMessenger=1 realHost=1 flag=true', lo
         if lifecycle: L.append(de('lifecycle', s, state='paused'))
         if ret: L.append(mk(s, 'RETURN'))
         if resumed: L.append(de('lifecycle', s, state='resumed'))
+        L.append(mk(s, 'RETURN_FOCUS', value='com.android.credentialmanager/x'))
     if s.endswith('select'):
         L.append(mk(s, 'TAP_ENTRY'))
         for _ in range(taps): L.append(mk(s, 'TAP_CONFIRM', xy='1,2'))
@@ -67,12 +68,17 @@ def dscen(s, host='api=fake loopback=0 realMessenger=1 realHost=1 flag=true', lo
     if o: L.append(de('outcome', s, value=o))
     if o and consume and s == 'dart_unlock_select': L.append(de('consume', s, value=consume))
     if done and s != 'dart_unlock_idle':
-        en, lk = ('false', 'false') if s == 'dart_disable_select' else (('true', 'false') if s == 'dart_unlock_select' else ('true', 'true'))
+        en, lk = ('false', 'false') if s == 'dart_disable_select' else (('true', 'true') if s in ('dart_unlock_select',) else ('true', 'true'))
         dv = dict(enabled=en, locked=lk, busy='false', error='none'); dv.update(done_vals or {})
         L.append(de('recover_done', s, **dv))
         if s.endswith('select'):
             want = 'false' if s == 'dart_disable_select' else 'true'
             L.append(de('app_lock_enabled', s, value=real_enabled or want)); L.append(ev('flag_after', s, present=flag_after or want))
+    if s in ('dart_unlock_select', 'dart_disable_select') and resume_before_settle: L.append(de('lifecycle', s, state='resumed'))
+    if settled and s in ('dart_home', 'dart_unlock_select', 'dart_disable_select'):
+        en, lk = {'dart_home': ('true', 'true'), 'dart_unlock_select': ('true', 'false'), 'dart_disable_select': ('false', 'false')}[s]
+        sv = dict(resumed='true' if settled_resumed else 'false', enabled=en, locked=lk, busy='false', error='none'); sv.update(settled_vals or {})
+        L.append(de('settled', s, **sv))
     if s == 'dart_cancel':
         L = [l for l in L if 'name=FOCUS_AFTER_CANCEL' not in l] + [mk(s, 'FOCUS_AFTER_CANCEL', value=CM)]
     return L
@@ -107,6 +113,15 @@ v('dart: no loaded event fails', [l for l in D() if not ('ev=dart_loaded ' in l 
 v('dart cancel missing focus after completion fails', [l for l in D() if not ('scenario=dart_cancel ' in l and 'name=FOCUS_AFTER_CANCEL' in l)], 1, 'FOCUS_AFTER_CANCEL')
 badfocus = D(); fi = next(i for i,l in enumerate(badfocus) if 'scenario=dart_cancel ' in l and 'name=FOCUS_AFTER_CANCEL' in l); item = badfocus.pop(fi); ci = next(i for i,l in enumerate(badfocus) if 'scenario=dart_cancel ' in l and 'ev=dart_channel_cancel ' in l); badfocus.insert(ci, item)
 v('dart cancel focus sampled too soon fails', badfocus, 1, 'FOCUS_AFTER_CANCEL')
+v('dart_select: recover_done locked=true then settled unlocked after resume passes (real-run shape)', D(), 0)
+v('dart_select: settled still locked fails', D(dart_unlock_select={'settled_vals': {'locked': 'true'}}), 1, 'settled state must be')
+v('dart_select: no settled checkpoint fails', D(dart_unlock_select={'settled': False}), 1, 'dart_settled')
+v('dart_select: settled before app resumed fails', D(dart_unlock_select={'settled_resumed': False}), 1, 'never resumed')
+v('dart_select: no lifecycle resumed before settled fails', D(dart_unlock_select={'resume_before_settle': False}), 1, 'no lifecycle resumed')
+v('dart_home: settled not locked fails', D(dart_home={'settled_vals': {'locked': 'false'}}), 1, 'settled state must be')
+v('dart_home: no settled fails', D(dart_home={'settled': False}), 1, 'dart_settled')
+v('dart_home: return focus is a reported fact', D(), 0, 'return_focus=')
+v('dart_disable: settled still enabled fails', D(dart_disable_select={'settled_vals': {'enabled': 'true'}}), 1, 'settled state must be')
 v('dart: channel start twice fails', D(dart_back={'chan_start': 2}), 1, 'exactly once')
 v('dart: selector focus wrong fails', D(dart_back={'focus': 'com.android.systemui/Keyguard'}), 1, 'not a credential selector')
 v('dart: entry not visible fails', D(dart_back={'entry': 'no'}), 1, 'not visible')
@@ -131,7 +146,6 @@ v('dart_select: not selected fails', D(dart_unlock_select={'selected': False}), 
 v('dart_select: wrong outcome fails', D(dart_unlock_select={'outcome': 'ABORTED'}), 1, 'UNLOCK_GRANTED')
 v('dart_select: consume false fails', D(dart_unlock_select={'consume': 'false'}), 1, 'consumeUnlock')
 v('dart_select: consume missing fails', D(dart_unlock_select={'consume': None}), 1, 'consumeUnlock')
-v('dart_select: controller still locked fails', D(dart_unlock_select={'done_vals': {'locked': 'true'}}), 1, 'recover_done')
 v('dart_select: flag gone fails', D(dart_unlock_select={'flag_after': 'false'}), 1, 'flag present')
 v('dart_select: real enabled() false fails', D(dart_unlock_select={'real_enabled': 'false'}), 1, 'enabled() must be')
 v('dart_disable: flag still present fails', D(dart_disable_select={'flag_after': 'true'}), 1, 'flag present')

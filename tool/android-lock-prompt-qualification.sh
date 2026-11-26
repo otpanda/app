@@ -82,7 +82,15 @@ run(){ # scenario action steps... (env RUN_MODE=loopback|dart, RUN_CANCEL_MS)
       wait*) sleep "${step#wait}";;
       idle) idle "$s";;
       home) mark "$s" HOME ""; "${A[@]}" shell input keyevent KEYCODE_HOME;;
-      return) mark "$s" RETURN ""; "${A[@]}" shell am start -W -f 0x20000000 -n "$hostact" >> "$OUT/start-$s.txt" 2>&1;;
+      return) mark "$s" RETURN ""; "${A[@]}" shell am start -W -f 0x20000000 -n "$hostact" >> "$OUT/start-$s.txt" 2>&1
+        sleep 2; "${A[@]}" shell dumpsys window displays 2>&1 | tr -d '\r' > "$OUT/window-$s-return.txt"
+        rf=$(grep -m1 mCurrentFocus "$OUT/window-$s-return.txt" | sed 's/.*{[^ ]* [^ ]* //; s/}.*//' | tr -c 'A-Za-z0-9._/\n' '_'); mark "$s" RETURN_FOCUS "value=$rf"
+        # HOME does not dismiss the selector task. If it still covers the app, press BACK once so the app can resume (logged; the selector state is a reported fact).
+        case "$rf" in com.android.credentialmanager*|com.google.android.gms*) mark "$s" BACK_AFTER_RETURN ""; "${A[@]}" shell input keyevent KEYCODE_BACK;; esac
+        for _ in $(seq 1 20); do "${A[@]}" logcat -d -b all 2>/dev/null | grep LOCKFX | grep "scenario=$s" | grep -q 'ev=dart_lifecycle.*state=resumed' && break; sleep 1; done
+        "${A[@]}" shell dumpsys window displays 2>&1 | tr -d '\r' > "$OUT/window-$s-resumed.txt"
+        mark "$s" FOCUS_AFTER_RESUME "value=$(grep -m1 mCurrentFocus "$OUT/window-$s-resumed.txt" | sed 's/.*{[^ ]* [^ ]* //; s/}.*//' | tr -c 'A-Za-z0-9._/\n' '_')"
+        sleep 3;;
       focusafter)
         # Observe completion before sampling focus, not merely an elapsed timer.
         local complete=false
@@ -119,9 +127,9 @@ export RUN_MODE=dart
 run dart_unlock_idle unlock wait12 idle wait3
 run dart_back unlock wait12 idle back wait3
 RUN_CANCEL_MS=30000 run dart_cancel unlock wait12 idle focusafter wait4
-run dart_home unlock wait12 idle home wait4 return wait4
-run dart_unlock_select unlock wait12 idle select wait4
-run dart_disable_select disable wait12 idle select wait4;; esac
+run dart_home unlock wait12 idle home wait4 return wait3
+run dart_unlock_select unlock wait12 idle select wait8
+run dart_disable_select disable wait12 idle select wait8;; esac
 "${A[@]}" logcat -d -b crash 2>&1 | tr -d '\r' > "$OUT/logcat-crash.txt"
 grep -qi 'FATAL\|ANR\|not responding' "$OUT/logcat-crash.txt" && echo 'CRASH=yes' >> "$OUT/fixture.log"
 if [ "$cur" = null ] || [ -z "$cur" ]; then "${A[@]}" shell settings delete secure credential_service >/dev/null 2>&1; else "${A[@]}" shell settings put secure credential_service "$cur" >/dev/null 2>&1; fi

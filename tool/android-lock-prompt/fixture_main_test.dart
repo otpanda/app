@@ -24,7 +24,7 @@ Future<List<String>> _run({
           'mode': 'dart',
           'action': action,
           'cancelMs': cancelMs,
-          'scenario': 't',
+          'scenario': 't', 'settleMaxMs': 0,
         };
       case 'log':
         log.add('${call.arguments['name']} ${call.arguments['kv']}');
