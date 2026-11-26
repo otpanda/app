@@ -225,7 +225,9 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(c.current('a')?.value, '0000001');
     expect(bridge.batches, 1);
-    for (var i = 0; i < 10; i++) c.tick();
+    for (var i = 0; i < 10; i++) {
+      c.tick();
+    }
     await Future<void>.delayed(Duration.zero);
     expect(bridge.batches, 1);
     time = 3000;
@@ -345,7 +347,9 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(bridge.requests.last, ['a', 'b']);
     expect(bridge.requests.length, 3);
-    for (var i = 0; i < 10; i++) c.tick();
+    for (var i = 0; i < 10; i++) {
+      c.tick();
+    }
     await Future<void>.delayed(Duration.zero);
     expect(bridge.requests.length, 3);
     c.dispose();
@@ -472,8 +476,9 @@ void main() {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
         (call) async {
-          if (call.method == 'Clipboard.setData')
+          if (call.method == 'Clipboard.setData') {
             copied = (call.arguments as Map)['text'] as String;
+          }
           return null;
         },
       );
