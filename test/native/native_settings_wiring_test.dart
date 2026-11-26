@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:io' show Platform, File;
 
@@ -207,11 +206,12 @@ void main() {
       final beforePasskeys = calls
           .where((r) => r.$2 == '/v1/manage/recovery/status')
           .length;
-      if (Platform.isLinux)
+      if (Platform.isLinux) {
         await expectLater(
           find.byType(MaterialApp),
           matchesGoldenFile('goldens/native-settings-enabled.png'),
         );
+      }
       await t.tap(find.text('Passkeys'));
       await t.pumpAndSettle();
       expect(
@@ -219,11 +219,12 @@ void main() {
         beforePasskeys + 1,
       );
       expect(find.text('Fixture phone'), findsOneWidget);
-      if (Platform.isLinux)
+      if (Platform.isLinux) {
         await expectLater(
           find.byType(MaterialApp),
           matchesGoldenFile('goldens/native-passkeys-enabled.png'),
         );
+      }
       expect(find.text('Passkeys could not load here.'), findsNothing);
       expect(calls.every((r) => r.$1 == 'GET'), isTrue);
       await t.pumpWidget(const SizedBox.shrink());
