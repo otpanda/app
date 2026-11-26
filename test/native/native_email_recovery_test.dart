@@ -102,7 +102,10 @@ void main() {
   );
 
   test('complete: code, new passkey, finish needs status completed', () async {
-    replies['/auth/native/recovery/email/complete-code'] = (status: 200, body: {});
+    replies['/auth/native/recovery/email/complete-code'] = (
+      status: 200,
+      body: {},
+    );
     replies['/auth/native/recovery/email/complete-begin'] = (
       status: 200,
       body: begun(),
@@ -126,7 +129,10 @@ void main() {
 
   test('cancelled passkey sends no finish and keeps nothing', () async {
     creator = _Create(null);
-    replies['/auth/native/recovery/email/complete-code'] = (status: 200, body: {});
+    replies['/auth/native/recovery/email/complete-code'] = (
+      status: 200,
+      body: {},
+    );
     replies['/auth/native/recovery/email/complete-begin'] = (
       status: 200,
       body: begun(),
@@ -145,7 +151,10 @@ void main() {
       ) async {
         replies = {
           '/auth/native/recovery/email/complete-code': (status: 200, body: {}),
-          '/auth/native/recovery/email/complete-begin': (status: 200, body: begun()),
+          '/auth/native/recovery/email/complete-begin': (
+            status: 200,
+            body: begun(),
+          ),
           '/auth/native/recovery/email/complete-finish': ?fin,
         };
         final r = make();
@@ -177,8 +186,14 @@ void main() {
       'id': 'evil.example',
       'name': 'OTPanda',
     };
-    replies['/auth/native/recovery/email/complete-code'] = (status: 200, body: {});
-    replies['/auth/native/recovery/email/complete-begin'] = (status: 200, body: b);
+    replies['/auth/native/recovery/email/complete-code'] = (
+      status: 200,
+      body: {},
+    );
+    replies['/auth/native/recovery/email/complete-begin'] = (
+      status: 200,
+      body: b,
+    );
     final r = make();
     await r.sendCompletionCode('a@b.co');
     await expectLater(

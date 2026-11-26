@@ -308,8 +308,7 @@ class _ProductShellState extends State<ProductShell>
     await widget.pageReload?.call();
   }
 
-  String spaced(String c) =>
-      c.length == 6 ? '${c.substring(0, 3)} ${c.substring(3)}' : c;
+  String spaced(String c) => c;
 
   Widget avatar(String name, [String? serviceId, String? issuer]) =>
       ServiceAvatar(
@@ -337,6 +336,7 @@ class _ProductShellState extends State<ProductShell>
     String? copyId,
     bool expired = false,
     bool early = false,
+    int? expectedDigits,
   ]) => Card(
     clipBehavior: Clip.antiAlias,
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
@@ -402,7 +402,7 @@ class _ProductShellState extends State<ProductShell>
                             child: Text(
                               spaced(code),
                               style: TextStyle(
-                                fontFamily: 'Figtree',
+                                fontFamily: 'CodeMono',
                                 fontFeatures: [FontFeature.tabularFigures()],
                                 fontSize: 22,
                                 fontWeight: FontWeight.w600,
@@ -446,11 +446,17 @@ class _ProductShellState extends State<ProductShell>
                     ] else if (showCodeStatus) ...[
                       const SizedBox(width: 12),
                       SizedBox(
-                        height: renewing ? 48 : null,
+                        height: 48,
                         child: Center(
                           child: Text(
-                            renewing ? 'Renewing code...' : 'No active code',
-                            style: const TextStyle(fontSize: 12, color: muted),
+                            '-' * (expectedDigits ?? 6),
+                            semanticsLabel: 'No active code',
+                            style: const TextStyle(
+                              fontFamily: 'CodeMono',
+                              fontSize: 22,
+                              fontWeight: FontWeight.w600,
+                              color: muted,
+                            ),
                           ),
                         ),
                       ),
@@ -707,6 +713,7 @@ class _ProductShellState extends State<ProductShell>
                       v == null ? null : 'totp/${e.id}/${v.periodStartMs}',
                       v != null && !v.copyable,
                       v?.early ?? false,
+                      batch?.expectedDigits(e.id) ?? e.expectedDigits,
                     );
                   },
                 ),

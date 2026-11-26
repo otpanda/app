@@ -95,6 +95,9 @@ flutter:
           weight: 700
         - asset: assets/fonts/BricolageGrotesque-800.ttf
           weight: 800
+    - family: CodeMono
+      fonts:
+        - asset: assets/fonts/CodeMono-Regular.ttf
     - family: GoogleSans
       fonts:
         - asset: assets/fonts/GoogleSans.ttf

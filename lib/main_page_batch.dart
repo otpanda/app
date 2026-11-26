@@ -207,6 +207,7 @@ class MainPageBatchController extends ChangeNotifier {
   }
 
   BatchCode? current(String id) => _safe ? store.current(id) : null;
+  int? expectedDigits(String id) => store.expectedDigits(id);
   BatchCode? tileCurrent(String id) => _safe ? store.tileCurrent(id) : null;
   bool awaitingBoundary(String id) => _safe && store.awaitingBoundary(id);
   int? get nextBoundaryDelayMs {

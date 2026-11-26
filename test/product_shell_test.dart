@@ -300,7 +300,7 @@ void main() {
       ),
     );
     expect(find.text('Acme'), findsOneWidget);
-    expect(find.text('123 456'), findsOneWidget);
+    expect(find.text('123456'), findsOneWidget);
   });
 
   testWidgets('fresh received codes sit on top, highlighted; old ones do not', (
@@ -356,13 +356,13 @@ void main() {
     expect(find.byKey(const Key('fresh-Bravo-222222')), findsOneWidget);
     // The older code is listed normally, once, below the fresh ones.
     expect(find.byKey(const Key('fresh-Alpha-111111')), findsNothing);
-    expect(find.text('111 111'), findsOneWidget);
-    expect(find.text('222 222'), findsOneWidget);
-    final top = t.getTopLeft(find.text('333 333')).dy;
-    expect(top, lessThan(t.getTopLeft(find.text('111 111')).dy));
+    expect(find.text('111111'), findsOneWidget);
+    expect(find.text('222222'), findsOneWidget);
+    final top = t.getTopLeft(find.text('333333')).dy;
+    expect(top, lessThan(t.getTopLeft(find.text('111111')).dy));
     expect(
-      t.getTopLeft(find.text('222 222')).dy,
-      lessThan(t.getTopLeft(find.text('111 111')).dy),
+      t.getTopLeft(find.text('222222')).dy,
+      lessThan(t.getTopLeft(find.text('111111')).dy),
     );
   });
 
@@ -386,7 +386,7 @@ void main() {
     });
     await pump(t, FakeTransport(r));
     expect(find.text('No codes yet'), findsNothing);
-    expect(find.text('444 444'), findsOneWidget);
+    expect(find.text('444444'), findsOneWidget);
   });
 
   testWidgets('no highlight without recent received codes', (t) async {
@@ -414,7 +414,7 @@ void main() {
       ),
     );
     expect(find.text('Just arrived'), findsNothing);
-    expect(find.text('555 555'), findsOneWidget);
+    expect(find.text('555555'), findsOneWidget);
   });
 
   testWidgets('failed read is not shown as an empty account', (t) async {
@@ -446,7 +446,7 @@ void main() {
       expect(bridge.status, 'idle');
       expect(find.text('No codes yet'), findsNothing);
       expect(find.text('Acme'), findsNothing);
-      expect(find.text('123 456'), findsNothing);
+      expect(find.text('123456'), findsNothing);
     },
   );
   testWidgets('background-cleared data never claims the account is empty', (
@@ -520,7 +520,7 @@ void main() {
         ],
       );
       await pump(t, ManagedFake(r), initialTab: 0);
-      final status = t.getTopLeft(find.text('No active code'));
+      final status = t.getTopLeft(find.text('------'));
       final title = find.textContaining('A very long service');
       expect(t.getTopRight(title).dx + 8, lessThanOrEqualTo(status.dx));
       expect(t.takeException(), isNull);
@@ -729,7 +729,7 @@ void main() {
       assignmentEnabled: true,
     );
     expect(find.byKey(const Key('assign-v')), findsNothing);
-    expect(find.text('666 666'), findsOneWidget);
+    expect(find.text('666666'), findsOneWidget);
   });
 
   testWidgets('assign: picks an owned entry, then only asks to prepare it', (

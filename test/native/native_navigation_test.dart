@@ -3,20 +3,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/native/native_navigation.dart';
 
 void main() {
-  test(
-    'history controller retains pages until explicit session clear',
-    () {
-      final h = NativeNavigationHistory();
-      h.navigate('settings');
-      h.navigate('about');
-      expect(h.route, 'about');
-      h.back();
-      expect(h.route, 'settings');
-      h.clear();
-      expect(h.route, 'codes');
-      expect(h.atRoot, isTrue);
-    },
-  );
+  test('history controller retains pages until explicit session clear', () {
+    final h = NativeNavigationHistory();
+    h.navigate('settings');
+    h.navigate('about');
+    expect(h.route, 'about');
+    h.back();
+    expect(h.route, 'settings');
+    h.clear();
+    expect(h.route, 'codes');
+    expect(h.atRoot, isTrue);
+  });
   testWidgets(
     'native Back walks account history, duplicates do not add steps, root may exit',
     (t) async {

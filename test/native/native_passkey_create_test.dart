@@ -207,19 +207,21 @@ void main() {
       expect(fin['response']['response']['attestationObject'], 'o');
     });
 
-    test('finish sent: the grant is spent, even when the answer is a failure',
-        () async {
-      bodies['/v1/manage/first-passkey/begin'] = jsonEncode(beginBody(now));
-      statuses['/v1/manage/first-passkey/finish'] = 503;
-      final b = await bridge();
-      expect(b.controller.session?.enrollGrant, isNotNull);
-      await expectLater(b.firstPasskey(), throwsA(isA<ClientFailure>()));
-      expect(b.controller.session?.enrollGrant, isNull);
-      expect(b.firstPasskeyAvailable, isFalse);
-      calls.clear();
-      await expectLater(b.firstPasskey(), throwsStateError);
-      expect(calls, isEmpty);
-    });
+    test(
+      'finish sent: the grant is spent, even when the answer is a failure',
+      () async {
+        bodies['/v1/manage/first-passkey/begin'] = jsonEncode(beginBody(now));
+        statuses['/v1/manage/first-passkey/finish'] = 503;
+        final b = await bridge();
+        expect(b.controller.session?.enrollGrant, isNotNull);
+        await expectLater(b.firstPasskey(), throwsA(isA<ClientFailure>()));
+        expect(b.controller.session?.enrollGrant, isNull);
+        expect(b.firstPasskeyAvailable, isFalse);
+        calls.clear();
+        await expectLater(b.firstPasskey(), throwsStateError);
+        expect(calls, isEmpty);
+      },
+    );
 
     test('no grant: first passkey is not offered', () async {
       final b = await bridge(grant: false);

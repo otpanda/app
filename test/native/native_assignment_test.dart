@@ -132,8 +132,7 @@ class _Server {
   }
 }
 
-const _target =
-    '{"sourceId":"S","eventId":"E","entryId":"N"}';
+const _target = '{"sourceId":"S","eventId":"E","entryId":"N"}';
 
 NativeAssignmentDriver _d(_Server s, _Src src, {Object? me = _me}) =>
     NativeAssignmentDriver(
@@ -176,7 +175,9 @@ void main() {
       isFalse,
     );
     expect(
-      assignmentRequestAllowed('/v1/manage/assignment/status', {'intentId': 'i'}),
+      assignmentRequestAllowed('/v1/manage/assignment/status', {
+        'intentId': 'i',
+      }),
       isTrue,
     );
   });
@@ -194,23 +195,25 @@ void main() {
     expect(s.bodies.first.containsKey('keyId'), isTrue);
   });
 
-  test('shared: validates, prompts once with parsed text, signs, finishes',
-      () async {
-    final s = _Server(shared: true), src = _Src();
-    final d = _d(s, src);
-    final summary = jsonDecode(await d.prepare(_target)) as Map;
-    expect(summary['proofRequired'], true);
-    expect(src.signs, 0, reason: 'no prompt at prepare');
-    expect(await d.confirm(), 'assigned');
-    expect(src.signs, 1);
-    expect(src.text, contains('GitHub'));
-    expect(src.text, contains('Shared with 2 people, 1 automation'));
-    expect(src.fields!.purpose, 'step-up');
-    expect(src.fields!.keyId, 'K');
-    final fin = s.bodies.last;
-    expect(fin.keys.toSet(), {'action', 'intentId', 'signature', 'token'});
-    expect((fin['signature'] as String).length, 86);
-  });
+  test(
+    'shared: validates, prompts once with parsed text, signs, finishes',
+    () async {
+      final s = _Server(shared: true), src = _Src();
+      final d = _d(s, src);
+      final summary = jsonDecode(await d.prepare(_target)) as Map;
+      expect(summary['proofRequired'], true);
+      expect(src.signs, 0, reason: 'no prompt at prepare');
+      expect(await d.confirm(), 'assigned');
+      expect(src.signs, 1);
+      expect(src.text, contains('GitHub'));
+      expect(src.text, contains('Shared with 2 people, 1 automation'));
+      expect(src.fields!.purpose, 'step-up');
+      expect(src.fields!.keyId, 'K');
+      final fin = s.bodies.last;
+      expect(fin.keys.toSet(), {'action', 'intentId', 'signature', 'token'});
+      expect((fin['signature'] as String).length, 86);
+    },
+  );
 
   test('shared without an enrolled key: no begin proof path', () async {
     final s = _Server(shared: true), src = _Src();
@@ -275,7 +278,10 @@ void main() {
     bad('challenge for another key', (s) {
       s.beginEdit = (r) => {
         ...r,
-        'challenge': {...(r['challenge'] as Map<String, dynamic>), 'keyId': 'Q'},
+        'challenge': {
+          ...(r['challenge'] as Map<String, dynamic>),
+          'keyId': 'Q',
+        },
       };
     });
     bad('proof said not required for a shared target', (s) {
@@ -301,17 +307,22 @@ void main() {
     });
   });
 
-  test('private with a proofRequired=false but nonzero recipients is refused',
-      () async {
-    final s = _Server(), src = _Src();
-    s.beginEdit = (r) => {
-      ...r,
-      'summary': {...(r['summary'] as Map<String, dynamic>), 'activeRecipients': 1},
-    };
-    final d = _d(s, src);
-    await expectLater(d.prepare(_target), throwsA(anything));
-    expect(d.state, 'unavailable');
-  });
+  test(
+    'private with a proofRequired=false but nonzero recipients is refused',
+    () async {
+      final s = _Server(), src = _Src();
+      s.beginEdit = (r) => {
+        ...r,
+        'summary': {
+          ...(r['summary'] as Map<String, dynamic>),
+          'activeRecipients': 1,
+        },
+      };
+      final d = _d(s, src);
+      await expectLater(d.prepare(_target), throwsA(anything));
+      expect(d.state, 'unavailable');
+    },
+  );
 
   test('cancelled prompt: nothing sent, can start again', () async {
     final s = _Server(shared: true), src = _Src();
@@ -340,20 +351,22 @@ void main() {
     expect(s.calls.where((c) => c.endsWith('/status')).length, 2);
   });
 
-  test('odd finish answer and no status answer stays unknown, dismiss refused',
-      () async {
-    final s = _Server(), src = _Src();
-    s.finish = (_) => (status: 409, body: null);
-    s.statuses.addAll([(status: 503, body: null)]);
-    final d = _d(s, src);
-    await d.prepare(_target);
-    expect(await d.confirm(), 'unknown');
-    expect(() => d.dismiss(), throwsStateError);
-    s.statuses.add((status: 200, body: {'status': 'not-assigned'}));
-    expect(await d.reconcile(), 'not-assigned');
-    d.dismiss();
-    expect(d.state, 'idle');
-  });
+  test(
+    'odd finish answer and no status answer stays unknown, dismiss refused',
+    () async {
+      final s = _Server(), src = _Src();
+      s.finish = (_) => (status: 409, body: null);
+      s.statuses.addAll([(status: 503, body: null)]);
+      final d = _d(s, src);
+      await d.prepare(_target);
+      expect(await d.confirm(), 'unknown');
+      expect(() => d.dismiss(), throwsStateError);
+      s.statuses.add((status: 200, body: {'status': 'not-assigned'}));
+      expect(await d.reconcile(), 'not-assigned');
+      d.dismiss();
+      expect(d.state, 'idle');
+    },
+  );
 
   test('clear() drops a late outcome and does not undo a sent write', () async {
     final s = _Server(), src = _Src();

@@ -419,6 +419,8 @@ final class BatchCodeStore {
     );
   }
 
+  int? expectedDigits(String id) => _held[id]?.entry.digits;
+
   /// Tile-only user-approved policy: a held successor may be shown/copied at
   /// most two seconds before its start, measured against the EARLIEST possible
   /// server time. Does not alter strict current() or authorize missing codes.
