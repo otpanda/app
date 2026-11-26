@@ -21,6 +21,28 @@ final class NativeCustodySync {
          epoch: epoch,
        );
 
+  /// Restart bootstrap reads only durable local preference. It never restores
+  /// snapshot authorization, enables a disabled owner or changes the epoch.
+  static Future<NativeCustodySync> open({
+    required NativeSeedCustody custody,
+    required String ownerId,
+    required String deviceId,
+  }) async {
+    final state = await custody.readOwnerState(ownerId);
+    final sync = NativeCustodySync(
+      custody: custody,
+      ownerId: ownerId,
+      deviceId: deviceId,
+      epoch: state.epoch,
+    );
+    if (!state.enabled) sync._guard.disable();
+    return sync;
+  }
+
+  /// Shares the transition queue; the answer itself grants no seed access.
+  Future<CustodyOwnerState> readOwnerState() =>
+      _serial(() => _custody.readOwnerState(_owner));
+
   final NativeSeedCustody _custody;
   final NativeSeedSyncGuard _guard;
   String _owner;

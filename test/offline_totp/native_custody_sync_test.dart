@@ -46,6 +46,50 @@ final class DelayedCustody implements NativeSeedCustody {
 }
 
 void main() {
+  test(
+    'restart state keeps disabled owner disabled and guard unready',
+    () async {
+      final fake = FakeSeedCustody();
+      final initial = await NativeCustodySync.open(
+        custody: fake,
+        ownerId: 'o',
+        deviceId: 'd',
+      );
+      expect((await initial.readOwnerState()).enabled, true);
+      await expectLater(
+        initial.issue(
+          ownerId: 'o',
+          deviceId: 'd',
+          entryId: 'e',
+          seedVersion: 1,
+        ),
+        throwsA(isA<GuardException>()),
+      );
+      await initial.disable();
+      final restarted = await NativeCustodySync.open(
+        custody: fake,
+        ownerId: 'o',
+        deviceId: 'd',
+      );
+      final saved = await restarted.readOwnerState();
+      expect(saved.epoch, 1);
+      expect(saved.enabled, false);
+      await expectLater(
+        restarted.issue(
+          ownerId: 'o',
+          deviceId: 'd',
+          entryId: 'e',
+          seedVersion: 1,
+        ),
+        throwsA(isA<GuardException>()),
+      );
+      fake.metadataDown = true;
+      await expectLater(
+        NativeCustodySync.open(custody: fake, ownerId: 'o', deviceId: 'd'),
+        throwsA(isA<CustodyException>()),
+      );
+    },
+  );
   const snapshot = GuardSnapshot(
     ownerId: 'o',
     deviceId: 'd',
