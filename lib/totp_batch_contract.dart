@@ -450,11 +450,11 @@ final class BatchCodeStore {
       // its conservative expiry. Only then retain disabled stale digits.
       final strict = current(id);
       if (strict != null) return strict;
-      final end = start + e.codes.length * period;
-      // Keep stale digits only for a brief transition, never indefinitely
-      // after coverage is exhausted or a refresh fails.
-      if (high > end + 2000) return null;
       final old = ((low - start) ~/ period).clamp(0, e.codes.length - 1);
+      final end = start + (old + 1) * period;
+      // Keep stale digits only for a brief transition, never indefinitely
+      // after any held period or the whole coverage is exhausted.
+      if (high > end + 2000) return null;
       return BatchCode._(
         id,
         e.codes[old],
