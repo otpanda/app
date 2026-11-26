@@ -73,6 +73,16 @@ class AndroidPasskeySource
   }
 }
 
+/// Server challenge lifetime.
+const _challengeTtlMs = 120000;
+
+/// Clock skew tolerated between this device and the server. A device clock up
+/// to this far behind the server sees the expiry that far further ahead; a
+/// device clock ahead only sees less time left. Anything beyond it fails
+/// closed, and the Credential Manager timeout is still capped at the TTL.
+const _clockSkewMs = 300000;
+const _challengeMaxAheadMs = _challengeTtlMs + _clockSkewMs;
+
 final _b64url = RegExp(r'^[A-Za-z0-9_-]+$');
 
 /// Validates a begin response exactly like tool/session-bootstrap.js and
@@ -96,7 +106,7 @@ String passkeyRequestJson(
       (o['allowCredentials'] as List).length > 50 ||
       exp is! int ||
       exp <= nowMs ||
-      exp > nowMs + 120000) {
+      exp > nowMs + _challengeMaxAheadMs) {
     throw const PasskeyException('invalid');
   }
   final allow = <Map<String, String>>[];
@@ -258,7 +268,7 @@ String passkeyCreationRequestJson(
       !RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(o['challenge'] as String) ||
       exp is! int ||
       exp <= nowMs ||
-      exp > nowMs + 120000 ||
+      exp > nowMs + _challengeMaxAheadMs ||
       o['authenticatorSelection'] is! Map ||
       (o['authenticatorSelection'] as Map)['userVerification'] != 'required' ||
       o['excludeCredentials'] is! List ||

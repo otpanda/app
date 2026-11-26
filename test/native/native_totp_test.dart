@@ -237,7 +237,7 @@ void main() {
     expect(
       () => passkeyRequestJson({
         'token': _tok(),
-        'expiresAt': now + 200000,
+        'expiresAt': now + 500000,
         'options': {
           'rpId': 'otpanda.github.io',
           'userVerification': 'required',
