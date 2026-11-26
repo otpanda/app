@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
+
+import 'native_platform_browser.dart';
 
 import 'package:material_ui/material_ui.dart';
 
@@ -26,6 +29,7 @@ const String apiOrigin = String.fromEnvironment(
 );
 
 Widget buildNativeRoot() {
+  if (!Platform.isAndroid) return const NativePlatformBrowserApp();
   final google = AndroidGoogleSource();
   return _Boot(google: google);
 }

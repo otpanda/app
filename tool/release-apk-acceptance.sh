@@ -47,6 +47,7 @@ for flavor in google fdroid;do
   new_code=$(sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' "repair-out/$name-after.txt" | head -1)
   test "$new_code" -gt "$old_code"
   test "$new_code" -gt 2026112605
+  grep -q "versionName=${GITHUB_REF_NAME#v}" "repair-out/$name-after.txt"
   after=$(adb shell dumpsys package app.otpanda | grep 'firstInstallTime=' | head -1)
   test "$before" = "$after"
   adb shell cat /data/user/0/app.otpanda/files/upgrade-proof | tee "repair-out/$name-preserved-data.txt"
