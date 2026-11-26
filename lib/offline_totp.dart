@@ -5,3 +5,5 @@ export 'offline_totp/otp_account.dart';
 export 'offline_totp/otpauth_uri.dart';
 export 'offline_totp/import_outcome.dart';
 export 'offline_totp/aegis_vault.dart';
+export 'offline_totp/two_fas.dart';
+export 'offline_totp/bitwarden.dart';

@@ -4,7 +4,7 @@ import 'otp_account.dart';
 
 /// Strict Google Authenticator Key URI parser for TOTP. Mirrors the API's
 /// totp-uri.js limits: no whitespace, only known parameters, no duplicates,
-/// digits 6 or 8, secret 10..128 bytes, issuer prefix must equal the issuer
+/// digits 6, 7 or 8, secret 10..128 bytes, issuer prefix must equal the issuer
 /// parameter. HOTP and anything unknown is refused, not downgraded.
 OtpAccount parseOtpauthUri(String input) {
   try {
@@ -57,7 +57,7 @@ OtpAccount parseOtpauthUri(String input) {
       _ => throw const OtpFormatException(OtpFormatError.unsupportedAlgorithm),
     };
     final d = params['digits'] ?? '6';
-    if (d != '6' && d != '8') {
+    if (d != '6' && d != '7' && d != '8') {
       throw const OtpFormatException(OtpFormatError.unsupportedDigits);
     }
     final p = params['period'] ?? '30';

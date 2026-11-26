@@ -9,7 +9,7 @@ import 'otp_account.dart';
 /// password-protected vault is refused as [OtpFormatError.encrypted].
 ///
 /// TOTP entries import with their own algorithm, digits and period. Anything
-/// OTPanda cannot carry exactly (HOTP, Steam, mOTP, Yandex, 7 digits, a label
+/// OTPanda cannot carry exactly (HOTP, Steam, mOTP, Yandex, a label
 /// with a colon) is skipped and reported, never converted.
 const maxAegisFileLength = 8 << 20, maxAegisEntries = 5000;
 
