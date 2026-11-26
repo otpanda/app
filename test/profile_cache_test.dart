@@ -247,7 +247,7 @@ void main() {
     await t.pumpWidget(const SizedBox());
   });
 
-  testWidgets('stale cache still triggers a refresh', (t) async {
+  testWidgets('stale hub cache waits for a category before refresh', (t) async {
     t.view.physicalSize = const Size(400, 800);
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.reset);
@@ -259,7 +259,7 @@ void main() {
       });
     await t.pumpWidget(page(b, nav: 'settings'));
     await t.pumpAndSettle();
-    expect(b.overviews, 1);
+    expect(b.overviews, 0);
     await t.pumpWidget(const SizedBox());
   });
 
