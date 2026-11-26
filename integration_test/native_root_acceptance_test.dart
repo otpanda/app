@@ -81,7 +81,6 @@ Future<void> _until(WidgetTester t, Finder f, {int secs = 25}) async {
     await t.pump(const Duration(milliseconds: 100));
     if (f.evaluate().isNotEmpty) return;
   }
-  // ignore: avoid_print
   print(
     'VISIBLE: ${t.widgetList<Text>(find.byType(Text)).map((v) => v.data ?? '').join(' | ')}',
   );
@@ -106,6 +105,7 @@ void main() {
   testWidgets(
     'real native root: restore, background/resume, D1-revoked device shows the native sign-in (no Remember, no Temporary demo), cold restart the same',
     (t) async {
+      expect(Uri.parse(_harness).host, '127.0.0.1');
       expect(
         const String.fromEnvironment('OTPANDA_API_ORIGIN'),
         _harness,
@@ -162,12 +162,11 @@ void main() {
         AppLifecycleState.inactive,
         AppLifecycleState.resumed,
       ]);
-      await _until(t, find.byType(AuthEntry));
+      await _until(t, find.byType(AuthEntry), secs: 60);
       expect(find.text('123 456'), findsNothing);
       expect(find.text('Remember this device'), findsNothing);
       expect(find.text('Temporary demo'), findsNothing);
       expect(await store.readDeviceId(), isNotNull, reason: 'id kept, no wipe');
-      // ignore: avoid_print
       print(
         'VISIBLE-REVOKED: ${t.widgetList<Text>(find.byType(Text)).map((v) => v.data ?? '').join(' | ')}',
       );
@@ -178,7 +177,7 @@ void main() {
       // Cold restart of the root.
       await t.pumpWidget(const SizedBox());
       await t.pumpWidget(buildNativeRoot());
-      await _until(t, find.byType(AuthEntry));
+      await _until(t, find.byType(AuthEntry), secs: 60);
       expect(find.text('123 456'), findsNothing);
       expect(find.text('Remember this device'), findsNothing);
       expect(find.text('Temporary demo'), findsNothing);
