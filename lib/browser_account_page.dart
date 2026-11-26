@@ -109,6 +109,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   /// nothing. [direct] sets state only, for use before the first load.
   void applyRoute(String? id, {bool direct = false}) {
     if (id == null) return;
+    if (settingsCategoryForRoute(id) != SettingsCategory.account &&
+        id != settingsPasskeysRoute) {
+      overviewPreparedRevision = null;
+    }
     final tab = productRoutes.indexOf(id);
     if (tab >= 0) {
       if (!widget.workspaceEnabled) return;
@@ -162,6 +166,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
 
   void navigated(String id) => widget.onNavigate?.call(id);
   void openSettings() {
+    overviewPreparedRevision = null;
     workspace.suspend(preserve: true);
     rememberView(4);
     setState(() {
@@ -173,6 +178,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   }
 
   void leaveSettings() {
+    overviewPreparedRevision = null;
     workspace.resume();
     rememberView(productTab);
     setState(() {
@@ -210,7 +216,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   DateTime? overviewFetchedAt;
   int overviewInFlightRevision = -1;
   int accountPagesShown = 0;
-  bool overviewPreparedForAppearance = false;
+  int? overviewPreparedRevision;
   String? settingChange;
   bool securityOpen = false;
   final organization = OrganizationStore();
@@ -545,10 +551,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     // Restoration may have fetched for this exact appearance before the
     // page mounted. Consume that attempt once, including a failed attempt.
     // Never carry it into a later appearance or use a time-based throttle.
-    if (overviewPreparedForAppearance) {
-      overviewPreparedForAppearance = false;
-      return;
-    }
+    final prepared = overviewPreparedRevision == revision;
+    overviewPreparedRevision = null;
+    if (prepared && overview != null) return;
     if (overview != null && status == 'restored' && mounted) {
       // Already held but possibly old: the Account page shows security
       // status, so read it again without the loading bar.
@@ -690,7 +695,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
             attempt == revision &&
             accountPagesShown == 0 &&
             settingsCategory == SettingsCategory.account) {
-          overviewPreparedForAppearance = true;
+          overviewPreparedRevision = overview != null && !overviewStale
+              ? attempt
+              : null;
         }
       }
     }
@@ -946,7 +953,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   bool forceOverview = false;
 
   void resetIdentity() {
-    overviewPreparedForAppearance = false;
+    overviewPreparedRevision = null;
     cachedProfile = null;
     overview = null;
     sessionOwner = null;
@@ -1764,6 +1771,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       passkeysOpen = false;
                     });
                     navigated(c.route);
+                    if (c != SettingsCategory.account) {
+                      overviewPreparedRevision = null;
+                    }
                     if (c == SettingsCategory.organization) {
                       unawaited(loadOrganizationSection());
                     }
@@ -1787,6 +1797,8 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                         }
                       },
                       onHidden: () {
+                        overviewPreparedRevision = null;
+                        overviewAttempted = false;
                         accountPagesShown--;
                         if (accountPagesShown <= 0) stopSecurityListening();
                       },
