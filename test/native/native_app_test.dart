@@ -1,10 +1,12 @@
 import 'dart:io' show Platform;
-import 'dart:typed_data';
+
+import 'package:flutter/services.dart';
+import 'package:otpanda_client/native/android_adapters.dart';
 
 import 'package:material_ui/material_ui.dart'
     show Checkbox, MaterialApp, Scaffold;
 import 'package:otpanda_client/auth_entry.dart';
-import 'package:flutter/widgets.dart' show Key, Size;
+import 'package:flutter/widgets.dart' show Key, Size, SizedBox;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/native/native_app.dart';
 import 'package:otpanda_client/native/native_bridge.dart';
@@ -207,6 +209,64 @@ void main() {
       await t.pumpAndSettle();
       expect(br.runs, 0);
     });
+
+    testWidgets(
+      'shared Google button follows actual Android probe after bridge creation',
+      (t) async {
+        final source = AndroidGoogleSource(
+          serverClientId: 'fixture-web-client',
+        );
+        final methods = <String>[];
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(googleChannel, (call) async {
+          methods.add(call.method);
+          if (call.method == 'available') return true;
+          if (call.method == 'idToken') {
+            expect(call.arguments['serverClientId'], 'fixture-web-client');
+            expect(call.arguments['nonce'], 'N');
+            return null; // User cancellation, no real credentials.
+          }
+          return null;
+        });
+        addTearDown(
+          () => messenger.setMockMethodCallHandler(googleChannel, null),
+        );
+        final c = NativeSessionController(
+          NativeAuth(
+            post: (p, b) async => (status: 200, body: {'nonce': 'N'}),
+            keystore: _Ks(),
+            browser: br,
+            google: source,
+            store: st,
+            apiOrigin: 'https://api.example',
+            launchUrl: (c, s) => Uri.parse('https://x/'),
+          ),
+        );
+        final bridge = NativeSessionBridge(
+          c,
+          (m, p, {body, query, required bearer}) async =>
+              const SessionResponse(401, '{}'),
+          googleAvailability: () => source.available,
+        );
+        expect(bridge.googleAvailable, isFalse);
+        await source.probe();
+        expect(bridge.googleAvailable, isTrue);
+        await t.pumpWidget(
+          NativeApp(
+            controller: c,
+            googleAvailable: source.available,
+            authBridge: bridge,
+          ),
+        );
+        await t.pumpAndSettle();
+        await t.tap(find.textContaining('Google').first);
+        await t.pumpAndSettle();
+        expect(methods, ['available', 'idToken']);
+        expect(br.runs, 0);
+        await t.pumpWidget(const SizedBox.shrink());
+      },
+    );
 
     testWidgets('Google without SDK opens the browser handoff directly', (
       t,

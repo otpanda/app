@@ -108,7 +108,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       _bearer,
       onLogout: () => controller.signOut(),
       passkeys: passkeys,
-      googleAvailable: widget.google.available,
+      googleAvailability: () => widget.google.available,
       creation: passkeys,
       headerRequest: androidHeaderRequest(apiOrigin),
       deviceLabel: androidDeviceLabel,
@@ -192,6 +192,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
                 navigation: route,
                 onNavigate: (r) => set(() => route = r),
                 accountOnly: true,
+                signOutEnabled: true,
                 workspaceEnabled: true,
                 // Off with NATIVE_AUTH_ENABLED: needs the enrolled device key.
                 assignmentEnabled: nativeAuthEnabled,
