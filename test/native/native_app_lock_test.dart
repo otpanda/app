@@ -44,6 +44,7 @@ void main() {
       expect(c.enabled, true);
       expect(p.writes, 1);
       p.allow = true;
+      c.foreground=true;
       await c.unlock();
       expect(c.locked, false);
       await c.change(false);
