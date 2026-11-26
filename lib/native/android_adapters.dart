@@ -170,6 +170,7 @@ class CustomTabHandoff with WidgetsBindingObserver implements BrowserHandoff {
 class AndroidGoogleSource implements GoogleIdTokenSource {
   AndroidGoogleSource({
     MethodChannel channel = googleChannel,
+    this.probeTimeout = const Duration(seconds: 3),
     this.serverClientId = const String.fromEnvironment(
       'GOOGLE_SERVER_CLIENT_ID',
     ),
@@ -178,6 +179,7 @@ class AndroidGoogleSource implements GoogleIdTokenSource {
 
   /// Public Web client ID, a build-time define. Empty hides native Google.
   final String serverClientId;
+  final Duration probeTimeout;
   bool _available = false;
 
   @override
@@ -186,8 +188,14 @@ class AndroidGoogleSource implements GoogleIdTokenSource {
   Future<void> probe() async {
     if (serverClientId.isEmpty) return;
     try {
-      _available = await _c.invokeMethod<bool>('available') ?? false;
+      _available =
+          await _c.invokeMethod<bool>('available').timeout(probeTimeout) ??
+          false;
     } on MissingPluginException {
+      _available = false;
+    } on PlatformException {
+      _available = false;
+    } on TimeoutException {
       _available = false;
     }
   }

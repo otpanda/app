@@ -78,13 +78,15 @@ class NativeSessionBridge
     this.onLogout,
     this.passkeys,
     this.deviceLabel,
-    this.googleAvailable = false,
+    bool googleAvailable = false,
+    bool Function()? googleAvailability,
     this.creation,
     this.headerRequest,
     this.settingsEnabled = false,
     RealtimeConnector? realtimeConnector,
     int Function()? now,
-  }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch) {
+  }) : _googleAvailability = googleAvailability ?? (() => googleAvailable),
+       _now = now ?? (() => DateTime.now().millisecondsSinceEpoch) {
     if (realtimeConnector != null) {
       _realtime = NativeRealtimeClient(
         mint: _mintTicket,
@@ -273,7 +275,8 @@ class NativeSessionBridge
   }
 
   /// True on the Google flavor with Play Services (OS Google sign-in).
-  final bool googleAvailable;
+  final bool Function() _googleAvailability;
+  bool get googleAvailable => _googleAvailability();
 
   // Shared sign-in screen (AuthEntry). Same screen as web; only the platform
   // action differs. Failures land in controller.lastError.

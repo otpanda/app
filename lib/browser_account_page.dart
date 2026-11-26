@@ -45,6 +45,10 @@ class _ReadTransport implements SessionTransport {
 class BrowserAccountPage extends StatefulWidget {
   final BrowserSessionBridge? bridge;
   final bool loginEnabled;
+
+  /// Separately expose sign-out for an already authenticated native host.
+  /// Does not enable browser-only sign-in or account settings actions.
+  final bool? signOutEnabled;
   final bool assignmentEnabled;
   final bool entryEditEnabled;
   final bool entryDomainsEnabled;
@@ -65,6 +69,7 @@ class BrowserAccountPage extends StatefulWidget {
     super.key,
     this.bridge,
     this.loginEnabled = false,
+    this.signOutEnabled,
     this.assignmentEnabled = false,
     this.entryEditEnabled = false,
     this.entryDomainsEnabled = false,
@@ -804,7 +809,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   /// server writes nothing at expiry, so the page hides them by the clock.
   List<Map> liveSecurityRows(String key) => [
     for (final raw in (securityInfo?[key] as List? ?? const []))
-      if (raw is Map && (raw['expiresAt'] is! int || (raw['expiresAt'] as int) > now())) raw,
+      if (raw is Map &&
+          (raw['expiresAt'] is! int || (raw['expiresAt'] as int) > now()))
+        raw,
   ];
 
   Future<void> refreshSecurity() async {
@@ -1611,7 +1618,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   }
 
   Widget? settingsFooter() {
-    if (status == 'unsupported' || !widget.loginEnabled) return null;
+    if (status == 'unsupported' ||
+        !(widget.signOutEnabled ?? widget.loginEnabled)) {
+      return null;
+    }
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: OutlinedButton.icon(
