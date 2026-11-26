@@ -1,0 +1,83 @@
+name: Persistent native candidate APK
+on:
+  push:
+    branches: [build/native-alpha5-qualified]
+permissions:
+  contents: read
+concurrency:
+  group: native-persistent-branded-candidate
+  cancel-in-progress: true
+env:
+  FLUTTER_VERSION: '3.50.1'
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # verified v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter --disable-analytics
+      - run: bash tool/bootstrap.sh
+      - name: Focused native regression checks
+        run: |
+          flutter test test/native/native_app_test.dart test/native/android_adapters_test.dart test/native/native_shared_page_test.dart test/native/native_root_switches_test.dart test/native/native_settings_wiring_test.dart
+          flutter analyze lib/native/native_bridge.dart lib/native/native_root_io.dart lib/native/android_adapters.dart lib/browser_account_page.dart
+      - name: Configure persistent release signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!v:-}" ]; then echo "::error::Release signing secret $v is not set."; exit 1; fi
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          RELEASE_STORE_FILE="$RUNNER_TEMP/release.jks" \
+          RELEASE_STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD" \
+          RELEASE_KEY_ALIAS="$ANDROID_KEY_ALIAS" \
+          RELEASE_KEY_PASSWORD="$ANDROID_KEY_PASSWORD" \
+          python3 .github/scripts/android-release-signing.py
+      - name: Build, verify signature and name APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="0.1.0-alpha.5"
+          # Android versionName can carry the prerelease suffix, so alphas are identifiable.
+          mkdir -p dist
+          keytool -exportcert -keystore "$RUNNER_TEMP/release.jks" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" > "$RUNNER_TEMP/expected-cert.der"
+          EXPECTED_CERT_SHA256=$(sha256sum "$RUNNER_TEMP/expected-cert.der" | cut -d ' ' -f1)
+          export EXPECTED_CERT_SHA256
+          test "$EXPECTED_CERT_SHA256" = 05c62f2d61fbdc150fddda58e7fbc836650a65743ab53f1393ae08d55ca85999
+          for flavor in google fdroid; do
+            flutter build apk --release --flavor "$flavor" --build-name "$version" --build-number "2026112604" --dart-define=APP_VERSION="$version" --dart-define=NATIVE_SIGNIN=true --dart-define=NATIVE_ENTRY_EDIT_ENABLED=true --dart-define=NATIVE_SETTINGS_ENABLED=true --dart-define=GOOGLE_SERVER_CLIENT_ID=367143149550-560r90pmkqr71qp1tid3amck2a053rdg.apps.googleusercontent.com
+            apk="build/app/outputs/flutter-apk/app-$flavor-release.apk"
+            bash .github/scripts/verify-apk-signature.sh "$apk"
+            cp "$apk" "dist/otpanda-android-$flavor-native-candidate.apk"
+          done
+      - name: Verify merged release backup exclusions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t manifests < <(find build/app/intermediates/merged_manifests -name AndroidManifest.xml -type f)
+          test "${#manifests[@]}" -ge 2
+          python3 tool/check-android-backup.py "${manifests[@]}" --res android/app/src/main/res
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-android
+          path: dist/*
+          retention-days: 7
