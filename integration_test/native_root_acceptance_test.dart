@@ -1,8 +1,8 @@
+// ignore_for_file: avoid_print
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:otpanda_client/auth_entry.dart';
@@ -115,6 +115,10 @@ void main() {
       expect((await _h('GET', '/__harness/health'))['ok'], isTrue);
       await _h('POST', '/__harness/seed');
       final ks = AndroidKeystoreAdapter();
+      addTearDown(() async {
+        await ks.deleteKey();
+        await _ChannelStore().clear();
+      });
       await ks.deleteKey();
       final store = _ChannelStore();
       await store.clear();

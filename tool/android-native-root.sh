@@ -9,6 +9,9 @@ API_DIR="${API_DIR:?path to the api repo checkout}"
 OUT="${1:-native-root-out}"
 PORT="${PORT:-8787}"
 mkdir -p "$OUT"
+[[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == 1 ]] || { echo 'Refusing non-emulator'; exit 1; }
+# Disposable CI emulator only. Never run on a user device or real enrollment.
+
 ( cd "$API_DIR" && npm ci --no-audit --no-fund )
 ( cd "$API_DIR" && node tool/native-roundtrip-harness.mjs --port "$PORT" ) > "$OUT/harness.log" 2>&1 &
 H=$!
