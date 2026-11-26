@@ -43,6 +43,7 @@ class FixtureV2(private val ctx: Context, private val out: (String) -> Unit) {
             need(c.generate(o, "fxsha512", 1, 59) == "90693936", "SHA512 RFC code via provisioned key")
             for (e in listOf("fxsha1", "fxsha256", "fxsha512")) say("RESULT v2-level $e=${c.levelOf(o, e)}")
             need(real.aliases().count { it.startsWith("otpanda.totp.v2.") } == 3, "exactly three v2 keys exist")
+            need(errOf { prov("fxsha1", 1, TotpCalculator.Algorithm.SHA1, 8, 30, s1) } == CustodyError.VERSION_CONFLICT, "same-version reprovision refused")
         }
         "v2-restart" -> {
             need(c.generate(o, "fxsha1", 1, 59) == "94287082", "SHA1 key survived process restart")
@@ -57,6 +58,7 @@ class FixtureV2(private val ctx: Context, private val out: (String) -> Unit) {
             need(errOf { c.generate(o, "fxsha1", 1, 59) } == CustodyError.VERSION_CONFLICT, "old version refused")
             need(errOf { prov("fxsha1", 1, TotpCalculator.Algorithm.SHA1, 8, 30, s1) } == CustodyError.VERSION_CONFLICT, "downgrade refused")
             need(!real.containsAlias(old), "old key deleted from the Keystore")
+            need(c.generate(o, "fxsha256", 1, 59) == "46119246", "rotation leaves other entries usable")
             c.delete(o, "fxsha1", 2)
             need(errOf { c.generate(o, "fxsha1", 2, 59) } == CustodyError.NOT_FOUND, "deleted entry is gone")
             need(errOf { prov("fxsha1", 2, TotpCalculator.Algorithm.SHA1, 6, 30, s1) } == CustodyError.VERSION_CONFLICT, "delete floor blocks resurrection at the deleted version")
@@ -68,6 +70,7 @@ class FixtureV2(private val ctx: Context, private val out: (String) -> Unit) {
             vault.deleteDown = true
             c.delete(o, "fxsha256", 1); c.delete(o, "fxsha512", 1)
             need(errOf { c.generate(o, "fxsha256", 1, 59) } == CustodyError.DENIED, "logical deny while the physical delete fails")
+            need(errOf { c.generate(o, "fxsha512", 1, 59) } == CustodyError.DENIED, "second pending entry is also denied")
             need(real.containsAlias(alias("fxsha256", 1, TotpCalculator.Algorithm.SHA256, 8, 30)), "key still physically present while pending")
             need(c.purgePending() == listOf("$o/fxsha256", "$o/fxsha512"), "purge reports both pending while delete keeps failing")
             // deleteDown stays true until this process ends; the pending state is durable and the next phase (new process) retries it.
