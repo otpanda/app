@@ -10,6 +10,9 @@ import 'android_adapters.dart';
 import 'native_assignment.dart';
 import 'native_bridge.dart';
 import 'native_app.dart';
+import 'native_app_lock.dart';
+import 'native_local_lock_recovery.dart';
+import 'native_local_lock_session.dart';
 import 'native_navigation.dart';
 import 'native_auth.dart';
 import 'native_device_proof.dart';
@@ -34,9 +37,27 @@ Widget buildNativeRoot() {
   return _Boot(google: google);
 }
 
+/// Android composition seam for widget qualification. Production always uses
+/// [buildNativeRoot] and the real session, bearer transport and Android channels.
+@visibleForTesting
+Widget buildAndroidNativeRootForTest({
+  required NativeSessionController session,
+  required BearerRequest request,
+}) => _Boot(
+  google: AndroidGoogleSource(),
+  sessionOverride: session,
+  requestOverride: request,
+);
+
 class _Boot extends StatefulWidget {
-  const _Boot({required this.google});
+  const _Boot({
+    required this.google,
+    this.sessionOverride,
+    this.requestOverride,
+  });
   final AndroidGoogleSource google;
+  final NativeSessionController? sessionOverride;
+  final BearerRequest? requestOverride;
   @override
   State<_Boot> createState() => _BootState();
 }
@@ -46,6 +67,12 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   late final NativeSessionBridge bridge;
   final passkeys = AndroidPasskeySource();
   bool ready = false;
+  final localLock = LocalLockController(ChannelLocalLock());
+  late final lockNavigation = LockNavigationObserver(localLock);
+  void _lockChanged() {
+    navigationHistory.blocked = !localLock.ready || localLock.locked;
+  }
+
   final navigationHistory = NativeNavigationHistory();
   late final NativeStartupRecovery startup;
   late final NativeDevicesService devices;
@@ -54,21 +81,25 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _lockChanged();
+    localLock.addListener(_lockChanged);
     WidgetsBinding.instance.addObserver(this);
-    controller = NativeSessionController(
-      NativeAuth(
-        post: androidJsonPost(apiOrigin),
-        keystore: AndroidKeystoreAdapter(),
-        browser: CustomTabHandoff(),
-        google: widget.google,
-        store: _PrefsDeviceStore(),
-        apiOrigin: apiOrigin,
-        launchUrl: pagesNativeLaunchUrl,
-        passkeys: passkeys,
-        recognition: AndroidRecognitionStore(),
-      ),
-    );
-    _bearer = androidBearerRequest(apiOrigin);
+    controller =
+        widget.sessionOverride ??
+        NativeSessionController(
+          NativeAuth(
+            post: androidJsonPost(apiOrigin),
+            keystore: AndroidKeystoreAdapter(),
+            browser: CustomTabHandoff(),
+            google: widget.google,
+            store: _PrefsDeviceStore(),
+            apiOrigin: apiOrigin,
+            launchUrl: pagesNativeLaunchUrl,
+            passkeys: passkeys,
+            recognition: AndroidRecognitionStore(),
+          ),
+        );
+    _bearer = widget.requestOverride ?? androidBearerRequest(apiOrigin);
     final proof = ChannelDeviceProofSource();
     final rawEnroll = ChannelPendingStore();
     startup = NativeStartupRecovery(
@@ -100,6 +131,10 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       settingsEnabled: true,
       realtimeConnector: androidRealtimeConnector(apiOrigin),
     );
+    localLock.recovery = NativeLocalLockRecovery(
+      platform: ChannelLocalRecovery(),
+      bearer: controller.accessToken,
+    );
     bridge.assignment = NativeAssignmentDriver(
       post: bridge.assignmentPost,
       source: proof,
@@ -126,7 +161,16 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
 
   // Off unless NATIVE_AUTH_ENABLED. Per session (see NativeStartupRecovery):
   // sign-out or another session clears and discards; offline changes nothing.
+  final _lockSession = NativeLocalLockSessionBoundary();
   void _maybeRecover() {
+    if (_lockSession.update(
+      controller.session?.deviceId,
+      signedOut:
+          controller.phase == NativeSessionPhase.signedOut ||
+          controller.phase == NativeSessionPhase.signInRequired,
+    )) {
+      localLock.sessionChanged();
+    }
     // Only a real sign-out or sign-in-required clears state and the retry
     // floor. unknown (starting) and offline are transient: nothing changes.
     switch (controller.phase) {
@@ -162,12 +206,18 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     devices.dispose();
     bridge.disposeRealtime();
     navigationHistory.dispose();
+    localLock.removeListener(_lockChanged);
+    lockNavigation.dispose();
+    localLock.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => ready
       ? NativeApp(
+          navigatorObservers: [lockNavigation],
+          appWrapper: (context, child) =>
+              NativeAppLock(controller: localLock, child: child),
           controller: controller,
           googleAvailable: widget.google.available,
           version: const String.fromEnvironment('APP_VERSION'),
@@ -177,6 +227,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
             builder: (context, route, navigate) {
               final page = BrowserAccountPage(
                 bridge: bridge,
+                localSecuritySetting: LocalLockSetting(controller: localLock),
                 navigation: route,
                 onNavigate: navigate,
                 accountOnly: true,

@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 class NativeNavigationHistory extends ChangeNotifier {
   String route = 'codes';
+  bool blocked = false;
   final _history = <String>[];
   bool get atRoot => _history.isEmpty;
   void navigate(String next) {
@@ -12,7 +13,7 @@ class NativeNavigationHistory extends ChangeNotifier {
   }
 
   void back() {
-    if (atRoot) return;
+    if (atRoot || blocked) return;
     route = _history.removeLast();
     notifyListeners();
   }

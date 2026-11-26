@@ -487,6 +487,16 @@ class NativeSessionBridge
   /// One attempt, and on 401 one renewal then one retry. A second 401 or a
   /// renewal that cannot finish is reported as 503 (session paused) like the
   /// web bridge, never as proof the account is signed out.
+  Future<SessionResponse> localLockPost(String path, String body) {
+    if (!{
+      '/v1/manage/local-lock/begin',
+      '/v1/manage/local-lock/finish',
+    }.contains(path)) {
+      throw ArgumentError('Unsupported local action');
+    }
+    return _call('POST', path, body: body);
+  }
+
   Future<SessionResponse> _call(
     String method,
     String path, {
