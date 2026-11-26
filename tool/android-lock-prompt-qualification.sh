@@ -49,12 +49,12 @@ run(){ # scenario mimic actions...
   echo "== scenario $s" >> "$OUT/fixture.log"
   "${A[@]}" logcat -d -v threadtime -s LOCKFX:I | tr -d '\r' | grep 'ev=' >> "$OUT/fixture.log"
 }
-run observe_idle 0 wait8 idle back wait3
-run observe_home 0 wait6 home wait4 return wait3 back wait2
-run mimic_idle 1 wait8 idle wait2
-run mimic_back 1 wait6 back wait3
-run mimic_home 1 wait6 home wait4
+run observe_idle 0 wait10 idle back wait3
+run observe_home 0 wait10 idle home wait4 return wait3 back wait2
+run mimic_idle 1 wait10 idle wait3
+run mimic_back 1 wait10 idle back wait3
+run mimic_home 1 wait10 idle home wait4
 "${A[@]}" logcat -d -b crash 2>&1 | tr -d '\r' > "$OUT/logcat-crash.txt"
-grep -q 'FATAL\|ANR' "$OUT/logcat-crash.txt" && echo 'CRASH=yes' >> "$OUT/fixture.log"
+grep -qi 'FATAL\|ANR\|not responding' "$OUT/logcat-crash.txt" && echo 'CRASH=yes' >> "$OUT/fixture.log"
 "${A[@]}" shell am force-stop "$PKG"; "${A[@]}" uninstall "$PKG" >/dev/null 2>&1 || true
 python3 "$fx/verify-log.py" "$OUT/fixture.log" "$EXPECT_API"
