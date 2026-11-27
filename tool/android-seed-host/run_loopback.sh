@@ -11,19 +11,14 @@ port=8787
 python3 tool/android-seed-host/install.py
 python3 tool/android-seed-host/install_loopback.py
 flutter build apk --debug --flavor google -t tool/android-seed-host/fixture_loopback_main.dart --dart-define=LOOPBACK_BASE=http://127.0.0.1:$port > "$out/build.log" 2>&1
-# Debug signer SHA-256 -> the assertion origin the host synthesizes is android:apk-key-hash of this exact signer.
-ks=${ANDROID_DEBUG_KEYSTORE:-$HOME/.android/debug.keystore}
-[ -f "$ks" ] || { echo 'HARNESS no debug keystore (build once first or set ANDROID_DEBUG_KEYSTORE)'; exit 2; }
-fp=$(keytool -list -v -keystore "$ks" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/^ *SHA256: *//p' | head -1 | tr -d '\r')
-printf '%s' "$fp" | grep -Eq '^([0-9A-F]{2}:){31}[0-9A-F]{2}$' || { echo 'HARNESS debug fingerprint not found'; exit 2; }
 adb uninstall app.otpanda > "$out/uninstall-before.txt" 2>&1 || true
 adb install -t build/app/outputs/flutter-apk/app-google-debug.apk > "$out/install.txt" 2>&1
-# The APK's actual signer must equal the fingerprint the host was told, otherwise the origin would not be the real apk-key-hash.
+# Derive assertion origin from the actual APK, not a guessed Gradle keystore path.
 signer=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner -type f | sort -V | tail -1)
 [ -n "$signer" ] || { echo "HARNESS apksigner unavailable"; exit 2; }
-apk_fp=$("$signer" verify --print-certs build/app/outputs/flutter-apk/app-google-debug.apk 2>/dev/null | sed -n 's/.*SHA-256 digest: *//p' | head -1 | tr -d '\r' | tr 'a-f' 'A-F' | sed 's/../&:/g;s/:$//')
-if [ -n "$apk_fp" ] && [ "$apk_fp" != "$fp" ]; then echo 'HARNESS APK signer differs from debug keystore'; exit 2; fi
-echo "signer_checked=$([ -n "$apk_fp" ] && echo yes || echo skipped-no-apksigner)" > "$out/signer.txt"
+fp=$("$signer" verify --print-certs build/app/outputs/flutter-apk/app-google-debug.apk | sed -n 's/.*SHA-256 digest: *//p' | head -1 | tr -d '\r' | tr 'a-f' 'A-F' | sed 's/../&:/g;s/:$//')
+printf '%s' "$fp" | grep -Eq '^([0-9A-F]{2}:){31}[0-9A-F]{2}$' || { echo 'HARNESS actual APK signer unavailable'; exit 2; }
+echo 'signer_checked=yes-actual-apk' > "$out/signer.txt"
 node "$api/tool/seed-sync-loopback/server.mjs" "$port" 127.0.0.1 "$fp" > "$out/host.log" 2>&1 &
 host=$!
 cleanup() { kill "$host" 2>/dev/null || true; adb reverse --remove tcp:$port > "$out/reverse-remove.txt" 2>&1 || true; adb uninstall app.otpanda > "$out/uninstall-after.txt" 2>&1 || true; }
