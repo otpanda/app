@@ -32,6 +32,8 @@ class NativeWorkspaceCoordinator extends ChangeNotifier {
   int _savedRevision = -1;
   String? _admittedOwner;
   Future<void> _operations = Future.value();
+  // All opens and cold rediscovery are serialized. Stale cleanup can never
+  // close a newer open that has already started.
   Future<void> _serial(Future<void> Function() action) {
     final next = _operations.catchError((_) {}).then((_) => action());
     _operations = next;
@@ -87,6 +89,7 @@ class NativeWorkspaceCoordinator extends ChangeNotifier {
       // A stale open must not retain a live database. A later cold discovery
       // uses durable local authority, independently of this server session.
       runtime.lock();
+      if (active(generation)) unawaited(discover());
       return;
     }
     if (runtime.phase != NativeOfflineWorkspacePhase.ready) {
