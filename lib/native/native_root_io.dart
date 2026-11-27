@@ -521,71 +521,81 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
                   onReconnect: () => unawaited(controller.forceRenew()),
                 )
               : null,
-          signedInBuilder: (context) => NativeNavigation(
-            history: navigationHistory,
-            builder: (context, route, navigate) {
-              final page = BrowserAccountPage(
-                bridge: bridge,
-                importSaver: _transferSaver,
-                transferPage: _transferSaver != null && _transferSource != null
-                    ? TransferFlow(
-                        key: ValueKey('transfer-$_transferFence'),
-                        saver: _transferSaver!,
-                        exportSource: _transferSource!,
-                        onSaved: () async {
-                          await _admitWorkspace();
-                        },
-                      )
-                    : const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text(
-                          'Transfer codes is not available until this client and its server support are activated.',
+          signedInBuilder: (context) => ListenableBuilder(
+            listenable: localLock,
+            builder: (context, _) =>
+                !localLock.ready || localLock.locked || !localLock.foreground
+                ? const SizedBox.shrink()
+                : NativeNavigation(
+                    history: navigationHistory,
+                    builder: (context, route, navigate) {
+                      final page = BrowserAccountPage(
+                        bridge: bridge,
+                        importSaver: _transferSaver,
+                        transferPage:
+                            _transferSaver != null && _transferSource != null
+                            ? TransferFlow(
+                                key: ValueKey('transfer-$_transferFence'),
+                                saver: _transferSaver!,
+                                exportSource: _transferSource!,
+                                onSaved: () async {
+                                  await _admitWorkspace();
+                                },
+                              )
+                            : const Padding(
+                                padding: EdgeInsets.all(16),
+                                child: Text(
+                                  'Transfer codes is not available until this client and its server support are activated.',
+                                ),
+                              ),
+                        onWorkspaceReady: workspace.bind,
+                        onWorkspaceClosed: workspace.unbind,
+                        localSecuritySetting: Column(
+                          children: [
+                            LocalLockSetting(controller: localLock),
+                            if (nativeSeedSyncEnabled)
+                              NativeOfflineSetting(
+                                enrollment: offlineEnrollment,
+                              ),
+                          ],
                         ),
-                      ),
-                onWorkspaceReady: workspace.bind,
-                onWorkspaceClosed: workspace.unbind,
-                localSecuritySetting: Column(
-                  children: [
-                    LocalLockSetting(controller: localLock),
-                    if (nativeSeedSyncEnabled)
-                      NativeOfflineSetting(enrollment: offlineEnrollment),
-                  ],
-                ),
-                navigation: route,
-                onNavigate: navigate,
-                accountOnly: true,
-                signOutEnabled: true,
-                workspaceEnabled: true,
-                // Off with NATIVE_AUTH_ENABLED: needs the enrolled device key.
-                assignmentEnabled: nativeAuthEnabled,
-                // Own switch: needs the server's native entry routes.
-                entryEditEnabled: true,
-                entryDomainsEnabled: true,
-              );
-              // Only with NATIVE_AUTH_ENABLED: the way into phone sign-in.
-              if (!nativeAuthEnabled) return page;
-              return Stack(
-                children: [
-                  page,
-                  Positioned(
-                    right: 12,
-                    bottom: 12,
-                    child: SafeArea(
-                      child: FloatingActionButton.extended(
-                        heroTag: 'phone-sign-in',
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => NativeDevicesPage(service: devices),
+                        navigation: route,
+                        onNavigate: navigate,
+                        accountOnly: true,
+                        signOutEnabled: true,
+                        workspaceEnabled: true,
+                        // Off with NATIVE_AUTH_ENABLED: needs the enrolled device key.
+                        assignmentEnabled: nativeAuthEnabled,
+                        // Own switch: needs the server's native entry routes.
+                        entryEditEnabled: true,
+                        entryDomainsEnabled: true,
+                      );
+                      // Only with NATIVE_AUTH_ENABLED: the way into phone sign-in.
+                      if (!nativeAuthEnabled) return page;
+                      return Stack(
+                        children: [
+                          page,
+                          Positioned(
+                            right: 12,
+                            bottom: 12,
+                            child: SafeArea(
+                              child: FloatingActionButton.extended(
+                                heroTag: 'phone-sign-in',
+                                onPressed: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        NativeDevicesPage(service: devices),
+                                  ),
+                                ),
+                                icon: const Icon(Icons.phonelink_lock),
+                                label: const Text('Phone sign-in'),
+                              ),
+                            ),
                           ),
-                        ),
-                        icon: const Icon(Icons.phonelink_lock),
-                        label: const Text('Phone sign-in'),
-                      ),
-                    ),
+                        ],
+                      );
+                    },
                   ),
-                ],
-              );
-            },
           ),
         )
       : const SizedBox.shrink();

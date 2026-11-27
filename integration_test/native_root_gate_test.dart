@@ -8,6 +8,9 @@
 // remount and unlock; sign-out invalidates the cold selection (a cold remount shows no local view). Each proof prints GATE:<name>.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/rendering.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -130,7 +133,7 @@ void _lifecycle(WidgetTester t, List<AppLifecycleState> seq) {
 
 Future<void> _mountRoot(WidgetTester t) async {
   await t.pumpWidget(const SizedBox());
-  await t.pumpWidget(buildNativeRoot());
+  await t.pumpWidget(RepaintBoundary(key: _shotKey, child: buildNativeRoot()));
 }
 
 Future<void> _unlock(WidgetTester t) async {
@@ -147,6 +150,28 @@ Future<void> _unlock(WidgetTester t) async {
     'unlock via the real device credential prompt',
     secs: 60,
   );
+}
+
+final _shotKey = GlobalKey();
+
+Future<void> _shot(WidgetTester t, String name) async {
+  await t.pump(const Duration(milliseconds: 300));
+  final b =
+      _shotKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+  final bytes = await t.runAsync(() async {
+    final img = await b.toImage(pixelRatio: 1);
+    final d = await img.toByteData(format: ui.ImageByteFormat.png);
+    return d!.buffer.asUint8List();
+  });
+  expect(bytes!.length, greaterThan(2000), reason: 'blank screenshot $name');
+  final s = base64Encode(bytes);
+  const n = 800;
+  final parts = (s.length / n).ceil();
+  for (var i = 0; i < parts; i++) {
+    print(
+      'SHOTPART:$name:$i:$parts:${s.substring(i * n, (i + 1) * n > s.length ? s.length : (i + 1) * n)}',
+    );
+  }
 }
 
 void main() {
@@ -225,6 +250,7 @@ void main() {
         readsBefore,
         reason: 'owner verification ran while locked',
       );
+      await _shot(t, 'locked_no_owner_read_no_admission');
       _gate('locked_no_owner_read_no_admission');
 
       // 2. Unlock: owner verified from the real session response, admission enabled.
@@ -245,6 +271,7 @@ void main() {
       expect(scope, isNotNull, reason: 'workspace never admitted after unlock');
       expect(scope!.owner, _owner);
       expect(await _sessionReads(), greaterThan(readsBefore));
+      await _shot(t, 'admitted_after_owner_and_unlock');
       _gate('admitted_after_owner_and_unlock');
       // Let the authenticated snapshot publish before the lock and offline checks.
       await _pump(t, 6000);
@@ -291,6 +318,7 @@ void main() {
       print(
         'VISIBLE-OFFLINE: ${t.widgetList<Text>(find.byType(Text)).map((v) => v.data ?? '').join(' | ')}',
       );
+      await _shot(t, 'cold_local_view_offline_after_unlock');
       _gate('cold_local_view_offline_after_unlock');
       await _h('POST', '/__loopback/outage', '{"on":false}');
 
@@ -351,6 +379,7 @@ void main() {
       await _pump(t, 6000);
       expect(find.text(_offlineMarker), findsNothing);
       expect(await _discover(t), isNull);
+      await _shot(t, 'cold_root_after_signout_no_local_view');
       _gate('cold_root_after_signout_no_local_view');
 
       // Leave the emulator without a lock flag.

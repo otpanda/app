@@ -9,6 +9,11 @@ permissions:
 env:
   # Exact API commit carrying tool/seed-sync-loopback and the generation-cap correction. Not main, not deployed.
   API_SHA: 047b75f02e60d678d0ffbb180c598921ba98c0c4
+# One current branch qualification, while main/deploy work is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/feat/native-offline-workspace' || github.head_ref == 'feat/native-offline-workspace' }}
+
 jobs:
   loopback:
     runs-on: ubuntu-latest

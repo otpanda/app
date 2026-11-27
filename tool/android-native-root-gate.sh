@@ -51,6 +51,8 @@ flutter test integration_test/native_root_gate_test.dart --flavor google -d "$DE
   --dart-define="OTPANDA_API_ORIGIN=http://127.0.0.1:$PORT" --dart-define="HARNESS=http://127.0.0.1:$PORT" 2>&1 | tee "$OUT/test.log"
 result=${PIPESTATUS[0]}
 set -e
+mkdir -p "$OUT/shots"
+python3 tool/extract-shots.py "$OUT/test.log" "$OUT/shots"
 curl -fsS "http://127.0.0.1:$PORT/__loopback/counters" > "$OUT/counters-final.json" || true
 "${A[@]}" exec-out screencap -p > "$OUT/final.png" || true
 "${A[@]}" logcat -d -b crash > "$OUT/crash.txt" || true
