@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'fake_seed_custody.dart';
+
+import 'package:otpanda_client/offline_totp/otp_account.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/offline_totp/native_seed_custody.dart';
 import 'package:otpanda_client/offline_totp/seed_sync_channel.dart';
@@ -192,6 +196,58 @@ class FakeNative implements SeedSyncNative {
   Future<void> finish(String handleId) async => log.add('finish');
 }
 
+// Uses the stateful custody contract rather than a fixed needs list. Crypto is
+// deliberately a seam here; the installed Android channel fixture separately
+// covers the real sealed open and durable same-statement identity.
+class StatefulNative extends FakeNative {
+  StatefulNative(super.log, this.custody);
+  final FakeSeedCustody custody;
+  final wanted = <String, SeedBatchEntry>{};
+  bool interruptB = true;
+  @override
+  Future<SeedBatchStart> begin({
+    required String owner,
+    required String deviceId,
+    required int generation,
+    required int epoch,
+    required List<SeedBatchEntry> entries,
+  }) {
+    wanted.addEntries(entries.map((e) => MapEntry(e.entryId, e)));
+    return super.begin(
+      owner: owner,
+      deviceId: deviceId,
+      generation: generation,
+      epoch: epoch,
+      entries: entries,
+    );
+  }
+
+  @override
+  Future<List<String>> open(
+    String handleId, {
+    required String entryId,
+    required String serverPublicKey,
+    required String nonce,
+    required String ciphertext,
+  }) async {
+    if (entryId == 'b' && interruptB)
+      throw StateError('simulated interrupted native reply');
+    final e = wanted[entryId]!;
+    await custody.provision(
+      ownerId: 'owner',
+      entryId: entryId,
+      seedVersion: e.seedVersion,
+      algorithm: OtpAlgorithm.sha1,
+      digits: e.digits,
+      period: e.periodSeconds,
+      seed: Uint8List.fromList(List.filled(20, 42)),
+      epoch: 4,
+    );
+    opened.add(entryId);
+    return const [];
+  }
+}
+
 class FakeApi implements SeedSyncPullApi {
   FakeApi(this.log);
   final Log log;
@@ -306,6 +362,38 @@ class Rig {
 bool noForbidden(Rig r) => !r.ev.any((e) => e.startsWith('FORBIDDEN'));
 
 void main() {
+  test('interrupted pull replays exact snapshot and pulls only remaining custody need', () async {
+    final log = Log(), custody = FakeSeedCustody();
+    await custody.enableOwner('owner', epoch: 4);
+    final native = StatefulNative(log, custody)..j = journal();
+    final api = FakeApi(log)..snapshot = snap([se('a', 5), se('b', 8)]);
+    SeedSyncCoordinator coordinator() => SeedSyncCoordinator(
+      api: api,
+      native: native,
+      custody: custody,
+      current: (_) async => true,
+    );
+    expect(
+      (await coordinator().sync(scope)).outcome,
+      SeedSyncOutcome.unknownOutcome,
+    );
+    expect(custody.versionOf('owner', 'a'), 5);
+    expect(custody.versionOf('owner', 'b'), isNull);
+    native.interruptB = false;
+    // A new coordinator simulates lost orchestration state, retaining custody.
+    expect((await coordinator().sync(scope)).outcome, SeedSyncOutcome.synced);
+    expect(api.requested.map((b) => b.map((e) => e.entryId).toList()), [
+      ['a', 'b'],
+      ['b'],
+    ]);
+    expect(native.opened, ['a', 'b']);
+    api.snapshot = snap([se('a', 6), se('b', 8)]);
+    expect(
+      (await coordinator().sync(scope)).outcome,
+      SeedSyncOutcome.staleSnapshot,
+    );
+    expect(api.requested.length, 2);
+  });
   test(
     'happy path: snapshot, reconcile, then one signed batch; native opens',
     () async {
