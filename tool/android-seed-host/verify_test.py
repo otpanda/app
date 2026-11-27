@@ -20,5 +20,7 @@ with tempfile.TemporaryDirectory() as t:
    reset();f.write_text(f.read_text()+f'\nCHECK {label} true');assert not ok()
   reset();f=p/f'{phase}.log';f.write_text(f.read_text()+'\nCHECK phase_failed false');assert not ok()
   reset();(p/f'crash-{phase}.txt').write_text('FATAL EXCEPTION');assert not ok()
-  reset();(p/f'ui-{phase}.xml').write_text('<node text="Pixel Launcher is not responding"/>');assert not ok()
+  reset();(p/f'ui-{phase}.xml').write_text('<node text="missing fixture"/>');assert not ok()
+  for anr in ["isn't responding", 'is not responding']:
+   reset();(p/f'ui-{phase}.xml').write_text(f'<node text="Synthetic seed host check"/><node text="Pixel Launcher {anr}"/>');assert not ok()
  print('PASS verifier negative controls: every missing/duplicate label, failed check, Android crash')

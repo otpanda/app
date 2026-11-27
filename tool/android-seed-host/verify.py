@@ -9,6 +9,6 @@ for phase, labels in extra.items():
  assert ' false' not in text, f'{phase}: failed check'
  for label in common+labels: assert text.count(f'CHECK {label} true')==1, f'{phase}: missing/duplicate {label}'
  ui=(p/f'ui-{phase}.xml').read_text()
- assert 'Synthetic seed host check' in ui and 'isn' not in ui, f'{phase}: fixture frame obscured or not ready'
+ assert 'Synthetic seed host check' in ui and not any(s in ui for s in ("isn't responding", 'is not responding')), f'{phase}: fixture frame obscured or not ready'
  assert 'FATAL EXCEPTION' not in (p/f'crash-{phase}.txt').read_text(), f'{phase}: Android crash'
 print('PASS real Flutter channel, composed shared custody/install/sync host, AndroidKeystore enrollment/signature, restart and disable; synthetic owner only, no continued enrollment proof, server confirmation, seed sync, API or provider proof')
