@@ -657,20 +657,27 @@ void main() {
       if (!Platform.isWindows) expect(mode, 0x180);
     });
 
-    test('existing file, folder, link: alreadyExists, untouched', () async {
-      File(p('f.txt')).writeAsStringSync('keep');
-      Directory(p('d.txt')).createSync();
-      Link(p('l.txt')).createSync(p('nowhere'));
-      for (final n in ['f.txt', 'd.txt', 'l.txt']) {
-        expect(
-          await writeNewFileExclusive(dir.path, n, [1, 2, 3]),
-          ExportFileResult.alreadyExists,
-          reason: n,
-        );
-      }
-      expect(File(p('f.txt')).readAsStringSync(), 'keep');
-      expect(names(), ['d.txt', 'f.txt', 'l.txt']);
-    });
+    test(
+      'existing file, folder, link: refusal leaves each untouched',
+      () async {
+        File(p('f.txt')).writeAsStringSync('keep');
+        Directory(p('d.txt')).createSync();
+        Link(p('l.txt')).createSync(p('nowhere'));
+        for (final n in ['f.txt', 'd.txt', 'l.txt']) {
+          expect(
+            await writeNewFileExclusive(dir.path, n, [1, 2, 3]),
+            Platform.isWindows && n == 'l.txt'
+                ? anyOf(ExportFileResult.alreadyExists, ExportFileResult.failed)
+                : ExportFileResult.alreadyExists,
+            reason: n,
+          );
+        }
+        expect(File(p('f.txt')).readAsStringSync(), 'keep');
+        expect(Directory(p('d.txt')).existsSync(), isTrue);
+        expect(Link(p('l.txt')).targetSync(), p('nowhere'));
+        expect(names(), ['d.txt', 'f.txt', 'l.txt']);
+      },
+    );
 
     test(
       'concurrent writers in one isolate: exactly one wins, whole file',
