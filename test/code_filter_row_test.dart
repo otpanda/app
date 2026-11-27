@@ -82,6 +82,18 @@ void main() {
           .selected,
       true,
     );
+    expect(
+      t.getTopLeft(find.byKey(const ValueKey('dialog-filter-work'))).dy,
+      lessThanOrEqualTo(
+        t.getTopLeft(find.byKey(const ValueKey('dialog-filter-mine'))).dy,
+      ),
+    );
+    expect(
+      t.getTopLeft(find.byKey(const ValueKey('dialog-filter-work'))).dx,
+      lessThan(
+        t.getTopLeft(find.byKey(const ValueKey('dialog-filter-mine'))).dx,
+      ),
+    );
     await t.tap(find.byKey(const ValueKey('dialog-filter-family')));
     await t.pumpAndSettle();
     expect(selected, containsAll(['work', 'family']));

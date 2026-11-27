@@ -110,7 +110,10 @@ class CodeFilterRow extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  for (final c in choices)
+                  for (final c in [
+                    ...choices.where((c) => current.contains(c.id)),
+                    ...choices.where((c) => !current.contains(c.id)),
+                  ])
                     FilterChip(
                       key: ValueKey('dialog-filter-${c.id}'),
                       label: Text(c.label),
