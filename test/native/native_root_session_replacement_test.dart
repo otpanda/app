@@ -56,6 +56,7 @@ class _Google implements GoogleIdTokenSource {
 class _Rig {
   _Rig({required this.equalAccess});
   final bool equalAccess;
+  String responseOwner = 'owner';
   int renews = 0,
       reads = 0,
       owners = 0,
@@ -194,7 +195,7 @@ class _Rig {
         readGates.add(g);
         return g.future;
       }
-      return const SessionResponse(200, '{"ownerId":"owner"}');
+      return SessionResponse(200, '{"ownerId":"$responseOwner"}');
     }
     return const SessionResponse(503, '{}');
   }
@@ -470,6 +471,32 @@ void main() {
       r.coord!.hasLocalView &&
       r.rt!.snapshot?.entries.single.service == 'Saved service';
 
+  for (final mode in ['same', 'different', 'unverified']) {
+    testWidgets(
+      'root render: cold scope owner, verification $mode, then outage',
+      (t) async {
+        final r = _Rig(equalAccess: false)..install();
+        r.responseOwner = mode == 'different' ? 'different-owner' : 'owner';
+        r.holdReads = mode == 'unverified';
+        await _mount(t, r);
+        await _pump(t);
+        await seedLocalView(t, r);
+        r.renewUnavailable = true;
+        await r.controller.forceRenew();
+        await _pump(t, 8);
+        expect(r.controller.phase, NativeSessionPhase.offline);
+        expect(r.rt!.snapshot, isNotNull); // Hidden, not erased or closed.
+        final marker = find.text(
+          'Offline. Your own saved authenticator codes still work.',
+        );
+        expect(marker, mode == 'different' ? findsNothing : findsOneWidget);
+        await r.controller.forceRenew();
+        await _pump(t, 5);
+        expect(marker, mode == 'different' ? findsNothing : findsOneWidget);
+        await _teardown(t, r);
+      },
+    );
+  }
   testWidgets(
     'R1 OUTCOME: same-session offline renewal failure keeps the actual local snapshot readable',
     (t) async {
