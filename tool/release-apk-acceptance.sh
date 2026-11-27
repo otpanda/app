@@ -9,6 +9,7 @@ sign_in(){
  adb shell am force-stop app.otpanda
  adb shell am start -n app.otpanda/.MainActivity
  local ready=false
+ local start=$SECONDS
  for i in $(seq 1 25);do
   sleep 2
   rm -f repair-out/current.xml
@@ -18,10 +19,28 @@ sign_in(){
    if grep -q 'Sign in with a passkey' repair-out/current.xml && grep -q 'Create account with a passkey' repair-out/current.xml;then ready=true;break;fi
   fi
  done
- adb exec-out screencap -p > "repair-out/$name-signin.png"
+ # A semantics tree can be ready before the compositor displays a frame.
+ # Keep the first frame and every retry; fail after 20 seconds, never hide it.
+ local frame_start=$SECONDS frame_ok=false
+ for attempt in $(seq 0 10);do
+  adb exec-out screencap -p > "repair-out/$name-frame-$attempt.png"
+  if java tool/CheckStartupFrame.java "repair-out/$name-frame-$attempt.png";then
+   cp "repair-out/$name-frame-$attempt.png" "repair-out/$name-signin.png"
+   frame_ok=true
+   printf 'first usable captured frame: %ss since launch; %ss after semantics; attempt %s\n' "$((SECONDS-start))" "$((SECONDS-frame_start))" "$attempt" > "repair-out/$name-frame-timing.txt"
+   break
+  fi
+  test "$((SECONDS-frame_start))" -lt 20 || break
+  sleep 1
+ done
+ test "$frame_ok" = true || { echo "No meaningful app frame within bounded capture window"; return 1; }
+ adb shell uiautomator dump /sdcard/release.xml
+ adb pull /sdcard/release.xml repair-out/current.xml
  test -f repair-out/current.xml && cp repair-out/current.xml "repair-out/$name-signin.xml"
  if grep -Eq 'Sign-in on this device is not ready|Open OTPanda in your browser|This development build cannot sign in' repair-out/current.xml;then return 1;fi
  test "$ready" = true
+ grep -q 'Sign in with a passkey' repair-out/current.xml
+ grep -q 'Create account with a passkey' repair-out/current.xml
 }
 # Negative control must reject the exact disabled alpha7, not stale UI.
 adb uninstall app.otpanda || true
