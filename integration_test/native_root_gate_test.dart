@@ -522,13 +522,10 @@ void main() {
       await _until(
         t,
         () =>
-            find.text('OTPanda is locked').evaluate().isNotEmpty ||
-            find.byType(AuthEntry).evaluate().isNotEmpty,
-        'cold root after sign-out',
+            find.byType(AuthEntry).evaluate().isNotEmpty &&
+            find.text('OTPanda is locked').evaluate().isEmpty,
+        'cold signed-out root with previously disabled local lock',
       );
-      if (find.text('OTPanda is locked').evaluate().isNotEmpty) {
-        await _unlock(t);
-      }
       await _pump(t, 6000);
       expect(find.text(_offlineMarker), findsNothing);
       expect(await _discover(t), isNull);
