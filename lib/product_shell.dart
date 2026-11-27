@@ -1192,6 +1192,19 @@ class _ProductShellState extends State<ProductShell>
           ]),
 
         if (entries.isEmpty &&
+            filters.isNotEmpty &&
+            (input.isNotEmpty ||
+                private.isNotEmpty ||
+                widget.controller.contexts.isNotEmpty))
+          empty(
+            'No codes match your filters',
+            'Your filters are hiding the codes. Change or clear the filters to see them.',
+            action: TextButton(
+              onPressed: () => setState(() => filters = {}),
+              child: const Text('Clear all filters'),
+            ),
+          )
+        else if (entries.isEmpty &&
             private.isEmpty &&
             widget.controller.contexts.isEmpty)
           empty('No codes yet', 'Add an authenticator or connect a source.'),
@@ -1430,7 +1443,7 @@ class _ProductShellState extends State<ProductShell>
     setState(() {});
   }
 
-  Widget empty(String title, String body) => Card(
+  Widget empty(String title, String body, {Widget? action}) => Card(
     child: Padding(
       padding: const EdgeInsets.all(22),
       child: Column(
@@ -1442,6 +1455,7 @@ class _ProductShellState extends State<ProductShell>
           ),
           const SizedBox(height: 6),
           Text(body),
+          if (action != null) ...[const SizedBox(height: 10), action],
         ],
       ),
     ),
