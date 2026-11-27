@@ -94,6 +94,36 @@ void main() {
     );
     expect(t.takeException(), isNull);
   });
+  testWidgets('filter row stays within narrow and scaled layouts', (t) async {
+    for (final scale in [1.0, 1.5, 2.0]) {
+      for (final width in [100.0, 160.0, 240.0, 300.0, 390.0, 700.0]) {
+        await t.pumpWidget(
+          MaterialApp(
+            theme: otpandaTheme(),
+            home: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+              child: Scaffold(
+                body: SizedBox(
+                  width: width,
+                  child: CodeFilterRow(
+                    choices: const [
+                      CodeFilterChoice('mine', 'Mine'),
+                      CodeFilterChoice('shared', 'Shared'),
+                      CodeFilterChoice('tag', 'Work'),
+                    ],
+                    selected: const {'mine', 'tag'},
+                    onChanged: (_) {},
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await t.pumpAndSettle();
+        expect(t.takeException(), isNull, reason: 'width=$width scale=$scale');
+      }
+    }
+  });
   testWidgets('overflow row and dialog use the same selection', (t) async {
     t.view.physicalSize = const Size(390, 720);
     t.view.devicePixelRatio = 1;
