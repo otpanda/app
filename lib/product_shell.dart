@@ -146,7 +146,6 @@ class _ProductShellState extends State<ProductShell>
   String query = '';
   AccountSort accountSort = AccountSort.frequentlyUsed;
   Set<String> filters = {}, selectedAccounts = {};
-  bool matchAllTags = false;
   final Map<String, int> localLastUsed = {};
   String? selectionOwner;
   final searchController = TextEditingController();
@@ -788,9 +787,7 @@ class _ProductShellState extends State<ProductShell>
       return (ownership.isEmpty ||
               ownership.contains(e.manage ? 'mine' : 'shared')) &&
           (selectedTags.isEmpty ||
-              (matchAllTags
-                  ? selectedTags.every(tags(e.id).contains)
-                  : tags(e.id).intersection(selectedTags).isNotEmpty));
+              tags(e.id).intersection(selectedTags).isNotEmpty);
     }
 
     final entries = input.where(matches).toList();
@@ -1901,8 +1898,6 @@ class _ProductShellState extends State<ProductShell>
                 child: CodeFilterRow(
                   choices: filterChoices,
                   selected: filters,
-                  matchAll: matchAllTags,
-                  onMatchAllChanged: (v) => setState(() => matchAllTags = v),
                   onChanged: (value) => setState(() => filters = value),
                 ),
               ),
