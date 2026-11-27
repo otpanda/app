@@ -141,7 +141,10 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.byTooltip('Back to settings'));
     await t.pumpAndSettle();
-    // Sign out is pinned to the bottom edge of the screen.
+    // Extra device display/source categories can scroll; footer remains at the list end.
+    await t.drag(find.byType(CustomScrollView).first, const Offset(0, -400));
+    await t.pumpAndSettle();
+    // Sign out is pinned to the bottom edge when the content fits.
     final screen = t.getRect(find.byType(Scaffold).first);
     expect(
       screen.bottom -
@@ -150,6 +153,8 @@ void main() {
     );
     // Sign out sits at the bottom of the main list.
     expect(find.widgetWithText(OutlinedButton, 'Sign out'), findsOneWidget);
+    await t.drag(find.byType(CustomScrollView).first, const Offset(0, 400));
+    await t.pumpAndSettle();
     await t.tap(find.text('Account & security'));
     await t.pumpAndSettle();
     expect(log, ['settings/about', 'settings', 'settings/account-security']);
