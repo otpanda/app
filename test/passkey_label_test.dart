@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:otpanda_client/recovery_contract.dart';
@@ -12,6 +14,24 @@ class LabelRecovery extends FakeRecovery implements PasskeyLabelBridge {
   Future<void> renamePasskey(String id, String? label) async {
     log.add('rename:$id:$label');
     if (refuse) throw const RecoveryRefused();
+  }
+}
+
+class HeldLabelRecovery extends LabelRecovery {
+  HeldLabelRecovery(super.state);
+  Completer<RecoveryStatus>? heldStatus;
+  Completer<void>? heldRename;
+  int reads = 0;
+  @override
+  Future<RecoveryStatus> recoveryStatus() {
+    reads++;
+    return heldStatus?.future ?? super.recoveryStatus();
+  }
+
+  @override
+  Future<void> renamePasskey(String id, String? label) async {
+    log.add('rename:$id:$label');
+    await heldRename?.future;
   }
 }
 
@@ -173,6 +193,197 @@ void main() {
       await t.tap(find.text('Save'));
       await t.pumpAndSettle();
       expect(find.textContaining('not accepted'), findsOneWidget);
+    },
+  );
+
+  testWidgets('bridge change invalidates open rename confirmation', (t) async {
+    final old = LabelRecovery(
+      status(const [
+        RecoveryPasskey(
+          'shared-id',
+          1700000000000,
+          null,
+          label: 'Old account key',
+        ),
+      ]),
+    );
+    final next = LabelRecovery(
+      status(const [
+        RecoveryPasskey(
+          'shared-id',
+          1700000000000,
+          null,
+          label: 'New account key',
+        ),
+      ]),
+    );
+    await show(t, old);
+    await t.tap(find.byTooltip('Rename passkey'));
+    await t.pumpAndSettle();
+    await t.enterText(find.byType(TextField), 'Wrong account rename');
+    await t.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: RecoveryPanel(
+              bridge: next,
+              sections: const {RecoverySection.passkeys},
+            ),
+          ),
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    await t.tap(find.text('Save'));
+    await t.pumpAndSettle();
+    expect(next.log.where((l) => l.startsWith('rename')), isEmpty);
+    expect(old.log.where((l) => l.startsWith('rename')), isEmpty);
+    expect(find.text('New account key'), findsOneWidget);
+    expect(find.text('Old account key'), findsNothing);
+  });
+
+  for (final fail in [false, true]) {
+    testWidgets(
+      'late old-bridge status ${fail ? 'failure' : 'success'} cannot replace new passkeys',
+      (t) async {
+        final gate = Completer<RecoveryStatus>();
+        final old = HeldLabelRecovery(
+          status(const [RecoveryPasskey('old', 1, null, label: 'Old key')]),
+        )..heldStatus = gate;
+        final next = LabelRecovery(
+          status(const [RecoveryPasskey('new', 1, null, label: 'New key')]),
+        );
+        Widget panel(LabelRecovery b) => MaterialApp(
+          home: Scaffold(
+            body: RecoveryPanel(
+              bridge: b,
+              sections: const {RecoverySection.passkeys},
+            ),
+          ),
+        );
+        await t.pumpWidget(panel(old));
+        await t.pump();
+        await t.pumpWidget(panel(next));
+        await t.pumpAndSettle();
+        if (fail) {
+          gate.completeError(StateError('old read failed'));
+        } else {
+          gate.complete(old.state);
+        }
+        await t.pumpAndSettle();
+        expect(find.text('New key'), findsOneWidget);
+        expect(find.text('Old key'), findsNothing);
+        expect(find.textContaining('could not'), findsNothing);
+        expect(t.takeException(), isNull);
+      },
+    );
+  }
+  testWidgets(
+    'old in-flight rename completion never reloads new bridge or reports saved',
+    (t) async {
+      final gate = Completer<void>();
+      final old = HeldLabelRecovery(
+        status(const [RecoveryPasskey('old', 1, null)]),
+      )..heldRename = gate;
+      final next = HeldLabelRecovery(
+        status(const [RecoveryPasskey('new', 1, null, label: 'New key')]),
+      );
+      await show(t, old);
+      await t.tap(find.byTooltip('Rename passkey'));
+      await t.pumpAndSettle();
+      await t.enterText(find.byType(TextField), 'Old request');
+      await t.tap(find.text('Save'));
+      await t.pumpAndSettle();
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: RecoveryPanel(
+                bridge: next,
+                sections: const {RecoverySection.passkeys},
+              ),
+            ),
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(next.reads, 1);
+      gate.complete();
+      await t.pumpAndSettle();
+      expect(next.reads, 1);
+      expect(next.log, isEmpty);
+      expect(find.text('Name saved.'), findsNothing);
+      expect(find.text('New key'), findsOneWidget);
+    },
+  );
+  testWidgets('bridge change invalidates open destructive confirmation', (
+    t,
+  ) async {
+    final old = LabelRecovery(
+      status(const [
+        RecoveryPasskey('shared', 1, null),
+        RecoveryPasskey('other', 1, null),
+      ]),
+    );
+    final next = LabelRecovery(
+      status(const [
+        RecoveryPasskey('shared', 1, null),
+        RecoveryPasskey('next', 1, null),
+      ]),
+    );
+    await show(t, old);
+    await t.tap(find.byTooltip('Remove passkey').first);
+    await t.pumpAndSettle();
+    await t.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: RecoveryPanel(
+              bridge: next,
+              sections: const {RecoverySection.passkeys},
+            ),
+          ),
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    await t.tap(find.text('Remove'));
+    await t.pumpAndSettle();
+    expect(next.log, isEmpty);
+    expect(old.log, isEmpty);
+  });
+
+  testWidgets(
+    'open recovery-enable dialog survives bridge swap and sends nothing',
+    (t) async {
+      final old = LabelRecovery(status(const []));
+      final next = LabelRecovery(status(const []));
+      Widget panel(LabelRecovery b) => MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: RecoveryPanel(
+              bridge: b,
+              sections: const {RecoverySection.emailRecovery},
+            ),
+          ),
+        ),
+      );
+      await t.pumpWidget(panel(old));
+      await t.pumpAndSettle();
+      final dynamic state = t.state(find.byType(RecoveryPanel));
+      final pending = state.enable() as Future<void>;
+      await t.pumpAndSettle();
+      await t.pumpWidget(panel(next));
+      await t.pumpAndSettle();
+      await t.tap(find.byType(CheckboxListTile));
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+      await t.tap(find.text('Turn on'));
+      await pending;
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+      expect(old.log, isEmpty);
+      expect(next.log, isEmpty);
     },
   );
 
