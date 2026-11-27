@@ -49,7 +49,8 @@ class BatchImportSaver implements ImportSaver {
     if (_busy) return ImportSaveOutcome.notSaved;
     final outcome = await _save(accounts);
     if (!_unknown &&
-        (outcome == ImportSaveOutcome.notSaved ||
+        (outcome == ImportSaveOutcome.saved ||
+            outcome == ImportSaveOutcome.notSaved ||
             outcome == ImportSaveOutcome.cancelled)) {
       _payload = null;
       _nonce = null;

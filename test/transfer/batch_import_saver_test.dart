@@ -42,6 +42,34 @@ void main() {
       ],
     },
   };
+  test('definite save retires attempt so another reviewed batch gets a fresh nonce', () async {
+    final pk = Passkey(), nonces = <Object?>[];
+    final saver = BatchImportSaver(
+      passkeys: pk,
+      current: () async => true,
+      nowMs: () => 1000000,
+      post: (path, body) async {
+        nonces.add(body['batchNonce']);
+        if (path.endsWith('batch-begin')) {
+          return (status: 200, body: challenge());
+        }
+        return (
+          status: 201,
+          body: <String, dynamic>{
+            'entryIds': (body['items'] as List).length == 2
+                ? ['one', 'two']
+                : ['third'],
+          },
+        );
+      },
+    );
+    expect(await saver.save(accounts), ImportSaveOutcome.saved);
+    expect(await saver.save([accounts.first]), ImportSaveOutcome.saved);
+    expect(nonces[0], nonces[1]);
+    expect(nonces[2], nonces[3]);
+    expect(nonces[0], isNot(nonces[2]));
+    expect(pk.calls, 2);
+  });
   test(
     'whole reviewed batch sends one begin and finish under one prompt',
     () async {
