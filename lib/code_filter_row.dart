@@ -101,6 +101,7 @@ class CodeFilterRow extends StatelessWidget {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, refresh) => AlertDialog(
+          constraints: const BoxConstraints(maxWidth: 520),
           title: const Text('Filters'),
           content: SizedBox(
             width: 460,

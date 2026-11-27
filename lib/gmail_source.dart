@@ -195,6 +195,7 @@ class _GmailSourceConnectState extends State<GmailSourceConnect>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         title: const Text('Connect Gmail'),
         content: const SingleChildScrollView(
           child: Text(
@@ -339,6 +340,7 @@ class _GmailSourceDisconnectState extends State<GmailSourceDisconnect> {
     final yes = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         title: const Text('Disconnect Gmail?'),
         content: Text(
           'Stop collecting codes from ${widget.label}. Verify with a passkey to disconnect. This removes OTPanda\'s stored mailbox token and OTPanda will try to remove the label and filter it created. Google permission to read mail and manage the OTPanda label and filter may remain. Remove OTPanda in your Google Account permissions too if you want to revoke that grant.',
@@ -367,6 +369,7 @@ class _GmailSourceDisconnectState extends State<GmailSourceDisconnect> {
       await showDialog<void>(
         context: context,
         builder: (c) => AlertDialog(
+          constraints: const BoxConstraints(maxWidth: 400),
           title: Text(
             result.disconnected ? 'Gmail disconnected' : 'Nothing was changed',
           ),

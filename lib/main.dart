@@ -88,6 +88,7 @@ ThemeData otpandaTheme() => ThemeData(
     ),
   ),
   dialogTheme: DialogThemeData(
+    constraints: const BoxConstraints(maxWidth: 560),
     titleTextStyle: const TextStyle(
       fontFamily: 'BricolageGrotesque',
       fontSize: 22,
@@ -240,6 +241,7 @@ class _ClientHomeState extends State<ClientHome> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialog) => AlertDialog(
+          constraints: const BoxConstraints(maxWidth: 400),
           title: Row(
             children: [
               const Expanded(child: Text('Assign this code')),
@@ -323,6 +325,7 @@ class _ClientHomeState extends State<ClientHome> {
     final result = await showDialog<AccountEntry>(
       context: context,
       builder: (context) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         title: dialogTitle(context, entry == null ? 'Add entry' : 'Edit entry'),
         content: SingleChildScrollView(
           child: Form(
@@ -426,6 +429,7 @@ class _ClientHomeState extends State<ClientHome> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         title: dialogTitle(context, 'Delete entry?'),
         content: Text(
           'Delete ${entry.service} and its fictional saved code? This cannot be undone except by restarting this demo.',

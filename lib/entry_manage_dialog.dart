@@ -84,6 +84,7 @@ class _EntryManageDialogState extends State<EntryManageDialog> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         key: const Key('entry-delete-confirm'),
         title: const Text('Delete this entry?'),
         content: ConstrainedBox(
@@ -114,6 +115,7 @@ class _EntryManageDialogState extends State<EntryManageDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    constraints: const BoxConstraints(maxWidth: 400),
     key: const Key('entry-manage'),
     title: const Text('Edit entry'),
     content: ConstrainedBox(

@@ -108,6 +108,7 @@ class _TotpEntryDialogState extends State<TotpEntryDialog>
   Widget build(BuildContext context) {
     final code = store.visible(), left = store.remainingSeconds();
     return AlertDialog(
+      constraints: const BoxConstraints(maxWidth: 520),
       title: const Text('Authenticator code'),
       content: SizedBox(
         width: 360,
@@ -172,6 +173,7 @@ Future<bool> totpPrerequisite(
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 520),
         title: const Text('Add a passkey first'),
         content: const Text(
           'A passkey is needed to verify authenticator setup. Add one in Account & security, then return here. Your existing sign-in keeps working.',
@@ -194,6 +196,7 @@ Future<bool> totpPrerequisite(
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
+          constraints: const BoxConstraints(maxWidth: 520),
           title: const Text('Could not check passkeys'),
           content: const Text(
             'Check your connection and try adding the authenticator again.',
@@ -501,6 +504,7 @@ class _AddTotpState extends State<_AddTotp> {
     // a finished add must always return its entry id so the shell can refresh.
     canPop: !busy,
     child: AlertDialog(
+      constraints: const BoxConstraints(maxWidth: 520),
       title: const Text('Add authenticator'),
       content: SizedBox(
         width: 420,

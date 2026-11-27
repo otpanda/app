@@ -110,6 +110,7 @@ class _EntryDomainsDialogState extends State<EntryDomainsDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    constraints: const BoxConstraints(maxWidth: 400),
     key: const Key('entry-domains'),
     title: Text('Websites for ${widget.entry.service}'),
     content: ConstrainedBox(

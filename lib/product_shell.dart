@@ -1000,6 +1000,7 @@ class _ProductShellState extends State<ProductShell>
     final target = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         key: const Key('assign-picker'),
         title: const Text('Choose an entry'),
         children: [

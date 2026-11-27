@@ -18,6 +18,7 @@ class _AccountSecurityPreviewState extends State<AccountSecurityPreview> {
       final remove = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
+          constraints: const BoxConstraints(maxWidth: 400),
           title: const Text('No recovery option left'),
           content: const Text(
             'In a real account, losing every passkey and enrolled recovery device would mean losing access. Email alone cannot restore your vault. This changes the preview only.',

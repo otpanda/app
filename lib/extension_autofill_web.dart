@@ -109,6 +109,7 @@ class _AutofillDialogState extends State<_AutofillDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    constraints: const BoxConstraints(maxWidth: 400),
     title: const Text('Automatic code autofill'),
     content: SizedBox(
       width: 320,

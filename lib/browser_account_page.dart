@@ -1109,6 +1109,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     final target = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         title: const Text('Choose an owned entry'),
         children: [
           for (final entry in owned)

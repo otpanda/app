@@ -95,6 +95,7 @@ class _OrganizationPanelState extends State<OrganizationPanel> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, refresh) => AlertDialog(
+          constraints: const BoxConstraints(maxWidth: 400),
           title: Text(tag == null ? 'New personal tag' : 'Rename personal tag'),
           content: SizedBox(
             width: 320,
@@ -155,6 +156,7 @@ class _OrganizationPanelState extends State<OrganizationPanel> {
     final confirmed = await _dialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         title: const Text('Delete personal tag?'),
         content: Text(
           'Remove "${tag.label}" from all your entries? Entries and services are not deleted.',
@@ -191,6 +193,7 @@ class _OrganizationPanelState extends State<OrganizationPanel> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, refresh) => AlertDialog(
+          constraints: const BoxConstraints(maxWidth: 400),
           title: const Text('Personal tags for entry'),
           content: SizedBox(
             width: 320,
