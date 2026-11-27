@@ -181,7 +181,7 @@ void main() {
         post: (path, body) async {
           final r = await bridge.rulePost(path, body);
           debugPrint(
-            'SYNTHETIC_RULE_RESPONSE $path ${r.status} ${jsonEncode(r.body)}',
+            'SYNTHETIC_RULE_RESPONSE $path ${r.status} localNow=${DateTime.now().millisecondsSinceEpoch} identity=${await identity()} ${jsonEncode(r.body)}',
           );
           return r;
         },
