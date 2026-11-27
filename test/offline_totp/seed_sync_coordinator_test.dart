@@ -230,8 +230,9 @@ class StatefulNative extends FakeNative {
     required String nonce,
     required String ciphertext,
   }) async {
-    if (entryId == 'b' && interruptB)
+    if (entryId == 'b' && interruptB) {
       throw StateError('simulated interrupted native reply');
+    }
     final e = wanted[entryId]!;
     await custody.provision(
       ownerId: 'owner',
