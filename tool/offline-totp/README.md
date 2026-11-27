@@ -38,3 +38,29 @@ Fixes after review (v2): no API 33 calls (bounded read loop; adapters also compi
 
 
 API34 isolated instrumentation run on26November2026 passed: https://github.com/otpanda/app/actions/runs/45813877902 . Artifact: https://github.com/otpanda/app/actions/runs/45813877902/artifacts/15114675750 . Default refused software keys and rolled back; explicit test seam generated SHA1/256/512 RFC codes with reported software keys; separate processes retained records/codes; simulated key loss and orphan reconciliation passed;65byte key was accepted. Raw perphase instrumentation output and empty crash log inspected. This does not establish API30 runtime, physical hardware, lock/unlock behavior, actual uninstall/reinstall or backup/restore. Final fixture record cleanup passed; the teardown uninstall command did not preserve independent absence proof. No real seed, host wiring or production policy selection.
+
+## Native custody v2 (owner/version/epoch contract), UNWIRED
+
+`NativeCustody.kt` (`NativeSeedCustodyCore`, pure JVM), `OwnerStateFileStore.kt` (atomic per-owner state in noBackupFilesDir) and `AndroidSeedVault.probe()`
+implement the Kotlin side of the Dart `NativeSeedCustody` contract. The v1 `LocalSeedCustody` above is superseded but kept until v2 is reviewed; retire it then.
+Key alias = SHA-256 of the same length-prefixed AAD as Dart `custodyAad` (pinned by a cross-language test vector), so a record cannot move to another
+owner, entry, version, epoch or parameter set. Software-backed Keystore keys are accepted (OS-encrypted); capability() reports hardware vs OS-encrypted by probe.
+Tests: `NativeCustodyTest.kt` (JVM fakes only). Not proven: real Keystore, hardware level, lock, uninstall/backup behavior, 64+ byte seeds, rollback or replacement of
+the state file by code running as the app UID (not prevented). `NativeCustodyChannel.kt` is a Flutter-free MethodChannel handler proposal (JVM-tested); MainActivity wiring is not done. Emulator fixture phases v2-* exist (runtime/RuntimeFixtureV2.kt) and are UNRUN until the manual workflow executes them.
+
+### Purge versus opt-out, durable catalog (JVM fakes only, UNWIRED)
+`purgeOwner(owner, epoch)` is the ordinary sign-out or owner-switch purge: it removes that owner's keys, advances the local epoch, and leaves the persisted preference untouched (default enabled stays enabled, an explicit opt-out stays opted out). `clearOwner` remains the persistent opt-out. `readCatalog(owner)` is a read-only durable view of live entries (version, epoch, algorithm, digits, period, protection level, floor, minAccepted) plus entries with a pending physical delete; it needs no vault access, never returns a seed or alias, and fails closed on unreadable state. `purgeOwner` returns the effective epoch with `purged` (native may already be ahead); a caller epoch above the owner state is EPOCH_MISMATCH for both `purgeOwner` and `clearOwner`, with no state change. `readCatalog` lists no entries while opted out (pending deletes are still reported). Channel methods `purgeOwner` and `readCatalog` mirror them. Not done: the Dart contract/adapters and fakes for these two methods, the sign-out wiring, and the state format is unchanged, so an explicit "enabled" cannot be told apart from the default.
+
+## Seed-sync key and erase (inactive foundation)
+
+`SeedSyncKey.kt` holds the dedicated per-owner seed-sync signing key lifecycle, separate from the shared device key. Erase is one persisted, fail-closed sequence for every purge trigger: commit a deny record plus an owed purge in one write, purge the seeds, then delete the key and read back that it is gone. A failed commit blocks the key in memory (ERASE_INCOMPLETE) until a retry commits it. `retryPending` repeats unresolved work per owner using the durably captured native owner epoch, without burning epochs on repeated physical-delete failure. A new erase recaptures native state; a reset that lowered native state clamps the retry to native truth. Wiring requirements (not built): the caller persists its own sign-out/disable intent and re-runs erase or `retryPending` at app start, foreground and unlock. Tests use JVM fakes and synthetic keys only: they are not Keystore, device, backup or uninstall evidence. The core and file store are not constructed anywhere in production (release guard).
+
+### Inactive wire contract
+`SeedSyncWire.kt` builds enroll, snapshot, revoke and batch proofs from the signing key's stored generation and install id, and the current native custody epoch. The old three-field active enrollment record is rejected, not migrated; this foundation has never been active. An epoch read and signing are not atomic with a concurrent custody transition. A server epoch mismatch must discard the work and obtain a fresh begin, never trigger a purge. Raw signing is test-only and production references fail the release guard. Full native handle ownership, lifecycle, registration and network coordination remain separate work.
+
+## Seed-sync Keystore adapter and channel contract (inactive, unregistered)
+
+`AndroidSyncKeyVault.kt` is the Android Keystore EC P-256 signing vault for the seed-sync key (non-exportable, SHA-256, no user-auth requirement, fresh alias only, DER out).
+`SeedSyncChannel.kt` is the strict, Flutter-free channel contract (`SeedSyncChannelHandler`): native builds every signed message and uses its own clock; seeds never
+cross the channel; replies carry codes only. The method list and rules are in the header of that file. Neither is registered, wired or constructed in production (release
+guard). Not verified: hardware level, lock, uninstall, backup, OS invalidation, a real MethodChannel. The JVM tests use fakes and synthetic keys.

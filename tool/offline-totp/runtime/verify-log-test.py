@@ -11,6 +11,10 @@ def phase(name, oks, extra=()):
     lines.append(f"FIXTURE api={API} END phase={name} oks={oks}")
     return "\n".join(lines)
 EXTRA = {"env": ["env fingerprint=generic/x"], "secure-default": ["RESULT secure-default outcome=protection_too_weak"], "size": ["RESULT size65 outcome=accepted"],
+         "v2-capability": ["RESULT v2-capability protection=OS_ENCRYPTED reason=null"],
+         "v2-provision": [f"RESULT v2-level {a}=software" for a in ("fxsha1", "fxsha256", "fxsha512")],
+         "v3-vault": ["RESULT v3-vault-level=software"],
+         "v2-keylen": [f"RESULT keylen {n}={'ok' if n <= 64 else 'INVALID_INPUT'}" for n in (10, 20, 32, 64, 65, 100, 128)],
          "seam-provision": [f"RESULT level {a}=software" for a in ("fxsha1", "fxsha256", "fxsha512")]}
 def good(): return {n: phase(n, max(v.MIN_OKS[n], 1) if v.MIN_OKS[n] else 0, EXTRA.get(n, ())) for n in v.PHASES}
 def log(d): return "\n".join(d[n] for n in v.PHASES) + "\n"
@@ -35,3 +39,14 @@ g = good(); g["env"] = g["env"] + "\ntrailing noise"; expect_fail("trailing nois
 g = good(); g["env"] = g["env"].replace("END phase=env", "END phase=cleanup"); expect_fail("wrong END name", log(g))
 expect_fail("truncated log", log(good())[:-40])
 print("PASS verifier negative tests (synthetic logs; verifier fails closed on empty, missing, duplicate, truncated, crash, wrong API)")
+g = good(); g["v2-keylen"] = phase("v2-keylen", 7, EXTRA["v2-keylen"][:5]); expect_fail("missing keylen result", log(g))
+g = good(); g["v2-keylen"] = phase("v2-keylen", 7, [x.replace("=INVALID_INPUT", "=WRONG_CODE") for x in EXTRA["v2-keylen"]]); expect_fail("wrong code", log(g))
+g = good(); g["v2-capability"] = phase("v2-capability", 2, ["RESULT v2-capability protection=UNAVAILABLE reason=x"]); expect_fail("unavailable capability", log(g))
+g = good(); g["v2-provision"] = phase("v2-provision", 5, EXTRA["v2-provision"][:2]); expect_fail("missing v2 level", log(g))
+g = good(); del g["v2-pending-retry"]; expect_fail("missing v2 phase", "\n".join(g[n] for n in v.PHASES if n in g))
+print("PASS v2 verifier negatives")
+g = good(); g["v3-vault"] = phase("v3-vault", 10); expect_fail("missing v3 level", log(g))
+g = good(); g["v3-vault"] = phase("v3-vault", 10, ["RESULT v3-vault-level=null"]); expect_fail("null v3 level", log(g))
+g = good(); del g["v3-pending-retry"]; expect_fail("missing v3 phase", "\n".join(g[n] for n in v.PHASES if n in g))
+g = good(); g["v3-enroll"] = phase("v3-enroll", 2); expect_fail("too few v3 oks", log(g))
+print("PASS v3 verifier negatives")

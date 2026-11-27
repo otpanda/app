@@ -109,6 +109,8 @@ jobs:
             python3 .github/scripts/android-release-signing.py
           flutter build apk --release --flavor fdroid --target-platform android-arm64
           flutter build apk --release --flavor google --target-platform android-arm64
+          python3 tool/android-seed-host/check_release.py build/app/outputs/flutter-apk/app-fdroid-release.apk
+          python3 tool/android-seed-host/check_release.py build/app/outputs/flutter-apk/app-google-release.apk
           export THROWAWAY_STORE_PASSWORD=throwaway-pass
           keytool -exportcert -keystore "$RUNNER_TEMP/throwaway.jks" -storepass:env THROWAWAY_STORE_PASSWORD -alias throwaway > "$RUNNER_TEMP/expected-cert.der"
           EXPECTED_CERT_SHA256=$(sha256sum "$RUNNER_TEMP/expected-cert.der" | cut -d ' ' -f1)
