@@ -88,6 +88,18 @@ class ActionSecurityBridge extends SecurityBridge {
   }
 }
 
+class HeldOverviewBridge extends ActionSecurityBridge {
+  Completer<SessionResponse>? heldOverview;
+  @override
+  Future<SessionResponse> read(String path) {
+    if (path == '/v1/manage/account' && heldOverview != null) {
+      overviewReads++;
+      return heldOverview!.future;
+    }
+    return super.read(path);
+  }
+}
+
 Future<void> open(
   WidgetTester t,
   SecurityBridge b, [
@@ -360,6 +372,129 @@ void main() {
         after,
         reason: 'no extra overview read after the single catch-up',
       );
+      await t.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets('hint during Account entry read gets one quiet catch-up', (
+    t,
+  ) async {
+    final b = HeldOverviewBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await open(t, b);
+    final before = b.overviewReads;
+    final gate = Completer<SessionResponse>();
+    b.heldOverview = gate;
+    final dynamic state = t.state(find.byType(BrowserAccountPage));
+    final entry = state.ensureOverview() as Future<void>;
+    await t.pump();
+    expect(b.overviewReads, before + 1);
+    b.hint();
+    await t.pump(const Duration(milliseconds: 100));
+    expect(b.overviewReads, before + 1, reason: 'no overlapping read');
+    b.heldOverview = null;
+    gate.complete(
+      SessionResponse(
+        200,
+        jsonEncode({
+          'email': 'fixture@example.test',
+          'passkeys': 1,
+          'google': true,
+          'recoveryDevices': 0,
+        }),
+      ),
+    );
+    await entry;
+    await t.pumpAndSettle();
+    expect(
+      b.overviewReads,
+      before + 2,
+      reason: 'one trailing overview read after Account entry',
+    );
+    await t.pump(const Duration(seconds: 5));
+    expect(b.overviewReads, before + 2);
+    await t.pumpWidget(const SizedBox());
+  });
+  for (final result in [401, 503]) {
+    testWidgets('hint during Account entry ending $result is bounded', (
+      t,
+    ) async {
+      final b = HeldOverviewBridge()
+        ..status = 'restored'
+        ..clockNow = 100000;
+      await open(t, b);
+      final before = b.overviewReads;
+      final gate = Completer<SessionResponse>();
+      b.heldOverview = gate;
+      final dynamic state = t.state(find.byType(BrowserAccountPage));
+      final entry = state.ensureOverview() as Future<void>;
+      await t.pump();
+      b.hint();
+      await t.pump(const Duration(milliseconds: 100));
+      b.heldOverview = null;
+      gate.complete(SessionResponse(result, '{}'));
+      await entry;
+      await t.pumpAndSettle();
+      expect(
+        b.overviewReads,
+        before + (result == 401 ? 1 : 2),
+        reason: '401 ends session; transient failure earns one catch-up',
+      );
+      await t.pumpWidget(const SizedBox());
+    });
+  }
+  testWidgets('disposed Account entry never drains queued hint', (t) async {
+    final b = HeldOverviewBridge()
+      ..status = 'restored'
+      ..clockNow = 100000;
+    await open(t, b);
+    final before = b.overviewReads;
+    final gate = Completer<SessionResponse>();
+    b.heldOverview = gate;
+    final dynamic state = t.state(find.byType(BrowserAccountPage));
+    final entry = state.ensureOverview() as Future<void>;
+    await t.pump();
+    b.hint();
+    await t.pump(const Duration(milliseconds: 100));
+    await t.pumpWidget(const SizedBox());
+    b.heldOverview = null;
+    gate.complete(const SessionResponse(503, '{}'));
+    await entry;
+    await t.pumpAndSettle();
+    expect(b.overviewReads, before + 1);
+    expect(t.takeException(), isNull);
+  });
+  testWidgets(
+    'queued overview drain guards and identity reset are idempotent',
+    (t) async {
+      final b = ActionSecurityBridge()
+        ..status = 'restored'
+        ..clockNow = 100000;
+      await open(t, b);
+      final dynamic state = t.state(find.byType(BrowserAccountPage));
+      final before = b.overviewReads;
+      final epoch = state.revision as int;
+      state.overviewAgain = true;
+      state.busy = true;
+      state.drainOverviewAgain(epoch);
+      expect(b.overviewReads, before);
+      state.busy = false;
+      state.drainOverviewAgain(epoch - 1);
+      expect(b.overviewReads, before);
+      state.status = 'sign-in-required';
+      state.drainOverviewAgain(epoch);
+      expect(b.overviewReads, before);
+      state.status = 'restored';
+      state.drainOverviewAgain(epoch);
+      state.drainOverviewAgain(epoch);
+      await t.pumpAndSettle();
+      expect(b.overviewReads, before + 1);
+      state.overviewAgain = true;
+      state.resetIdentity();
+      expect(state.overviewAgain, isFalse);
+      state.drainOverviewAgain(epoch);
+      await t.pump();
+      expect(b.overviewReads, before + 1);
       await t.pumpWidget(const SizedBox());
     },
   );
