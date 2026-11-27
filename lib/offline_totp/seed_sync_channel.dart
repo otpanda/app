@@ -171,8 +171,9 @@ final class SeedSyncChannel {
     try {
       return await run();
     } on SeedSyncFailure catch (e) {
-      if (e.kind == SeedSyncFailureKind.malformedReply)
+      if (e.kind == SeedSyncFailureKind.malformedReply) {
         throw const SeedSyncFailure(SeedSyncFailureKind.unknownOutcome);
+      }
       rethrow;
     } catch (_) {
       throw const SeedSyncFailure(SeedSyncFailureKind.unknownOutcome);
@@ -463,15 +464,17 @@ final class SeedSyncChannel {
     int maxBytes = 144,
   }) {
     if (value.length > maxBytes * 2 ||
-        !RegExp(r'^[A-Za-z0-9_-]*$').hasMatch(value))
+        !RegExp(r'^[A-Za-z0-9_-]*$').hasMatch(value)) {
       _input();
+    }
     try {
       final b = base64Url.decode(base64Url.normalize(value));
       if ((exact != null && b.length != exact) ||
           b.length < min ||
           b.length > maxBytes ||
-          base64UrlEncode(b).replaceAll('=', '') != value)
+          base64UrlEncode(b).replaceAll('=', '') != value) {
         _input();
+      }
     } on FormatException {
       _input();
     }
