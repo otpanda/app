@@ -23,6 +23,7 @@ jobs:
       - run: bash tool/bootstrap.sh
       - run: flutter analyze lib test tool/android-seed-host/fixture_main.dart
       - run: flutter test test/offline_totp
+      - run: python3 tool/android-seed-host/verify_test.py
       - run: bash tool/offline-totp/release-guard.sh
       - name: Enable KVM on disposable emulator only
         run: |
