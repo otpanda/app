@@ -111,7 +111,7 @@ Future<void> run() async {
     await check('install_survives_restart', id == saved['install']);
     final st = (await call<Map>('syncEnrollmentState', {'owner': owner}))!;
     await check(
-      'enrollment_survives_restart',
+      'durable_key_state_after_restart',
       st['keyId'] == key && st['provable'] == false,
     );
     final owners = await SeedStatusChannel(channel).owners();
