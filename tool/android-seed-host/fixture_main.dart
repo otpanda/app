@@ -93,6 +93,52 @@ Future<void> workspaceCheck(bool create) async {
           'Synthetic offline service',
     );
   }
+  final custody = AndroidSeedCustody(channel: channel);
+  const snapshot = CustodySnapshot(
+    epoch: 0,
+    revision: 1,
+    complete: true,
+    versions: {'sealed-entry': 1},
+  );
+  await custody.reconcile(owner, snapshot);
+  await check(
+    'workspace_snapshot_replay',
+    (await custody.reconcile(owner, snapshot)).needsProvision.isEmpty,
+  );
+  if (!create) {
+    try {
+      await custody.reconcile(
+        owner,
+        const CustodySnapshot(
+          epoch: 0,
+          revision: 1,
+          complete: false,
+          versions: {'sealed-entry': 1},
+        ),
+      );
+      await check('workspace_changed_replay_refused', false);
+    } on CustodyException catch (e) {
+      await check(
+        'workspace_changed_replay_refused',
+        e.error == CustodyError.staleSnapshot,
+      );
+    }
+    await custody.reconcile(
+      owner,
+      const CustodySnapshot(
+        epoch: 0,
+        revision: 2,
+        complete: true,
+        versions: {},
+        preserve: {'sealed-entry'},
+      ),
+    );
+    await check(
+      'workspace_unsupported_preserved',
+      (await custody.readCatalog(owner)).entries
+          .any((e) => e.entryId == 'sealed-entry'),
+    );
+  }
   await localRuntime.refreshLocalCodes();
   await check(
     'workspace_local_code',

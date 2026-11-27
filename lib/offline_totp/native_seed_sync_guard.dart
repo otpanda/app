@@ -54,6 +54,7 @@ final class GuardSnapshot {
     required this.complete,
     required this.versions,
     this.tombstones = const {},
+    this.preserve = const {},
   });
   final String ownerId, deviceId;
   final int epoch, revision;
@@ -62,6 +63,9 @@ final class GuardSnapshot {
   final bool complete;
   final Map<String, int> versions;
   final Map<String, int> tombstones;
+
+  /// Unsupported present rows retain existing custody but grant no new seed access.
+  final Set<String> preserve;
 }
 
 /// Permission to hand one seed response to custody. Single use. Holds no seed.
@@ -181,7 +185,8 @@ final class NativeSeedSyncGuard {
         s.epoch < 0 ||
         s.epoch >= custodyMaxSafeInt ||
         s.versions.length > 5000 ||
-        s.tombstones.length > 5000) {
+        s.tombstones.length > 5000 ||
+        s.preserve.length > 5000) {
       throw bad();
     }
     for (final m in [s.versions, s.tombstones]) {
@@ -192,6 +197,11 @@ final class NativeSeedSyncGuard {
           throw bad();
         }
       }
+    }
+    if (s.preserve.any(
+      (id) => !validCustodyId(id) || s.versions.containsKey(id),
+    )) {
+      throw bad();
     }
     for (final e in s.versions.entries) {
       final t = s.tombstones[e.key];

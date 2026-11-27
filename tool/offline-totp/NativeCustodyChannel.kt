@@ -34,6 +34,13 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
     private fun Map<*, *>.idLongs(k: String): Map<String, Long> =
         map(k).entries.associate { (key, v) -> (key as? String ?: throw Bad()) to (when (v) { is Long -> v; is Int -> v.toLong(); else -> throw Bad() }) }
 
+    private fun Map<*, *>.idList(k: String): Set<String> {
+        val l = this[k] as? List<*> ?: throw Bad()
+        val out = l.map { it as? String ?: throw Bad() }
+        if (out.toSet().size != out.size) throw Bad()
+        return out.toSet()
+    }
+
     private val known = setOf("readOwnerState", "capability", "provision", "generate", "delete", "clearOwner", "purgeOwner", "readCatalog", "enableOwner", "purgePending", "sweepOrphans", "reconcile")
     fun handle(method: String, arguments: Any?): ChannelReply {
         if (method !in known) { ((arguments as? Map<*, *>)?.get("seed") as? ByteArray)?.fill(0); return ChannelReply.NotImplemented }
@@ -47,7 +54,7 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
                 "generate" -> a.exact("owner", "entry", "seedVersion", "unixSeconds")
                 "delete" -> a.exact("owner", "entry", "seedVersion")
                 "clearOwner", "purgeOwner", "enableOwner" -> a.exact("owner", "epoch")
-                "reconcile" -> { a.exact("owner", "snapshot"); a.map("snapshot").exact("epoch", "revision", "complete", "versions", "tombstones") }
+                "reconcile" -> { a.exact("owner", "snapshot"); a.map("snapshot").exact("epoch", "revision", "complete", "versions", "tombstones", "preserve") }
             }
             when (method) {
                 "readOwnerState" -> core.readOwnerState(a.str("owner")).let { ChannelReply.Ok(mapOf("epoch" to it.epoch, "enabled" to it.enabled)) }
@@ -69,7 +76,7 @@ class NativeCustodyChannelHandler(private val core: NativeSeedCustodyCore) {
                 "reconcile" -> {
                     val snap = a.map("snapshot")
                     val complete = snap["complete"] as? Boolean ?: throw Bad()
-                    val r = core.reconcile(a.str("owner"), Snapshot(snap.long("epoch"), snap.long("revision"), complete, snap.idLongs("versions"), snap.idLongs("tombstones")))
+                    val r = core.reconcile(a.str("owner"), Snapshot(snap.long("epoch"), snap.long("revision"), complete, snap.idLongs("versions"), snap.idLongs("tombstones"), snap.idList("preserve")))
                     ChannelReply.Ok(mapOf("removed" to r.removed, "superseded" to r.superseded, "needsProvision" to r.needsProvision, "pendingPurge" to r.pendingPurge))
                 }
                 else -> ChannelReply.NotImplemented

@@ -611,12 +611,14 @@ void main() {
       Map<String, int> tombstones = const {},
       int epoch = 0,
       int revision = 1,
+      Set<String> preserve = const {},
     }) => CustodySnapshot(
       epoch: epoch,
       revision: revision,
       complete: complete,
       versions: versions,
       tombstones: tombstones,
+      preserve: preserve,
     );
 
     Future<FakeSeedCustody> three() async {
@@ -715,6 +717,78 @@ void main() {
         custodyFails(CustodyError.invalidInput),
       );
       expect(c.entries('o1')..sort(), ['a', 'b', 'c']);
+    });
+
+    test(
+      'an equal revision replays only the identical full statement',
+      () async {
+        final c = await three();
+        final s = snap(
+          {'a': 2, 'd': 3},
+          revision: 5,
+          preserve: {'b'},
+          tombstones: {'c': 2},
+        );
+        final r1 = await c.reconcile('o1', s);
+        expect(r1.removed, ['c']);
+        expect(r1.needsProvision, ['d']);
+        final r2 = await c.reconcile(
+          'o1',
+          snap(
+            {'d': 3, 'a': 2},
+            revision: 5,
+            preserve: {'b'},
+            tombstones: {'c': 2},
+          ),
+        );
+        expect(r2.needsProvision, ['d']);
+        expect(r2.removed, isEmpty);
+        for (final other in [
+          snap(
+            {'a': 2, 'd': 3},
+            revision: 5,
+            preserve: {'b'},
+            tombstones: {'c': 2},
+            complete: false,
+          ),
+          snap(
+            {'a': 2, 'd': 4},
+            revision: 5,
+            preserve: {'b'},
+            tombstones: {'c': 2},
+          ),
+          snap({'a': 2, 'd': 3}, revision: 5, preserve: {'b'}),
+          snap({'a': 2, 'd': 3}, revision: 5, tombstones: {'c': 2}),
+          snap(
+            {'a': 2, 'd': 3},
+            revision: 4,
+            preserve: {'b'},
+            tombstones: {'c': 2},
+          ),
+        ]) {
+          await expectLater(
+            c.reconcile('o1', other),
+            custodyFails(CustodyError.staleSnapshot),
+          );
+        }
+        expect(c.entries('o1')..sort(), ['a', 'b']);
+      },
+    );
+
+    test('preserve keeps an absent entry under a complete snapshot, a tombstone does not', () async {
+      final c = await three();
+      final r = await c.reconcile(
+        'o1',
+        snap({'a': 2}, preserve: {'b', 'c'}, tombstones: {'c': 2}),
+      );
+      expect(r.removed, ['c']);
+      expect(c.entries('o1')..sort(), ['a', 'b']);
+      await expectLater(
+        c.reconcile('o1', snap({'a': 2}, revision: 2, preserve: {'a'})),
+        custodyFails(CustodyError.invalidSnapshot),
+      );
+      final r2 = await c.reconcile('o1', snap({'a': 2}, revision: 3));
+      expect(r2.removed, ['b']);
     });
 
     test('a stale or replayed snapshot cannot undo a newer one', () async {
