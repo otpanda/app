@@ -57,6 +57,20 @@ Future<void> _chmod600(String path) async {
   if (r.exitCode != 0) throw FileSystemException('chmod failed', path);
 }
 
+/// True when [path] is anything at all, including a link whose target is
+/// missing. Never follows a link and never creates anything.
+Future<bool> _nameTaken(String path) async {
+  try {
+    if (await FileSystemEntity.type(path, followLinks: false) !=
+        FileSystemEntityType.notFound) {
+      return true;
+    }
+    return await Link(path).exists();
+  } catch (_) {
+    return true;
+  }
+}
+
 Future<ExportFileResult> writeNewFileExclusive(
   String directoryPath,
   String fileName,
@@ -72,7 +86,10 @@ Future<ExportFileResult> writeNewFileExclusive(
   final target = '$directoryPath$sep$fileName';
   if (!await Directory(directoryPath).exists()) return ExportFileResult.failed;
 
-  // 1. Reserve.
+  // 1. Reserve. Look at the name itself first, without following links. On
+  // Windows an exclusive create on a link whose target is missing can create
+  // that target, so a link must be refused before any create is attempted.
+  if (await _nameTaken(target)) return ExportFileResult.alreadyExists;
   final placeholder = File(target);
   try {
     await placeholder.create(exclusive: true);

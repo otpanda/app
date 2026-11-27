@@ -660,27 +660,51 @@ void main() {
     test(
       'existing file, folder, link: refusal leaves each untouched',
       () async {
+        // The link target is outside the export folder, so a write through
+        // the link cannot hide as an extra entry in it.
+        final outside = Directory.systemTemp.createTempSync('otp-outside');
+        addTearDown(() => outside.deleteSync(recursive: true));
+        final missing = '${outside.path}${Platform.pathSeparator}nowhere';
         File(p('f.txt')).writeAsStringSync('keep');
         Directory(p('d.txt')).createSync();
-        Link(p('l.txt')).createSync(p('nowhere'));
+        Link(p('l.txt')).createSync(missing);
         for (final n in ['f.txt', 'd.txt', 'l.txt']) {
           expect(
             await writeNewFileExclusive(dir.path, n, [1, 2, 3]),
-            Platform.isWindows && n == 'l.txt'
-                ? anyOf(ExportFileResult.alreadyExists, ExportFileResult.failed)
-                : ExportFileResult.alreadyExists,
+            ExportFileResult.alreadyExists,
             reason: n,
           );
         }
         expect(File(p('f.txt')).readAsStringSync(), 'keep');
         expect(Directory(p('d.txt')).existsSync(), isTrue);
+        expect(Link(p('l.txt')).targetSync(), missing);
         expect(
-          Link(p('l.txt')).targetSync(),
-          p('nowhere').replaceAll('/', Platform.pathSeparator),
+          FileSystemEntity.typeSync(p('l.txt'), followLinks: false),
+          FileSystemEntityType.link,
         );
+        expect(
+          FileSystemEntity.typeSync(missing),
+          FileSystemEntityType.notFound,
+        );
+        expect(outside.listSync(), isEmpty);
         expect(names(), ['d.txt', 'f.txt', 'l.txt']);
       },
     );
+
+    test('link to an existing file: refused, target bytes untouched', () async {
+      final outside = Directory.systemTemp.createTempSync('otp-outside');
+      addTearDown(() => outside.deleteSync(recursive: true));
+      final t = File('${outside.path}${Platform.pathSeparator}t.txt')
+        ..writeAsStringSync('keep');
+      Link(p('l.txt')).createSync(t.path);
+      expect(
+        await writeNewFileExclusive(dir.path, 'l.txt', [1, 2, 3]),
+        ExportFileResult.alreadyExists,
+      );
+      expect(t.readAsStringSync(), 'keep');
+      expect(outside.listSync().length, 1);
+      expect(names(), ['l.txt']);
+    });
 
     test(
       'concurrent writers in one isolate: exactly one wins, whole file',
