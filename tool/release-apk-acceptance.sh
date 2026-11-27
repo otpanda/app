@@ -14,6 +14,11 @@ sign_in(){
   rm -f repair-out/current.xml
   adb shell rm -f /sdcard/release.xml
   if adb shell uiautomator dump /sdcard/release.xml && adb pull /sdcard/release.xml repair-out/current.xml;then
+   # A known disposable-emulator Launcher ANR is not an app failure. Close only
+   # that identified system dialog, preserve its evidence, then retry the UI read.
+   if python3 tool/close-launcher-anr.py repair-out/current.xml "$name" "$i"; then
+    continue
+   fi
    if grep -q 'Sign-in on this device is not ready' repair-out/current.xml;then break;fi
    if grep -q 'Sign in with a passkey' repair-out/current.xml && grep -q 'Create account with a passkey' repair-out/current.xml;then ready=true;break;fi
   fi

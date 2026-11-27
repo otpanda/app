@@ -1,0 +1,53 @@
+name: Alpha12 exact artifact installed recovery
+on:
+  push:
+    branches: [fix/alpha12-launcher-qualification]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: '15161187082'
+          run-id: '45912120298'
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Pin exact alpha12 APK bytes and original source
+        run: |
+          mkdir -p repair-out original-alpha6
+          printf '%s\n' 'cc2733a90897c92a8f58fa6bdaee4a2a9831e3e4a7517f5e9c7e876ed52100ea  candidate/otpanda-android-google-v0.1.0-alpha.12.apk' 'f5908a40b357334e5b3c7f0f0680e09298e9a692d5cc1e558be1ff17ab5042ac  candidate/otpanda-android-fdroid-v0.1.0-alpha.12.apk' | sha256sum -c - | tee repair-out/exact-alpha12-input.txt
+          printf '%s\n' 'release45912120298 artifact15161187082 source90d9034ed5bf96f7adf2c6ae9976305e2f160a38 tagv0.1.0-alpha.12' > repair-out/provenance.txt
+          base=https://github.com/otpanda/app/releases/download/qualification-fixtures-2026-11-26
+          curl -fLsS "$base/original-alpha6-google.apk" -o original-alpha6/otpanda-android-google-native-candidate.apk
+          curl -fLsS "$base/original-alpha6-fdroid.apk" -o original-alpha6/otpanda-android-fdroid-native-candidate.apk
+          curl -fLsS "$base/broken-alpha7-google.apk" -o broken-alpha7.apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: GITHUB_REF_NAME=v0.1.0-alpha.12 bash tool/release-apk-acceptance.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-alpha12-installed-recovery
+          path: repair-out
