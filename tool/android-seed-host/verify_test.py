@@ -11,6 +11,7 @@ with tempfile.TemporaryDirectory() as t:
   for phase,ls in labels.items():
    (p/f'{phase}.log').write_text('\n'.join(f'CHECK {x} true' for x in ls))
    (p/f'crash-{phase}.txt').write_text('')
+   (p/f'ui-{phase}.xml').write_text('<node text="Synthetic seed host check"/>')
  def ok():return subprocess.run([sys.executable,str(v),t],capture_output=True).returncode==0
  reset();assert ok()
  for phase,ls in labels.items():
@@ -19,4 +20,5 @@ with tempfile.TemporaryDirectory() as t:
    reset();f.write_text(f.read_text()+f'\nCHECK {label} true');assert not ok()
   reset();f=p/f'{phase}.log';f.write_text(f.read_text()+'\nCHECK phase_failed false');assert not ok()
   reset();(p/f'crash-{phase}.txt').write_text('FATAL EXCEPTION');assert not ok()
+  reset();(p/f'ui-{phase}.xml').write_text('<node text="Pixel Launcher is not responding"/>');assert not ok()
  print('PASS verifier negative controls: every missing/duplicate label, failed check, Android crash')

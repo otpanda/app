@@ -8,6 +8,13 @@ flutter build apk --debug --flavor google -t tool/android-seed-host/fixture_main
 adb uninstall app.otpanda > "$out/uninstall-before.txt" 2>&1 || true
 adb install -t build/app/outputs/flutter-apk/app-google-debug.apk > "$out/install.txt" 2>&1
 trap 'adb uninstall app.otpanda > "$out/uninstall-after.txt" 2>&1 || true' EXIT
+# Disposable launcher can ANR during first Google services startup. Reset only
+# this test emulator launcher before collecting any app proof.
+adb shell am force-stop com.google.android.apps.nexuslauncher
+adb shell input keyevent KEYCODE_WAKEUP
+adb shell wm dismiss-keyguard
+adb shell input keyevent KEYCODE_HOME
+sleep 5
 for phase in create restart; do
   adb shell am force-stop app.otpanda
   adb logcat -c
@@ -18,6 +25,9 @@ for phase in create restart; do
     if grep -q 'CHECK .* false' "$out/$phase.log"; then break; fi
     sleep 1
   done
+  sleep 2
+  adb shell uiautomator dump /sdcard/seedfx-ui.xml > "$out/ui-dump-$phase.txt"
+  adb pull /sdcard/seedfx-ui.xml "$out/ui-$phase.xml" > "$out/ui-pull-$phase.txt" 2>&1
   adb exec-out screencap -p > "$out/$phase.png"
   adb logcat -d -b crash > "$out/crash-$phase.txt"
 done
