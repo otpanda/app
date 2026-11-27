@@ -1091,7 +1091,10 @@ class _ProductShellState extends State<ProductShell>
               (c) =>
                   !freshPrivate.contains(c) &&
                   !widget.controller.contexts.any(
-                    (r) => r.eventId == c.eventId && r.retained(now),
+                    (r) =>
+                        r.sourceId == c.sourceId &&
+                        r.eventId == c.eventId &&
+                        r.retained(now),
                   ),
             ))
               unassigned(c),
@@ -1173,7 +1176,8 @@ class _ProductShellState extends State<ProductShell>
     if (accepted != true || !mounted || !identical(widget.organization, org)) {
       return;
     }
-    for (final id in ids) {
+    final accessible = widget.controller.store.entries.map((e) => e.id).toSet();
+    for (final id in ids.where(accessible.contains)) {
       final tags = {...org.preferencesFor(id).tagIds};
       for (final choice in decisions.entries) {
         choice.value ? tags.add(choice.key) : tags.remove(choice.key);
