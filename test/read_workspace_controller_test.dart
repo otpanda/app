@@ -65,20 +65,20 @@ class Bridge implements BrowserSessionBridge {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
-    'one refresh uses only five read endpoints and gates rapid retries',
+    'one refresh uses six read endpoints including optional review context and gates rapid retries',
     () async {
       var now = 100;
       final bridge = Bridge();
       final c = ReadWorkspaceController(bridge: bridge, clock: () => now);
       await c.refresh();
-      expect(bridge.paths.length, 5);
+      expect(bridge.paths.length, 6);
       expect(c.store.entries.single.id, 'entry');
       await c.refresh();
-      expect(bridge.paths.length, 5);
+      expect(bridge.paths.length, 6);
       expect(c.refreshWaitMs, 15000);
       now += 15000;
       await c.refresh();
-      expect(bridge.paths.length, 10);
+      expect(bridge.paths.length, 12);
       c.dispose();
     },
   );
@@ -109,7 +109,7 @@ void main() {
       await loading;
       expect(c.store.entries, isEmpty);
       expect(c.loading, false);
-      expect(bridge.paths.length, 6);
+      expect(bridge.paths.length, 7);
       c.dispose();
     },
   );
@@ -145,13 +145,13 @@ void main() {
       now += 120000;
       c.tick();
       await Future<void>.delayed(Duration.zero);
-      expect(bridge.paths.length, 5);
+      expect(bridge.paths.length, 6);
       c.suspend();
       c.resume();
       now += 15000;
       c.tick();
       await Future<void>.delayed(Duration.zero);
-      expect(bridge.paths.length, 5);
+      expect(bridge.paths.length, 6);
       c.dispose();
     },
   );

@@ -17,6 +17,12 @@ enum SettingsCategory {
     'Where you are signed in',
     Icons.devices_outlined,
   ),
+  sources(
+    'settings/sources',
+    'Sources',
+    'Mailboxes and phones that receive codes',
+    Icons.inbox_outlined,
+  ),
   display(
     'settings/display',
     'Display',

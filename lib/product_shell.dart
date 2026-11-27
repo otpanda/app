@@ -1,6 +1,11 @@
 import 'dart:async';
 
 import 'copy_hint.dart';
+import 'organization_contract.dart';
+import 'account_sort.dart';
+import 'code_filter_row.dart';
+import 'revealed_filter_list.dart';
+import 'unassigned_context.dart';
 
 import 'main_page_batch.dart';
 import 'totp_batch_contract.dart';
@@ -31,6 +36,11 @@ import 'session_contract.dart';
 /// until their endpoints exist.
 class ProductShell extends StatefulWidget {
   final ReadWorkspaceController controller;
+  final OrganizationStore? organization;
+  final VoidCallback? onOrganizationChanged;
+  final Widget? organizationTools;
+  final bool showTileTags;
+  final bool organizationBusy;
   final BatchPolicy? batchPolicy;
   final CopyHintStore? copyHintStore;
 
@@ -61,6 +71,11 @@ class ProductShell extends StatefulWidget {
   const ProductShell({
     super.key,
     required this.controller,
+    this.organization,
+    this.onOrganizationChanged,
+    this.organizationTools,
+    this.showTileTags = false,
+    this.organizationBusy = false,
     this.copyHintStore,
     this.batchPolicy,
     this.batchClock,
@@ -96,13 +111,6 @@ class _ProductShellState extends State<ProductShell>
       widget.controller.bridge is TotpManagementBridge &&
       (widget.controller.bridge is! TotpCreationCapability ||
           (widget.controller.bridge as TotpCreationCapability).canAddTotp);
-  static const names = ['Codes', 'Sources', 'Unassigned', 'Entries'];
-  static const icons = [
-    Icons.password,
-    Icons.inbox_outlined,
-    Icons.crop_free,
-    Icons.list,
-  ];
   static const ink = Color(0xff12281f), muted = Color(0xff5d746a);
   static const line = Color(0xffe0e8e3);
   _Phase get phase => !widget.controller.signedIn
@@ -116,6 +124,10 @@ class _ProductShellState extends State<ProductShell>
       : _Phase.cleared;
   late int tab = widget.initialTab.clamp(0, 3);
   String query = '';
+  AccountSort accountSort = AccountSort.frequentlyUsed;
+  Set<String> filters = {}, selectedAccounts = {};
+  final Map<String, int> localLastUsed = {};
+  String? selectionOwner;
   final searchController = TextEditingController();
 
   /// Search only filters Codes and Entries.
@@ -244,6 +256,23 @@ class _ProductShellState extends State<ProductShell>
   Future<void> copyTile(String id, Future<bool> Function() copy) async {
     try {
       if (!await copy() || !mounted) return;
+      final parts = id.split('/');
+      final entryId =
+          parts.length > 1 && (parts.first == 'entry' || parts.first == 'totp')
+          ? parts[1]
+          : null;
+      if (entryId != null) {
+        localLastUsed[entryId] = widget.clock();
+        final bridge = widget.controller.bridge;
+        {
+          unawaited(
+            bridge
+                .copied(entryId, widget.clock())
+                .then((_) {})
+                .catchError((Object _) {}),
+          );
+        }
+      }
       _copiedTimer?.cancel();
       setState(() {
         _copiedTile = id;
@@ -379,6 +408,12 @@ class _ProductShellState extends State<ProductShell>
   @override
   void didUpdateWidget(covariant ProductShell oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (selectionOwner != widget.controller.store.ownerId) {
+      selectionOwner = widget.controller.store.ownerId;
+      selectedAccounts.clear();
+      filters.clear();
+      localLastUsed.clear();
+    }
     if (oldWidget.initialTab != widget.initialTab) {
       tab = widget.initialTab.clamp(0, 3);
       clearSearch();
@@ -386,6 +421,12 @@ class _ProductShellState extends State<ProductShell>
   }
 
   void changed() {
+    if (selectionOwner != widget.controller.store.ownerId) {
+      selectionOwner = widget.controller.store.ownerId;
+      selectedAccounts.clear();
+      filters.clear();
+      localLastUsed.clear();
+    }
     scheduleBoundaryRepaint();
     queueBatchSelection();
     if (mounted) setState(() {});
@@ -447,6 +488,9 @@ class _ProductShellState extends State<ProductShell>
     bool expired = false,
     bool early = false,
     int? expectedDigits,
+    Widget? below,
+    Widget? leading,
+    bool pin = false,
   ]) => Card(
     clipBehavior: Clip.antiAlias,
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
@@ -465,156 +509,659 @@ class _ProductShellState extends State<ProductShell>
         onTap: code != null && onCopy != null && copyId != null
             ? () => copyTile(copyId, onCopy)
             : null,
-        child: Stack(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 48),
-                child: Row(
-                  children: [
-                    avatar(title, serviceId, issuer),
-                    const SizedBox(width: 11),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
-                            ),
-                          ),
-                          if (sub.isNotEmpty)
-                            Text(
-                              sub,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: muted,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    if (code != null) ...[
-                      const SizedBox(width: 6),
-                      codeSlot(
-                        Stack(
-                          clipBehavior: Clip.none,
-                          alignment: Alignment.center,
-                          children: [
-                            Opacity(
-                              opacity: _copiedTile == copyId && copyId != null
-                                  ? 0
-                                  : (expired ? 0.45 : 1),
-                              child: Text(
-                                spaced(code),
-                                style: TextStyle(
-                                  fontFamily: 'CodeMono',
-                                  fontFeatures: [FontFeature.tabularFigures()],
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w600,
-                                  color: expired ? muted : ink,
+            Stack(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: SizedBox(
+                    height: 40,
+                    child: Row(
+                      children: [
+                        ?leading,
+                        avatar(title, serviceId, issuer),
+                        const SizedBox(width: 11),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
                                 ),
                               ),
-                            ),
-                            if (expired)
-                              const Positioned(
-                                left: 0,
-                                right: 0,
-                                bottom: -10,
-                                child: Align(
-                                  alignment: Alignment.bottomCenter,
+                              if (sub.isNotEmpty)
+                                Text(
+                                  sub,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: muted,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        if (pin)
+                          const Padding(
+                            padding: EdgeInsets.only(left: 4),
+                            child: Icon(Icons.push_pin, size: 14, color: green),
+                          ),
+                        if (code != null) ...[
+                          const SizedBox(width: 6),
+                          codeSlot(
+                            Stack(
+                              clipBehavior: Clip.none,
+                              alignment: Alignment.center,
+                              children: [
+                                Opacity(
+                                  opacity:
+                                      _copiedTile == copyId && copyId != null
+                                      ? 0
+                                      : (expired ? 0.45 : 1),
                                   child: Text(
-                                    'Updating',
-                                    style: TextStyle(fontSize: 9, color: muted),
+                                    spaced(code),
+                                    style: TextStyle(
+                                      fontFamily: 'CodeMono',
+                                      fontFeatures: [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w600,
+                                      color: expired ? muted : ink,
+                                    ),
+                                  ),
+                                ),
+                                if (expired)
+                                  const Positioned(
+                                    left: 0,
+                                    right: 0,
+                                    bottom: -10,
+                                    child: Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: Text(
+                                        'Updating',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          color: muted,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (_copiedTile == copyId && copyId != null)
+                                  Semantics(
+                                    liveRegion: true,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.check,
+                                          size: 16,
+                                          color: green,
+                                        ),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'Copied',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: green,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ] else if (showCodeStatus) ...[
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            height: 48,
+                            child: Center(
+                              child: codeSlot(
+                                Text(
+                                  '-' * (expectedDigits ?? 6),
+                                  semanticsLabel: renewing
+                                      ? 'Updating code'
+                                      : 'No active code',
+                                  style: const TextStyle(
+                                    fontFamily: 'CodeMono',
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                    color: muted,
                                   ),
                                 ),
                               ),
-                            if (_copiedTile == copyId && copyId != null)
-                              Semantics(
-                                liveRegion: true,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.check, size: 16, color: green),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      'Copied',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: green,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ] else if (showCodeStatus) ...[
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        height: 48,
-                        child: Center(
-                          child: codeSlot(
-                            Text(
-                              '-' * (expectedDigits ?? 6),
-                              semanticsLabel: renewing
-                                  ? 'Updating code'
-                                  : 'No active code',
-                              style: const TextStyle(
-                                fontFamily: 'CodeMono',
-                                fontSize: 22,
-                                fontWeight: FontWeight.w600,
-                                color: muted,
-                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ],
-                    if (_showCopyButton &&
-                        code != null &&
-                        onCopy != null &&
-                        copyId != null) ...[
-                      const SizedBox(width: 8),
-                      IconButton(
-                        key: ValueKey('copy-button-$copyId'),
-                        tooltip: early
-                            ? 'Copy next code to clipboard'
-                            : 'Copy code to clipboard',
-                        onPressed: () => copyTile(copyId, onCopy),
-                        icon: const Icon(Icons.copy_outlined, size: 20),
-                      ),
-                    ],
-                    if (trailing != null) ...[
-                      const SizedBox(width: 4),
-                      trailing,
-                    ],
-                  ],
+                        ],
+                        if (_showCopyButton &&
+                            code != null &&
+                            onCopy != null &&
+                            copyId != null) ...[
+                          const SizedBox(width: 8),
+                          IconButton(
+                            key: ValueKey('copy-button-$copyId'),
+                            tooltip: early
+                                ? 'Copy next code to clipboard'
+                                : 'Copy code to clipboard',
+                            onPressed: () => copyTile(copyId, onCopy),
+                            icon: const Icon(Icons.copy_outlined, size: 20),
+                          ),
+                        ],
+                        if (trailing != null) ...[
+                          const SizedBox(width: 4),
+                          trailing,
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+                if (remainingMs != null && periodMs != null && code != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: RefreshBar(
+                      key: ValueKey(barId ?? 'refresh-$title'),
+                      remainingMs: remainingMs,
+                      periodMs: periodMs,
+                    ),
+                  ),
+              ],
             ),
-            if (remainingMs != null && periodMs != null && code != null)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: RefreshBar(
-                  key: ValueKey(barId ?? 'refresh-$title'),
-                  remainingMs: remainingMs,
-                  periodMs: periodMs,
-                ),
-              ),
+            ?below,
           ],
         ),
       ),
     ),
   );
+
+  Future<void> contextDetails(UnassignedContext review) async {
+    await showDialog<void>(
+      context: context,
+      builder: (c) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 600),
+        title: const Text('Unassigned details'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(review.kind == 'sms' ? 'SMS' : 'Email'),
+              Text(review.sourceLabel),
+              Text('From: ${review.sender}'),
+              const SizedBox(height: 12),
+              Text(
+                review.contentLabel,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text(review.redactedText ?? 'Message details unavailable.'),
+              if (review.truncated) const Text('Text shortened.'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget reviewTile(
+    UnassignedContext review,
+    List<UnassignedCode> codes,
+    int now,
+  ) {
+    UnassignedCode? live;
+    for (final code in codes) {
+      if (code.sourceId == review.sourceId &&
+          code.eventId == review.eventId &&
+          code.active(now)) {
+        live = code;
+      }
+    }
+    final code = live;
+    return codeTile(
+      review.sender,
+      review.sourceLabel,
+      code?.value,
+      code == null
+          ? null
+          : () async {
+              if (!widget.controller.canCopyPrivate(code)) return false;
+              await widget.onCopyPrivate(code);
+              return true;
+            },
+      true,
+      false,
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Details',
+            onPressed: () => contextDetails(review),
+            icon: const Icon(Icons.info_outline),
+          ),
+          if (code != null && widget.assignmentEnabled)
+            IconButton(
+              tooltip: 'Assign',
+              onPressed: () => assign(code),
+              icon: const Icon(Icons.drive_file_move_outline),
+            ),
+        ],
+      ),
+      null,
+      null,
+      null,
+      null,
+      null,
+      false,
+      code == null ? null : 'private/${code.sourceId}/${code.eventId}',
+    );
+  }
+
+  Widget unifiedCodes(
+    List<ManagedEntry> input,
+    Map<String, ReceivedCode> codes,
+    int now,
+  ) {
+    final org = widget.organization;
+    bool known(String id) {
+      try {
+        org?.preferencesFor(id);
+        return org != null;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    bool pinned(String id) => known(id) && org!.preferencesFor(id).pinned;
+    Set<String> tags(String id) =>
+        known(id) ? org!.preferencesFor(id).tagIds : {};
+    bool matches(ManagedEntry e) {
+      final ownership = filters.intersection({'mine', 'shared'});
+      final selectedTags = filters
+          .where((v) => v.startsWith('tag/'))
+          .map((v) => v.substring(4))
+          .toSet();
+      return (ownership.isEmpty ||
+              ownership.contains(e.manage ? 'mine' : 'shared')) &&
+          (selectedTags.isEmpty ||
+              tags(e.id).intersection(selectedTags).isNotEmpty);
+    }
+
+    final entries = input.where(matches).toList();
+    final byId = {for (final e in entries) e.id: e};
+    final ordered = sortAccounts(
+      entries.map(
+        (e) => AccountSortValues(
+          id: e.id,
+          name: e.service,
+          pinned: pinned(e.id),
+          score: org?.scoreFor(e.id) ?? 0,
+          createdAt: e.createdAt,
+          lastUsedAt: localLastUsed[e.id] ?? org?.lastUsedDayFor(e.id),
+        ),
+      ),
+      accountSort,
+    ).map((id) => byId[id]!).toList();
+    final private = widget.controller.store.visibleUnassigned(now);
+    final fresh =
+        entries
+            .where(
+              (e) =>
+                  !e.totp &&
+                  codes[e.id] != null &&
+                  now - codes[e.id]!.receivedAt < freshForMs,
+            )
+            .toList()
+          ..sort(
+            (a, b) =>
+                codes[b.id]!.receivedAt.compareTo(codes[a.id]!.receivedAt),
+          );
+    final freshPrivate =
+        private
+            .where(
+              (c) =>
+                  now - c.receivedAt < freshForMs &&
+                  query.trim().isEmpty &&
+                  filters.isEmpty,
+            )
+            .toList()
+          ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+    hadFresh = fresh.isNotEmpty || freshPrivate.isNotEmpty;
+    final desktop = MediaQuery.sizeOf(context).width > 700;
+    Widget section(String title, List<Widget> cards) => cards.isEmpty
+        ? const SizedBox.shrink()
+        : Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: muted,
+                    ),
+                  ),
+                ),
+                LayoutBuilder(
+                  builder: (context, box) {
+                    final count = box.maxWidth >= 1050
+                        ? 3
+                        : box.maxWidth >= 680
+                        ? 2
+                        : 1;
+                    final width = (box.maxWidth - (count - 1) * 10) / count;
+                    return Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final card in cards)
+                          SizedBox(width: width, child: card),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          );
+    Widget account(ManagedEntry e, {bool arrival = false}) {
+      final received = codes[e.id],
+          generated = e.totp ? batch?.tileCurrent(e.id) : null;
+      final value = received?.value ?? generated?.value;
+      final copyId = received != null
+          ? 'entry/${e.id}/${received.receivedAt}'
+          : generated != null
+          ? 'totp/${e.id}/${generated.periodStartMs}'
+          : null;
+      Future<bool> copy() async {
+        if (e.totp) return await batch?.copy(e.id) ?? false;
+        if (received == null || !widget.controller.canCopyAssigned(received)) {
+          return false;
+        }
+        await widget.onCopyAssigned(received);
+        return true;
+      }
+
+      final labels = [
+        for (final t in org?.tags ?? <PersonalTag>[])
+          if (tags(e.id).contains(t.id)) t.label,
+      ];
+      final tagRow = widget.showTileTags && !arrival
+          ? Container(
+              height: 34,
+              width: double.infinity,
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: line)),
+              ),
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  alignment: Alignment.centerLeft,
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: known(e.id) && !widget.organizationBusy
+                    ? () => editAccountTags({e.id})
+                    : null,
+                child: Text(
+                  labels.isEmpty ? 'Add tags' : labels.join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            )
+          : null;
+      final selection = desktop
+          ? Checkbox(
+              value: selectedAccounts.contains(e.id),
+              onChanged: (_) => setState(
+                () => selectedAccounts.contains(e.id)
+                    ? selectedAccounts.remove(e.id)
+                    : selectedAccounts.add(e.id),
+              ),
+            )
+          : null;
+      final tile = codeTile(
+        e.service,
+        e.account,
+        value,
+        copy,
+        true,
+        arrival,
+        selectedAccounts.isNotEmpty && !desktop
+            ? Checkbox(
+                value: selectedAccounts.contains(e.id),
+                onChanged: (_) => setState(
+                  () => selectedAccounts.contains(e.id)
+                      ? selectedAccounts.remove(e.id)
+                      : selectedAccounts.add(e.id),
+                ),
+              )
+            : null,
+        e.catalogId,
+        e.issuer,
+        generated?.remainingMs,
+        generated == null ? null : generated.period * 1000,
+        generated == null ? null : '${e.id}/${generated.periodStartMs}',
+        e.totp && (batch?.awaitingBoundary(e.id) ?? false),
+        copyId,
+        generated != null && !generated.copyable,
+        generated?.early ?? false,
+        batch?.expectedDigits(e.id) ?? e.expectedDigits,
+        tagRow,
+        selection,
+        pinned(e.id),
+      );
+      return GestureDetector(
+        onLongPress: () => setState(
+          () => selectedAccounts.contains(e.id)
+              ? selectedAccounts.remove(e.id)
+              : selectedAccounts.add(e.id),
+        ),
+        child: tile,
+      );
+    }
+
+    Widget unassigned(UnassignedCode c, {bool arrival = false}) => codeTile(
+      'Unassigned code',
+      'Only you',
+      c.value,
+      () async {
+        if (!widget.controller.canCopyPrivate(c)) return false;
+        await widget.onCopyPrivate(c);
+        return true;
+      },
+      true,
+      arrival,
+      widget.assignmentEnabled
+          ? IconButton(
+              tooltip: 'Assign',
+              onPressed: () => assign(c),
+              icon: const Icon(Icons.drive_file_move_outline),
+            )
+          : null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      false,
+      'private/${c.sourceId}/${c.eventId}',
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (selectedAccounts.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            children: [
+              Text('${selectedAccounts.length} selected'),
+              TextButton(
+                onPressed: () => setState(() => selectedAccounts.clear()),
+                child: const Text('Clear'),
+              ),
+              TextButton(
+                onPressed: org != null && !widget.organizationBusy
+                    ? () =>
+                          editAccountTags(selectedAccounts.where(known).toSet())
+                    : null,
+                child: const Text('Tags'),
+              ),
+              TextButton(
+                onPressed: org != null && !widget.organizationBusy
+                    ? () {
+                        for (final id in selectedAccounts.where(known)) {
+                          org.setPinned(id, true);
+                        }
+                        widget.onOrganizationChanged?.call();
+                        setState(() {});
+                      }
+                    : null,
+                child: const Text('Pin'),
+              ),
+              TextButton(
+                onPressed: org != null && !widget.organizationBusy
+                    ? () {
+                        for (final id in selectedAccounts.where(known)) {
+                          org.setPinned(id, false);
+                        }
+                        widget.onOrganizationChanged?.call();
+                        setState(() {});
+                      }
+                    : null,
+                child: const Text('Unpin'),
+              ),
+            ],
+          ),
+        section('New arrivals', [
+          for (final e in fresh) account(e, arrival: true),
+          for (final c in freshPrivate) unassigned(c, arrival: true),
+        ]),
+        section('Authenticator accounts', [
+          for (final e in ordered.where((e) => e.totp))
+            KeyedSubtree(
+              key: _batchKeys.putIfAbsent(e.id, () => GlobalKey()),
+              child: account(e),
+            ),
+        ]),
+        section('Accounts', [
+          for (final e in ordered.where((e) => !e.totp)) account(e),
+        ]),
+        if (filters.isEmpty && query.trim().isEmpty)
+          section('Needs assignment', [
+            for (final review in widget.controller.contexts.where(
+              (r) => r.retained(now),
+            ))
+              reviewTile(review, private, now),
+            for (final c in private.where(
+              (c) => !widget.controller.contexts.any(
+                (r) => r.eventId == c.eventId && r.retained(now),
+              ),
+            ))
+              unassigned(c),
+          ]),
+        if (widget.organizationTools != null) widget.organizationTools!,
+        if (entries.isEmpty && private.isEmpty)
+          empty('No accounts yet', 'Add an authenticator or connect a source.'),
+      ],
+    );
+  }
+
+  Future<void> editAccountTags(Set<String> ids) async {
+    final org = widget.organization;
+    if (org == null || ids.isEmpty) return;
+    final decisions = <String, bool>{};
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          constraints: const BoxConstraints(maxWidth: 430),
+          title: const Text('Tags for selected accounts'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final tag in org.tags)
+                  CheckboxListTile(
+                    tristate: true,
+                    title: Text(tag.label),
+                    value:
+                        decisions[tag.id] ??
+                        (ids.every(
+                              (id) => org
+                                  .preferencesFor(id)
+                                  .tagIds
+                                  .contains(tag.id),
+                            )
+                            ? true
+                            : ids.every(
+                                (id) => !org
+                                    .preferencesFor(id)
+                                    .tagIds
+                                    .contains(tag.id),
+                              )
+                            ? false
+                            : null),
+                    onChanged: (_) => update(
+                      () => decisions[tag.id] =
+                          !(decisions[tag.id] ??
+                              ids.every(
+                                (id) => org
+                                    .preferencesFor(id)
+                                    .tagIds
+                                    .contains(tag.id),
+                              )),
+                    ),
+                  ),
+                const Text(
+                  'Mixed tags stay unchanged unless you apply or remove them for all selected accounts.',
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (accepted != true || !mounted || !identical(widget.organization, org)) {
+      return;
+    }
+    for (final id in ids) {
+      final tags = {...org.preferencesFor(id).tagIds};
+      for (final choice in decisions.entries) {
+        choice.value ? tags.add(choice.key) : tags.remove(choice.key);
+      }
+      org.setTags(id, tags);
+    }
+    widget.onOrganizationChanged?.call();
+    setState(() {});
+  }
 
   Widget empty(String title, String body) => Card(
     child: Padding(
@@ -700,158 +1247,7 @@ class _ProductShellState extends State<ProductShell>
     final codes = {for (final c in store.visibleCodes(now)) c.entryId: c};
     switch (tab) {
       case 0:
-        final unassigned = store.visibleUnassigned(now);
-        if (store.entries.isEmpty && unassigned.isEmpty) {
-          return empty(
-            'No codes yet',
-            'Add an authenticator to generate codes, or connect a source.',
-          );
-        }
-        bool isFresh(int receivedAt) => now - receivedAt < freshForMs;
-        // Received codes (SMS, email), not generated TOTP codes.
-        final freshEntries = [
-          for (final e in entries)
-            if (!e.totp &&
-                codes[e.id] != null &&
-                isFresh(codes[e.id]!.receivedAt))
-              e,
-        ];
-        final freshPrivate = [
-          for (final c in unassigned)
-            if (isFresh(c.receivedAt) && q.isEmpty) c,
-        ];
-        hadFresh = freshEntries.isNotEmpty || freshPrivate.isNotEmpty;
-        final freshIds = {for (final e in freshEntries) e.id};
-        final withCode = entries.where(
-          (e) => codes.containsKey(e.id) && !freshIds.contains(e.id),
-        );
-        final rest = entries.where((e) => !codes.containsKey(e.id));
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (hadFresh)
-              const Padding(
-                key: Key('fresh-heading'),
-                padding: EdgeInsets.only(bottom: 8),
-                child: Text(
-                  'Just arrived',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                    color: green,
-                  ),
-                ),
-              ),
-            for (final c in freshPrivate)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: codeTile(
-                  'Unassigned code',
-                  'Only you',
-                  c.value,
-                  () async {
-                    if (!widget.controller.canCopyPrivate(c)) return false;
-                    await widget.onCopyPrivate(c);
-                    return true;
-                  },
-                  true,
-                  true,
-                  null,
-                  null,
-                  null,
-                  null,
-                  null,
-                  null,
-                  false,
-                  'private/${c.sourceId}/${c.eventId}',
-                ),
-              ),
-            for (final e in freshEntries)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: codeTile(
-                  e.service,
-                  e.account,
-                  codes[e.id]!.value,
-                  () async {
-                    final c = codes[e.id]!;
-                    if (!widget.controller.canCopyAssigned(c)) return false;
-                    await widget.onCopyAssigned(c);
-                    return true;
-                  },
-                  true,
-                  true,
-                  null,
-                  e.catalogId,
-                  e.issuer,
-                  null,
-                  null,
-                  null,
-                  false,
-                  'entry/${e.id}/${codes[e.id]!.receivedAt}',
-                ),
-              ),
-            for (final e in withCode)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: codeTile(
-                  e.service,
-                  e.account,
-                  codes[e.id]?.value,
-                  () async {
-                    final c = codes[e.id]!;
-                    if (!widget.controller.canCopyAssigned(c)) return false;
-                    await widget.onCopyAssigned(c);
-                    return true;
-                  },
-                  true,
-                  false,
-                  null,
-                  e.catalogId,
-                  e.issuer,
-                  null,
-                  null,
-                  null,
-                  false,
-                  'entry/${e.id}/${codes[e.id]!.receivedAt}',
-                ),
-              ),
-            for (final e in rest)
-              Padding(
-                key: e.totp
-                    ? _batchKeys.putIfAbsent(e.id, () => GlobalKey())
-                    : null,
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Builder(
-                  builder: (_) {
-                    // One clock read for value, bar and copy state.
-                    final v = e.totp ? batch?.tileCurrent(e.id) : null;
-                    return codeTile(
-                      e.service,
-                      e.account,
-                      v?.value,
-                      v != null && v.copyable ? () => batch!.copy(e.id) : null,
-                      true,
-                      false,
-                      null,
-                      e.catalogId,
-                      e.issuer,
-                      v?.remainingMs,
-                      v == null ? null : v.period * 1000,
-                      v == null ? null : '${e.id}/${v.periodStartMs}',
-                      e.totp && (batch?.awaitingBoundary(e.id) ?? false),
-                      v == null ? null : 'totp/${e.id}/${v.periodStartMs}',
-                      v != null && !v.copyable,
-                      v?.early ?? false,
-                      batch?.expectedDigits(e.id) ?? e.expectedDigits,
-                    );
-                  },
-                ),
-              ),
-            if (entries.isEmpty && freshPrivate.isEmpty)
-              const Text('Nothing matches your search.'),
-          ],
-        );
+        return unifiedCodes(entries, codes, now);
       case 1:
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1167,9 +1563,53 @@ class _ProductShellState extends State<ProductShell>
           if (_canAddTotp) const SizedBox(height: 80),
         ],
       );
-      final content = widget.pageReload == null
+      final scrollContent = widget.pageReload == null
           ? list
           : PullToRefresh(onRefresh: pull, child: list);
+      final org = widget.organization;
+      final tags = [...?org?.tags];
+      int tagCount(String id) => widget.controller.store.entries.where((e) {
+        try {
+          return org!.preferencesFor(e.id).tagIds.contains(id);
+        } catch (_) {
+          return false;
+        }
+      }).length;
+      tags.sort((a, b) {
+        final n = tagCount(b.id).compareTo(tagCount(a.id));
+        return n != 0
+            ? n
+            : a.label.toLowerCase().compareTo(b.label.toLowerCase());
+      });
+      final filterChoices = [
+        const CodeFilterChoice('mine', 'Mine'),
+        const CodeFilterChoice('shared', 'Shared'),
+        for (final t in tags) CodeFilterChoice('tag/${t.id}', t.label),
+      ];
+      final content = tab == 0
+          ? RevealedFilterList(
+              mobile: !desktop,
+              filters: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: CodeFilterRow(
+                        choices: filterChoices,
+                        selected: filters,
+                        onChanged: (value) => setState(() => filters = value),
+                      ),
+                    ),
+                    AccountSortButton(
+                      value: accountSort,
+                      onChanged: (value) => setState(() => accountSort = value),
+                    ),
+                  ],
+                ),
+              ),
+              child: scrollContent,
+            )
+          : scrollContent;
       final accountButton = IconButton(
         tooltip: 'Account & security',
         onPressed: widget.onOpenAccount,
@@ -1227,7 +1667,7 @@ class _ProductShellState extends State<ProductShell>
                           child: Row(
                             children: [
                               SizedBox(
-                                width: 232,
+                                width: 180,
                                 child: Padding(
                                   padding: const EdgeInsets.only(left: 24),
                                   child: Row(
@@ -1282,71 +1722,13 @@ class _ProductShellState extends State<ProductShell>
                 child: Center(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 1100),
-                    child: desktop
-                        ? Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                width: 232,
-                                child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    24,
-                                    22,
-                                    18,
-                                    0,
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      for (var i = 0; i < names.length; i++)
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            bottom: 8,
-                                          ),
-                                          child: ListTile(
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(9),
-                                            ),
-                                            selected: tab == i,
-                                            selectedTileColor: const Color(
-                                              0xffe9f8f0,
-                                            ),
-                                            selectedColor: const Color(
-                                              0xff0a7955,
-                                            ),
-                                            leading: Icon(icons[i], size: 18),
-                                            title: Text(names[i]),
-                                            onTap: () => selectTab(i),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              Expanded(child: content),
-                              const SizedBox(width: 24),
-                            ],
-                          )
-                        : content,
+                    child: content,
                   ),
                 ),
               ),
             ],
           ),
         ),
-        bottomNavigationBar: desktop
-            ? null
-            : NavigationBar(
-                selectedIndex: tab,
-                onDestinationSelected: selectTab,
-                destinations: [
-                  for (var i = 0; i < names.length; i++)
-                    NavigationDestination(
-                      icon: Icon(icons[i]),
-                      label: names[i],
-                    ),
-                ],
-              ),
       );
     },
   );
