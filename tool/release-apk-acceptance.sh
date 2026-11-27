@@ -3,7 +3,7 @@ set -euo pipefail
 adb root
 adb wait-for-device
 mkdir -p repair-out
-printf '%s\n' '8f150b01fcf3e17acb98584fbe36df1eafa85c1d1cdb375b551e3a602006d228  original-alpha6/otpanda-android-google-native-candidate.apk' 'cacc2ec1339e9727f11fa7d2c2bce3134de8c0cda33a4208e11d46a6a61939c4  original-alpha6/otpanda-android-fdroid-native-candidate.apk' '2b13c054117ecbe54d87e08d759ebb8f01534c3a8ecde50444034e5bc8aad771  broken-alpha7.apk' | sha256sum -c - | tee repair-out/pinned-fixtures.txt
+printf '%s\n' '8f150b01fcf3e17acb98584fbe36df1eafa85c1d1cdb375b551e3a602006d228  original-alpha6/otpanda-android-google-native-candidate.apk' 'cacc2ec1339e9727f11fa7d2c2bce3134de8c0cda33a4208e11d46a6a61939c4  original-alpha6/otpanda-android-fdroid-native-candidate.apk' '2b13c054117ecbe54d87e08d759ebb8f01534c3a8ecde50444034e5bc8aad771  broken-alpha7.apk' 'cc2733a90897c92a8f58fa6bdaee4a2a9831e3e4a7517f5e9c7e876ed52100ea  previous-alpha12/google.apk' 'f5908a40b357334e5b3c7f0f0680e09298e9a692d5cc1e558be1ff17ab5042ac  previous-alpha12/fdroid.apk' | sha256sum -c - | tee repair-out/pinned-fixtures.txt
 sign_in(){
  local name="$1"
  adb shell am force-stop app.otpanda
@@ -32,7 +32,7 @@ grep -q 'Sign-in on this device is not ready' repair-out/negative-alpha7-signin.
 printf '%s\n' 'PASS negative control rejected disabled alpha7' > repair-out/negative-control.txt
 for flavor in google fdroid;do
  apk="candidate/otpanda-android-$flavor-${GITHUB_REF_NAME}.apk"
- for source in "original-alpha6/otpanda-android-$flavor-native-candidate.apk" broken-alpha7.apk;do
+ for source in "original-alpha6/otpanda-android-$flavor-native-candidate.apk" broken-alpha7.apk "previous-alpha12/$flavor.apk";do
   name="$flavor-$(basename "$source" .apk)"
   adb uninstall app.otpanda || true
   adb install "$source" 2>&1 | tee "repair-out/$name-initial.txt"
@@ -46,7 +46,7 @@ for flavor in google fdroid;do
   old_code=$(sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' "repair-out/$name-before.txt" | head -1)
   new_code=$(sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' "repair-out/$name-after.txt" | head -1)
   test "$new_code" -gt "$old_code"
-  test "$new_code" -gt 2026112605
+  test "$new_code" -gt 2026112615
   grep -Eq "^[[:space:]]*versionName=${GITHUB_REF_NAME#v}$" "repair-out/$name-after.txt"
   after=$(adb shell dumpsys package app.otpanda | grep 'firstInstallTime=' | head -1)
   test "$before" = "$after"
