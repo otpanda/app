@@ -25,7 +25,6 @@ import 'page_reload_stub.dart'
     if (dart.library.js_interop) 'page_reload_web.dart'
     as platform;
 import 'app_theme.dart';
-import 'pull_to_refresh.dart';
 import 'refresh_bar.dart';
 import 'service_logo.dart';
 import 'session_contract.dart';
@@ -1193,6 +1192,19 @@ class _ProductShellState extends State<ProductShell>
           ]),
 
         if (entries.isEmpty &&
+            filters.isNotEmpty &&
+            (input.isNotEmpty ||
+                private.isNotEmpty ||
+                widget.controller.contexts.isNotEmpty))
+          empty(
+            'No codes match your filters',
+            'Your filters are hiding the codes. Change or clear the filters to see them.',
+            action: TextButton(
+              onPressed: () => setState(() => filters = {}),
+              child: const Text('Clear all filters'),
+            ),
+          )
+        else if (entries.isEmpty &&
             private.isEmpty &&
             widget.controller.contexts.isEmpty)
           empty('No codes yet', 'Add an authenticator or connect a source.'),
@@ -1431,7 +1443,7 @@ class _ProductShellState extends State<ProductShell>
     setState(() {});
   }
 
-  Widget empty(String title, String body) => Card(
+  Widget empty(String title, String body, {Widget? action}) => Card(
     child: Padding(
       padding: const EdgeInsets.all(22),
       child: Column(
@@ -1443,6 +1455,7 @@ class _ProductShellState extends State<ProductShell>
           ),
           const SizedBox(height: 6),
           Text(body),
+          if (action != null) ...[const SizedBox(height: 10), action],
         ],
       ),
     ),
@@ -1865,9 +1878,6 @@ class _ProductShellState extends State<ProductShell>
           if (_canAddTotp) const SizedBox(height: 80),
         ],
       );
-      final scrollContent = widget.pageReload == null
-          ? list
-          : PullToRefresh(onRefresh: pull, child: list);
       final org = widget.organization;
       final tags = [...?org?.tags];
       int tagCount(String id) => widget.controller.store.entries.where((e) {
@@ -1908,7 +1918,8 @@ class _ProductShellState extends State<ProductShell>
             ],
           ),
         ),
-        child: scrollContent,
+        onRefresh: widget.pageReload == null ? null : pull,
+        child: list,
       );
       final accountButton = IconButton(
         tooltip: 'Account & security',

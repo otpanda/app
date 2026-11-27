@@ -69,25 +69,32 @@ void main() {
     });
   }
 
-  testWidgets('web: pull reloads the page right away, never refetches data', (
-    t,
-  ) async {
-    var reloads = 0;
-    final (tr, now, set) = await setup(t, reload: () async => reloads++);
-    final before = tr.calls;
-    await pullDown(t); // inside the refetch cooldown: still reloads
-    expect(reloads, 1);
-    set(now() + 15000);
-    await pullDown(t);
-    expect(reloads, 2);
-    expect(tr.calls, before);
-  });
+  testWidgets(
+    'web: first pull reveals filters, next pull reloads without refetch',
+    (t) async {
+      var reloads = 0;
+      final (tr, now, set) = await setup(t, reload: () async => reloads++);
+      final before = tr.calls;
+      await pullDown(t);
+      expect(reloads, 0);
+      await pullDown(
+        t,
+      ); // filters already visible, even inside refetch cooldown
+      expect(reloads, 1);
+      set(now() + 15000);
+      await pullDown(t);
+      expect(reloads, 2);
+      expect(tr.calls, before);
+    },
+  );
 
   testWidgets('web: pull reloads while a refresh is still loading', (t) async {
     var reloads = 0;
     final (tr, _, _) = await setup(t, reload: () async => reloads++);
     tr.handler = (_) =>
         Future.delayed(const Duration(seconds: 30), () => throw 0);
+    await pullDown(t);
+    expect(reloads, 0);
     await pullDown(t);
     expect(reloads, 1);
   });
