@@ -38,7 +38,7 @@ def check_scenario(name):
     text = (p / f'{name}.log').read_text()
     drive = (p / f'{name}-drive.txt').read_text()
     assert 'HARNESS FAILED' not in drive and 'HARNESS EXCEPTION' not in drive, f'{name}: harness failure'
-    assert ' false' not in text and 'fixture_exception' not in text, f'{name}: failed check'
+    assert not re.search(r'CHECK \S+ false', text) and 'CHECK fixture_exception' not in text, f'{name}: failed check'
     assert 'FATAL EXCEPTION' not in (p / f'crash-{name}.txt').read_text(), f'{name}: Android crash'
     ui = (p / f'ui-{name}-final.xml').read_text()
     assert 'Synthetic picker fixture check' in ui and not any(s in ui for s in ("isn't responding", 'is not responding')), f'{name}: fixture frame obscured or not ready'
@@ -56,12 +56,17 @@ def check_scenario(name):
         assert used + dropped == 1 and count(text, r'CHECK phase_complete true$') == 1, f'{name}: need exactly one outcome'
         # engine survived: the one selection opened once and was delivered. Engine retired: it must never have been opened.
         assert got == ({'a': 1} if used else {}), f'{name}: provider opens {got} do not match the observed outcome'
+    if name == 'stale_recreate':
+        assert 'HARNESS recreated_before_selection' in drive and count(text, r'ENGINE cleanup') >= 1, f'{name}: the caller was not shown retired before the stale selection'
+    if name == 'stale_kill':
+        assert 'HARNESS killed_before_selection' in drive, f'{name}: the process was not shown dead before the stale selection'
     if name.startswith('stale'):
         assert count(text, r'ACT create \d+ restored true') >= 1, f'{name}: the caller was never restored by the system'
         assert count(text, r'ENGINE configure') >= 2, f'{name}: no second engine'
     if name == 'stale_kill':
-        before = re.search(r'pid_before (\d+)', drive); after = re.search(r'pid_after_restore (\d+)', drive)
-        assert before and after and before.group(1) != after.group(1), f'{name}: process did not change'
+        before = re.search(r'pid_before (\d+)', drive); killed = re.search(r'pid_after_kill (\w+)', drive); after = re.search(r'pid_after_restore (\d+)', drive)
+        assert before and killed and killed.group(1) != before.group(1), f'{name}: the process was not killed'
+        assert after and after.group(1) != before.group(1), f'{name}: restored process is not a new process'
     if name == 'normal':
         assert count(text, r'ACT stop \d+') >= 1, f'{name}: the app was never backgrounded by the picker'
     return 'used' if name in ('rotation', 'recreate') and count(text, r'CHECK rotation_text true$') else 'ok'

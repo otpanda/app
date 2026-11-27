@@ -150,28 +150,42 @@ def sc_recreate(r):
 
 
 def sc_stale_recreate(r):
-    shell('settings put global always_finish_activities 1')
+    """Retire the caller (engine and activity destroyed and recreated by a real configuration change) while the picker is open,
+    PROVE it happened from the lifecycle log, and only then select the old document."""
+    r.start()
+    r.wait_for(r'MARK old_picker_open', what='old_picker_open'); r.picker_focused()
+    shell('settings put system font_scale 1.3'); r.note('HARNESS config change font_scale')
     try:
-        r.start()
-        r.wait_for(r'MARK old_picker_open', what='old_picker_open'); r.picker_focused()
+        r.wait_for(r'ENGINE cleanup 1[\s\S]*ACT create \d+ restored true[\s\S]*ENGINE configure 2', 30, 'caller retired and recreated while the picker is open')
+        r.note('HARNESS recreated_before_selection')
+        r.picker_focused()
         r.select('fixture-a.txt', 'a')
         r.wait_for(r'MARK pick_2', 90, 'pick_2 from the recreated engine'); r.select('fixture-b.txt', 'b')
         complete(r)
     finally:
-        shell('settings put global always_finish_activities 0')
+        shell('settings put system font_scale 1.0')
+
+
+def kill_app(r):
+    """Real process death: SIGKILL the debuggable app's own process. The picker is another app's process and survives."""
+    before = pid()
+    r.note(f'HARNESS pid_before {before}')
+    if not before:
+        raise Harness(f'{r.name}: no app process to kill')
+    shell(f'run-as {PKG} kill -9 {before}')
+    time.sleep(3)
+    after = pid()
+    r.note(f'HARNESS pid_after_kill {after or "none"}')
+    if after == before:
+        raise Harness(f'{r.name}: the app process survived kill -9; process death was not exercised')
+    return before
 
 
 def sc_stale_kill(r):
     r.start()
     r.wait_for(r'MARK old_picker_open', what='old_picker_open'); r.picker_focused()
-    before = pid()
-    r.note(f'HARNESS pid_before {before}')
-    shell(f'am kill {PKG}')
-    time.sleep(3)
-    after_kill = pid()
-    r.note(f'HARNESS pid_after_kill {after_kill or "none"}')
-    if after_kill == before:
-        raise Harness(f'{r.name}: the app process survived am kill; process death was not exercised')
+    kill_app(r)
+    r.note('HARNESS killed_before_selection')
     r.picker_focused()
     r.select('fixture-a.txt', 'a')
     r.wait_for(r'MARK pick_2', 90, 'pick_2 from the restored process'); r.note(f'HARNESS pid_after_restore {pid()}')

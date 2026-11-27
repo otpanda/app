@@ -16,8 +16,8 @@ FILES = {
     'errors': (logs('errors', ['errors_not_text', 'errors_too_large', 'phase_complete'], ['bad', 'big']), SEL('bad', 'big')),
     'rotation': (logs('rotation', ['rotation_text', 'phase_complete'], ['a']), SEL('a')),
     'recreate': (logs('recreate', ['rotation_recreated_dropped', 'phase_complete'], []), SEL('a')),
-    'stale_recreate': (logs('s', ['stale_old_engine_gone', 'stale_second_text', 'phase_complete'], ['b'], 'ACT create 2 restored true\nENGINE configure 1\nENGINE configure 2'), SEL('a', 'b')),
-    'stale_kill': (logs('s', ['stale_old_engine_gone', 'stale_second_text', 'phase_complete'], ['b'], 'ACT create 2 restored true\nENGINE configure 1\nENGINE configure 2'), SEL('a', 'b') + '\nHARNESS pid_before 100\nHARNESS pid_after_restore 200'),
+    'stale_recreate': (logs('s', ['stale_old_engine_gone', 'stale_second_text', 'phase_complete'], ['b'], 'ACT create 2 restored true\nENGINE cleanup 1\nENGINE configure 1\nENGINE configure 2'), SEL('a', 'b') + '\nHARNESS recreated_before_selection'),
+    'stale_kill': (logs('s', ['stale_old_engine_gone', 'stale_second_text', 'phase_complete'], ['b'], 'ACT create 2 restored true\nENGINE configure 1\nENGINE configure 2'), SEL('a', 'b') + '\nHARNESS pid_before 100\nHARNESS pid_after_kill none\nHARNESS killed_before_selection\nHARNESS pid_after_restore 200'),
 }
 
 def write(p, files):
@@ -50,6 +50,13 @@ with tempfile.TemporaryDirectory() as t:
         assert not mutate(n, lambda l: l + '\nOPEN a 1'), f'{n}: stale selection opened must fail'
         assert not mutate(n, lambda l: l.replace('OPEN b 1', 'OPEN b 1\nOPEN b 2')), f'{n}: new selection opened twice must fail'
     assert not mutate('stale_kill', drive=lambda d: d.replace('pid_after_restore 200', 'pid_after_restore 100')), 'process must change'
+    assert not mutate('stale_kill', drive=lambda d: d.replace('pid_after_kill none', 'pid_after_kill 100')), 'process must have died'
+    assert not mutate('stale_kill', drive=lambda d: d.replace('HARNESS killed_before_selection', '')), 'death must precede the selection'
+    assert not mutate('stale_recreate', drive=lambda d: d.replace('HARNESS recreated_before_selection', '')), 'retirement must precede the selection'
+    assert not mutate('stale_recreate', lambda l: l.replace('ENGINE cleanup 1', '')), 'engine cleanup must be observed'
+    # ordinary lifecycle telemetry is not a failed check, a real false check is
+    assert mutate('normal', lambda l: l + '\nACT create 1 restored false'), 'restored false telemetry must pass'
+    assert not mutate('normal', lambda l: l + '\nCHECK something false'), 'a false check must fail'
     assert not mutate('stale_recreate', lambda l: l.replace('ACT create 2 restored true', '')), 'caller must be restored'
     assert not mutate('rotation', lambda l: l.replace('OPEN a 1', '')), 'delivered without being opened'
     assert not mutate('recreate', lambda l: l + '\nOPEN a 1'), 'dropped but opened'

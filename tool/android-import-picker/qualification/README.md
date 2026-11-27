@@ -25,10 +25,14 @@ Scenarios and what each proves:
 - rotation: real user rotation while the picker is open. Accepts either outcome and checks it is consistent: engine survived (text a,
   a opened once) or engine retired (new Dart run sees phase "picking", a never opened).
 - recreate: a configuration change (font scale) while the picker is open, same either-or check.
-- stale_recreate: `always_finish_activities=1`, so the caller is destroyed when the picker opens. The old selection a arrives at a
-  new engine: it must never be opened (opens a=0). Then a fresh pick of b works (b=1). Requires a restored caller and a second engine.
-- stale_kill: `am kill` of the app process while the picker is up (harness fails if the process survives), then selection a
-  and restore. a never opened; a fresh pick of b works; the pid differs. This is the process-death-with-surviving-picker case.
+- stale_recreate: a real configuration change (font scale) retires the caller (engine cleanup, activity destroyed and recreated)
+  while the picker is open. The harness proves from the lifecycle log that cleanup, a restored create and a second engine happened
+  BEFORE it selects the old document a. a must never be opened (opens a=0); a fresh pick of b then works (b=1). Font scale is
+  restored only after completion, so no second recreation hits the pending pick. (`always_finish_activities` via `settings put`
+  did not take effect on the API 34 image in run 46028325228, so it is not used.)
+- stale_kill: `run-as app.otpanda kill -9 <pid>` (real SIGKILL of the debuggable app; `am kill` left a picker-hosting process
+  alive in that run) while the picker is up. The harness fails if the pid survives, records `killed_before_selection`, then selects
+  a, restores, and requires a new pid. a never opened; a fresh pick of b works (b=1).
 
 Not covered: a NEW process beginning its own picker while the OLD picker is still open (overlap). Android's task restore order decides
 whether that can be driven, so no claim is made. The durable allocator is unit-tested for it (JVM). Also not proven: other pickers,
