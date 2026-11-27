@@ -1,0 +1,54 @@
+name: Isolated native signed rule qualification
+on:
+  push:
+    branches: [feat/signed-rule-client]
+permissions:
+  contents: read
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: otpanda/api
+          ref: f8b874221ce542d5b5aaf8da9dff785d10b064a8
+          path: api-fixture
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.50.1'
+          channel: stable
+          cache: true
+      - run: cp tool/native-lifecycle-fixture/*.mjs api-fixture/tool/
+      - run: bash tool/bootstrap.sh
+      - run: flutter analyze
+      - run: flutter test test/native/native_rule_test.dart
+      - name: Enable KVM on disposable emulator only
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            API_DIR="$GITHUB_WORKSPACE/api-fixture" bash tool/android-rules-private.sh native-rules-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-private-rules-evidence
+          path: |
+            native-rules-out
+          retention-days: 7
