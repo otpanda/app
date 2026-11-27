@@ -18,6 +18,7 @@ import 'totp_enrollment.dart';
 import 'read_workspace_controller.dart';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'branding.dart';
 import 'profile_header.dart';
@@ -65,6 +66,9 @@ class ProductShell extends StatefulWidget {
   final bool entryEditEnabled;
   final bool entryDomainsEnabled;
 
+  /// Web headers retain branding; installed clients use space for search.
+  final bool showHeaderBrand;
+
   /// Pull-down action on the web: reload the whole page. Null on native
   /// clients, which refresh their data in place instead.
   final Future<void> Function()? pageReload;
@@ -92,6 +96,7 @@ class ProductShell extends StatefulWidget {
     this.assignmentEnabled = false,
     this.entryEditEnabled = false,
     this.entryDomainsEnabled = false,
+    this.showHeaderBrand = kIsWeb,
     this.pageReload = platform.pageReload,
   });
   @override
@@ -1977,37 +1982,41 @@ class _ProductShellState extends State<ProductShell>
                           constraints: const BoxConstraints(maxWidth: 1100),
                           child: Row(
                             children: [
-                              SizedBox(
-                                width: 180,
-                                child: Padding(
-                                  padding: const EdgeInsets.only(left: 24),
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    alignment: Alignment.centerLeft,
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Image.memory(
-                                          bareOttyImage,
-                                          width: 42,
-                                          height: 42,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          'OTPanda',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontFamily: 'BricolageGrotesque',
-                                            fontSize: 23,
-                                            letterSpacing: -1,
-                                            color: context.pal.ink,
+                              if (widget.showHeaderBrand)
+                                SizedBox(
+                                  width: 180,
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(left: 24),
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      alignment: Alignment.centerLeft,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Image.memory(
+                                            ottyImage,
+                                            key: const Key('web-header-brand'),
+                                            width: 42,
+                                            height: 42,
                                           ),
-                                        ),
-                                      ],
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'OTPanda',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                              fontFamily: 'BricolageGrotesque',
+                                              fontSize: 23,
+                                              letterSpacing: -1,
+                                              color: context.pal.ink,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
+                              if (!widget.showHeaderBrand)
+                                const SizedBox(width: 24),
                               Expanded(
                                 child: phase == _Phase.loaded && searchable
                                     ? searchField(false)
@@ -2022,8 +2031,15 @@ class _ProductShellState extends State<ProductShell>
                       )
                     : Row(
                         children: [
-                          Image.memory(bareOttyImage, width: 42, height: 42),
-                          const SizedBox(width: 10),
+                          if (widget.showHeaderBrand) ...[
+                            Image.memory(
+                              ottyImage,
+                              key: const Key('web-header-brand'),
+                              width: 42,
+                              height: 42,
+                            ),
+                            const SizedBox(width: 10),
+                          ],
                           Expanded(
                             child: phase == _Phase.loaded && searchable
                                 ? searchField(true)

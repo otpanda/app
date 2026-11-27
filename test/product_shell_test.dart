@@ -141,6 +141,7 @@ Future<void> pump(
     MaterialApp(
       theme: otpandaTheme(),
       home: ProductShell(
+        showHeaderBrand: true, // Existing shell layout/goldens exercise web chrome.
         controller: controller,
         navigation: navigation,
         onNavigate: onNavigate,
