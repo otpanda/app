@@ -674,7 +674,10 @@ void main() {
         }
         expect(File(p('f.txt')).readAsStringSync(), 'keep');
         expect(Directory(p('d.txt')).existsSync(), isTrue);
-        expect(Link(p('l.txt')).targetSync(), p('nowhere'));
+        expect(
+          Link(p('l.txt')).targetSync(),
+          p('nowhere').replaceAll('/', Platform.pathSeparator),
+        );
         expect(names(), ['d.txt', 'f.txt', 'l.txt']);
       },
     );

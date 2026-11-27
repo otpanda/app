@@ -212,7 +212,7 @@ class ImportSession(private val launch: () -> Boolean, private val worker: Execu
     fun pickerOutstanding(): Boolean = synchronized(lock) { pickerOpen }
 }
 
-/** Durable record of picker launches whose result has not been seen yet. Holds request codes only, never file data. */
+/** Durable record of how many request codes this install has ever issued. Numbers only, never file data. */
 interface CodeStore {
     /** The saved codes: empty when nothing was ever saved, null when the record exists but cannot be read or is corrupt. */
     fun load(): IntArray?
@@ -266,83 +266,67 @@ class FileCodeStore(
 }
 
 /**
- * Attributes a system-picker result to the launch that asked for it, across engine recreation AND caller process death.
+ * Attributes a system-picker result to the launch that asked for it, across engine recreation and caller process death.
  *
- * Android keeps the system picker alive when the app's process dies and later delivers its result, with the original request
- * code, to a recreated caller in a new process. Per-process counters would restart and could alias that stale result, so the
- * set of codes that may still have a result in flight is stored durably:
- *  - [issue] picks a code not in the set, adds it and saves BEFORE the launch (fails closed with [NONE] if it cannot save,
- *    cannot read an existing record, or every code in the block is possibly in flight);
- *  - [release] removes a code only when its result has been seen (delivered, whether used or dropped) or the launch failed;
- *  - a code is therefore never given to a new launch while an older launch that used it may still deliver a result.
- * A launch whose result never comes (caller task destroyed) keeps its code reserved; the block is 1024 codes inside the lower
- * 16 bits (the legacy Activity request-code limit), and clearing app data resets it. One instance per process, shared by every
- * controller, so engine recreation sees the same set.
+ * Staging design, chosen for qualification and deliberately simple: request codes are issued from a reserved block of [SIZE]
+ * values (0x7800..0x7BFF, inside the lower 16 bits) by a MONOTONIC counter that is saved durably BEFORE the launch and is never
+ * reset, wrapped, recycled or lowered. A code is never handed out twice for the life of the app's data, whatever happened to
+ * its launch (result delivered, dropped, failed, abandoned, process killed). So a late or duplicate result can never carry the
+ * code of a different launch, and nothing here depends on Android delivering results exactly once.
+ *
+ * Limit, stated plainly: the block holds 1024 launches. When it is used up, [issue] returns [NONE] and picking reports
+ * "unavailable" until the app's data is cleared. A save failure or an unreadable record also fails closed. There is no silent reset.
+ *
+ * Owner routing is in memory: a live controller consumes only the result of its own current launch; a code issued by another live
+ * controller is left alone ([Claim.OTHER]); any other issued code (retired controller, earlier process) is dropped unread.
  */
 class PickerRequests(private val store: CodeStore, private val size: Int = SIZE) {
-    /** Who may consume a result. */
     enum class Claim { MINE, OTHER, ORPHAN }
 
     private val lock = Any()
-    private var inFlight: MutableSet<Int>? = null
+    private var next = -1                       // -1: record not loaded yet
     private var unreadable = false
-    private var cursor = 0
-    // In-memory only: which live controller launched a code. A reserved code with no live owner is an orphan (left by a retired
-    // controller or a dead process), and only orphans may be consumed by someone else.
-    private val owners = HashMap<Int, Any>()
+    private val owners = HashMap<Int, Any>()    // in-memory only: code -> live controller that launched it
 
-    private fun loaded(): MutableSet<Int>? {
-        inFlight?.let { return it }
-        if (unreadable) return null
+    /** The record is a single number: how many codes were ever issued. An empty record (never written) means 0. */
+    private fun loaded(): Boolean {
+        if (next >= 0) return true
+        if (unreadable) return false
         val saved = store.load()
-        if (saved == null || saved.any { it < 0 || it >= size }) { unreadable = true; return null }
-        return saved.toMutableSet().also { inFlight = it }
+        if (saved == null || saved.size > 1 || (saved.size == 1 && (saved[0] < 0 || saved[0] > size))) { unreadable = true; return false }
+        next = if (saved.isEmpty()) 0 else saved[0]
+        return true
     }
 
-    /** A code reserved durably for [owner], or [NONE]. */
+    /** A fresh, never-before-issued code reserved durably for [owner], or [NONE] (exhausted, unreadable record or save failure). */
     fun issue(owner: Any): Int = synchronized(lock) {
-        val set = loaded() ?: return NONE
-        for (step in 0 until size) {
-            val n = (cursor + step) % size
-            if (n in set) continue
-            set.add(n)
-            if (!store.save(set.toIntArray())) { set.remove(n); return NONE }
-            cursor = (n + 1) % size
-            owners[BASE + n] = owner
-            return BASE + n
-        }
-        NONE
+        if (!loaded() || next >= size) return NONE
+        if (!store.save(intArrayOf(next + 1))) return NONE
+        val code = BASE + next
+        next++
+        owners[code] = owner
+        code
     }
 
-    /** Who may consume a result for [code]: [owner] itself, another live controller (hands off), or nobody (orphan). */
     fun claim(code: Int, owner: Any): Claim = synchronized(lock) {
         val o = owners[code]
         when { o == null -> Claim.ORPHAN; o === owner -> Claim.MINE; else -> Claim.OTHER }
     }
 
-    /** [owner] is gone: its launches stay reserved (their pickers may still answer) but become orphans. */
+    /** [owner] is gone: its launches' pickers may still answer, and those results are dropped unread. */
     fun abandon(owner: Any) = synchronized(lock) { owners.values.removeAll { it === owner } }
 
-    /**
-     * The launch for [code] is over (result seen, or it never started). Frees the code only if the durable record was updated;
-     * if the save fails the code stays reserved in memory too, so it cannot be reused while disk still holds it. True if freed.
-     */
-    fun release(code: Int): Boolean = synchronized(lock) {
-        val set = loaded() ?: return false
-        if (code < BASE || code >= BASE + size || (code - BASE) !in set) return true
-        val next = set.toMutableSet().also { it.remove(code - BASE) }
-        if (!store.save(next.toIntArray())) return false
-        set.remove(code - BASE); owners.remove(code)
-        true
-    }
+    /** [owner]'s launch got its result. The code stays spent. */
+    fun settle(code: Int, owner: Any) = synchronized(lock) { if (owners[code] === owner) owners.remove(code) }
 
-    /** True when [code] is in this feature's block, whether or not it is in flight. */
+    /** True when [code] is in this feature's block, whether or not it was ever issued. */
     fun owns(code: Int): Boolean = code >= BASE && code < BASE + size
 
-    fun inFlightCount(): Int = synchronized(lock) { inFlight?.size ?: -1 }
+    /** For tests: codes issued so far (-1 while unloaded). */
+    fun issuedCount(): Int = synchronized(lock) { next }
 
     companion object {
-        /** Reserved block 0x7800..0x7BFF: below 0x10000, 1024 codes. */
+        /** Reserved block 0x7800..0x7BFF: below 0x10000, 1024 launches per install. */
         const val BASE = 0x7800
         const val SIZE = 0x0400
         const val NONE = -1
@@ -350,9 +334,9 @@ class PickerRequests(private val store: CodeStore, private val size: Int = SIZE)
 }
 
 /**
- * The host's decision logic without Android types: launch with a durable per-launch request code, route results by code.
- * [startActivity] returns false if the picker cannot be started. A result for any code but this controller's current launch is
- * dropped unread, then its code is freed.
+ * The host's decision logic without Android types: launch with a durable, never-reused request code and route results by code.
+ * [startActivity] returns false if the picker cannot be started (that code stays spent). Only this controller's current launch
+ * is delivered; every other code is dropped unread, or left to its live owner.
  */
 class ImportController(
     private val startActivity: (Int) -> Boolean,
@@ -364,29 +348,25 @@ class ImportController(
     private val session = ImportSession({
         val code = requests.issue(this)
         val ok = code != PickerRequests.NONE && startActivity(code)
-        if (ok) current = code else if (code != PickerRequests.NONE) requests.release(code)
+        if (ok) current = code
         ok
     }, worker, post)
 
     fun begin(r: ImportReply) = session.begin(r)
     fun cancel() = session.cancel()
-    /** Engine or activity gone for good: the launch's result can no longer reach this controller, so it becomes an orphan. */
+    /** Engine or activity gone for good: the launch's result can no longer reach this controller. */
     fun retire() { session.retire(); current = PickerRequests.NONE; requests.abandon(this) }
     fun active(): Boolean = session.active()
 
-    /**
-     * Returns true when the code was consumed. False means leave it to someone else: a foreign code, or a code that another
-     * live controller launched. Orphans (no live owner) are dropped unread and freed. Only this controller's current launch
-     * is delivered.
-     */
+    /** Returns true when the code was consumed. False leaves it to others: a foreign code, or another live controller's launch. */
     fun onResult(code: Int, open: (() -> InputStream?)?): Boolean {
         if (!requests.owns(code)) return false
         return when (requests.claim(code, this)) {
             PickerRequests.Claim.OTHER -> false
-            PickerRequests.Claim.ORPHAN -> { requests.release(code); true }
+            PickerRequests.Claim.ORPHAN -> true
             PickerRequests.Claim.MINE -> {
-                if (code == current) { current = PickerRequests.NONE; requests.release(code); session.onPicked(open) }
-                else requests.release(code)
+                if (code == current) { current = PickerRequests.NONE; requests.settle(code, this); session.onPicked(open) }
+                else requests.settle(code, this)
                 true
             }
         }
