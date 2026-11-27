@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:math';
 
 import '../browser_session_contract.dart';
+import '../offline_totp/seed_sync_http.dart'
+    show seedSyncPullBase, seedSyncPullRequestAllowed;
 import '../offline_totp/seed_enrollment_http.dart'
     show seedSyncRequestAllowed, seedSyncBase;
 import '../entry_domains.dart';
@@ -683,6 +685,30 @@ class NativeSessionBridge
     Map<String, dynamic>? parsed;
     try {
       final v = utf8.encode(r.body).length <= 16384 ? jsonDecode(r.body) : null;
+      if (v is Map<String, dynamic>) parsed = v;
+    } on FormatException {
+      parsed = null;
+    }
+    return (status: r.status, body: parsed);
+  }
+
+  Future<({int status, Map<String, dynamic>? body})> seedPullPost(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    if (!path.startsWith(seedSyncPullBase) ||
+        !seedSyncPullRequestAllowed(
+          path.substring(seedSyncPullBase.length),
+          body,
+        )) {
+      throw StateError('Signed seed pull request required');
+    }
+    final r = await _call('POST', path, body: jsonEncode(body));
+    Map<String, dynamic>? parsed;
+    try {
+      final v = utf8.encode(r.body).length <= 262144
+          ? jsonDecode(r.body)
+          : null;
       if (v is Map<String, dynamic>) parsed = v;
     } on FormatException {
       parsed = null;

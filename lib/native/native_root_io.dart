@@ -12,6 +12,8 @@ import '../offline_totp/native_offline_workspace_runtime.dart';
 import 'native_workspace_admission.dart';
 import 'native_workspace_coordinator.dart';
 import 'native_offline_enrollment.dart';
+import '../offline_totp/seed_sync_coordinator.dart';
+import '../offline_totp/seed_sync_http.dart';
 import 'native_offline_setting.dart';
 import '../offline_totp/seed_sync_channel.dart';
 import '../offline_totp/seed_enrollment_coordinator.dart';
@@ -96,6 +98,36 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   bool _admitting = false;
   late final NativeOfflineEnrollment offlineEnrollment;
   late final SeedStatusCoordinator offlineStatus;
+  late final SeedSyncCoordinator offlinePull;
+  bool _pulling = false;
+  Future<void> _pullOfflineCodes() async {
+    final scope = workspace.scope;
+    if (!nativeSeedSyncEnabled ||
+        _pulling ||
+        scope == null ||
+        !await _currentOfflineOwner(scope.owner)) {
+      return;
+    }
+    _pulling = true;
+    try {
+      await offlinePull.sync(
+        SeedSyncScope(
+          owner: scope.owner,
+          installId: scope.install,
+          epoch: scope.epoch,
+          deviceId: controller.session?.deviceId,
+        ),
+      );
+      await offlineRuntime.refreshLocalCodes();
+    } finally {
+      _pulling = false;
+    }
+  }
+
+  void _offlineEnrollmentChanged() {
+    if (offlineEnrollment.confirmed) unawaited(_pullOfflineCodes());
+  }
+
   String? _onlineOwner;
   Future<bool> _currentOfflineOwner(String owner) async =>
       mounted &&
@@ -139,6 +171,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
         offlineEnrollment.bindOwner(owner);
         await offlineEnrollment.refresh();
         await workspace.admitAuthenticated(owner);
+        if (nativeSeedSyncEnabled) unawaited(_pullOfflineCodes());
       }
     } catch (_) {
     } finally {
@@ -273,6 +306,13 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       installId: () =>
           SeedInstallId(SeedInstallIdChannelStore(seedChannel)).get(),
     );
+    offlinePull = SeedSyncCoordinator(
+      api: SeedSyncHttp(post: bridge.seedPullPost),
+      native: SeedSyncNativeAdapter(seedNative),
+      custody: AndroidSeedCustody(),
+      current: _currentOfflineOwner,
+    );
+    offlineEnrollment.addListener(_offlineEnrollmentChanged);
     workspace.addListener(_workspaceChanged);
     offlineRuntime.addListener(_workspaceChanged);
     _workspaceInitialized = true;
@@ -361,6 +401,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     bridge.disposeRealtime();
     workspace.removeListener(_workspaceChanged);
     offlineRuntime.removeListener(_workspaceChanged);
+    offlineEnrollment.removeListener(_offlineEnrollmentChanged);
     offlineEnrollment.dispose();
     workspace.dispose();
     offlineRuntime.dispose();
