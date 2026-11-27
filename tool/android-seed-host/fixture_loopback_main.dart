@@ -27,7 +27,12 @@ import 'package:otpanda_client/offline_totp/seed_sync_coordinator.dart';
 const channel = MethodChannel('app.otpanda/seed-custody');
 const driver = MethodChannel('seedfx/driver');
 const owner = 'fixture-owner';
-final loopback = Uri.parse(const String.fromEnvironment('LOOPBACK_BASE', defaultValue: 'http://127.0.0.1:8787'));
+final loopback = Uri.parse(
+  const String.fromEnvironment(
+    'LOOPBACK_BASE',
+    defaultValue: 'http://127.0.0.1:8787',
+  ),
+);
 
 Future<Map<String, dynamic>> _json(
   String method,
@@ -91,6 +96,12 @@ Future<void> run() async {
     Map<String, dynamic> body,
   ) async {
     final r = await _json('POST', path, jsonEncode(body), bearer);
+    // Fixed diagnostic labels and status only, never response bodies or tokens.
+    final op = path.split('/').last.replaceAll('-', '_');
+    await driver.invokeMethod('log', {
+      'label': 'http_${op}_ok',
+      'ok': r['status'] == 200,
+    });
     Map<String, dynamic>? b;
     try {
       final j = jsonDecode(r['text'] as String);
@@ -137,6 +148,11 @@ Future<void> run() async {
     final state = await custody.readOwnerState(owner);
     await check('custody_enabled_by_admission', state.enabled);
     final e = await enrollment.run(owner: owner, installId: id);
+    await driver.invokeMethod('log', {
+      'label':
+          'enroll_outcome_${e.outcome.name.replaceAllMapped(RegExp(r'[A-Z]'), (m) => '_${m[0]!.toLowerCase()}')}',
+      'ok': true,
+    });
     await check('enroll_confirmed', e.outcome == SeedEnrollOutcome.confirmed);
     final srv = jsonDecode(
       (await _json('GET', '/__loopback/state'))['text'] as String,
