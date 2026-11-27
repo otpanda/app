@@ -123,7 +123,7 @@ class WrappingKeyFixture(private val ctx: Context, private val out: (String) -> 
                 ctx.startService(Intent(ctx, c).putExtra("t0", t0))
             val lines = (1..3).map { waitFor(stateFile(ctx, "race-$it.txt"), 60_000) }
             need(lines.all { it != null }, "3 separate OS processes reported (${lines.map { it ?: "none" }})")
-            need(lines.none { it!!.startsWith("FAILED") }, "no process failed (${lines})")
+            need(lines.none { it!!.startsWith("FAILED") }, "all process results valid (${lines})")
             need(lines.count { it!!.contains("created=true") } == 1, "exactly one process created the key")
             need(lines.map { it!!.substringBefore(" created") }.distinct().size == 1, "all processes saw the same key")
             val stored = core.read(RACE_NS)
