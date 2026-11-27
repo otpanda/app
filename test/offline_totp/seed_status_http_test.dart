@@ -133,6 +133,37 @@ void main() {
       expect((request.headers as Headers).values, isEmpty);
     },
   );
+  test(
+    'explicit loopback origin keeps status separate and credential-free',
+    () async {
+      final c = Client(Request(Reply([utf8.encode('{}')])));
+      await HttpOverrides.runWithHttpOverrides(
+        () => SeedStatusHttp(origin: 'http://127.0.0.1:8787')
+            .post('/v1/manage/seed-sync/status-begin', {'keyId': 'synthetic'}),
+        Override(c),
+      );
+      expect(
+        c.url,
+        Uri.parse('http://127.0.0.1:8787/v1/manage/seed-sync/status-begin'),
+      );
+      expect(
+        (c.request.headers as Headers).values.keys,
+        unorderedEquals(['content-type', 'accept']),
+      );
+      expect(c.request.followRedirects, false);
+      expect(c.closed, true);
+      for (final origin in [
+        'http://example.test',
+        'https://user:password@example.test',
+        'https://example.test/path',
+        'https://example.test?x=1',
+        'https://example.test#x',
+        'file:///x',
+      ]) {
+        expect(() => SeedStatusHttp(origin: origin), throwsArgumentError);
+      }
+    },
+  );
   test('Retry-After hour boundary and future date are bounded', () async {
     for (final value in [
       '3600',

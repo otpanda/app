@@ -8,7 +8,7 @@ permissions:
   contents: read
 env:
   # Exact API commit carrying tool/seed-sync-loopback and the generation-cap correction. Not main, not deployed.
-  API_SHA: 6731b2ac93993864ec64badf7904f35de193a936
+  API_SHA: 557702cdf222f52210c98f1fa1d16ea60777570c
 # One current branch qualification, while main/deploy work is never cancelled.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}

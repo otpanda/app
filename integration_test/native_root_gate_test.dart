@@ -10,7 +10,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:crypto/crypto.dart';
+
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -77,6 +80,7 @@ Future<({int status, String text})> _h(
 
 /// Synthetic authenticator over the loopback host. Same interface production sign-in consumes.
 class _LoopbackPasskey implements PasskeyAssertionSource {
+  const _LoopbackPasskey();
   @override
   bool get available => true;
   @override
@@ -122,6 +126,32 @@ Future<NativeWorkspaceScope?> _discover(WidgetTester t) async =>
     (await t.runAsync<NativeWorkspaceScope?>(
       () => NativeWorkspaceAdmission().discover(),
     ));
+
+String _publicRfcCode(int millis) {
+  final counter = ByteData(8)..setUint64(0, millis ~/ 30000);
+  final digest = Hmac(
+    sha1,
+    utf8.encode('12345678901234567890'),
+  ).convert(counter.buffer.asUint8List()).bytes;
+  final off = digest.last & 15;
+  final value =
+      ((digest[off] & 127) << 24) |
+      (digest[off + 1] << 16) |
+      (digest[off + 2] << 8) |
+      digest[off + 3];
+  return (value % 100000000).toString().padLeft(8, '0');
+}
+
+bool _showsPublicRfcCode(WidgetTester t) {
+  final now = DateTime.now().millisecondsSinceEpoch;
+  return t
+      .widgetList<Text>(find.byType(Text))
+      .any(
+        (v) =>
+            v.data == _publicRfcCode(now) ||
+            v.data == _publicRfcCode(now - 1000),
+      );
+}
 
 void _gate(String name) => print('GATE:$name');
 
@@ -205,6 +235,22 @@ void main() {
       await t.binding.setSurfaceSize(const Size(390, 844));
       addTearDown(() => t.binding.setSurfaceSize(null));
 
+      // Qualification-only channel substitute. Root uses AndroidPasskeySource unchanged;
+      // only Credential Manager assertion acquisition is synthetic. Device lock is real.
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(passkeyChannel, (call) async {
+            if (call.method == 'available') return true;
+            if (call.method == 'get') {
+              return const _LoopbackPasskey().get(
+                (call.arguments as Map)['requestJson'] as String,
+              );
+            }
+            throw PlatformException(code: 'unsupported_qualification_method');
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(passkeyChannel, null),
+      );
       // Precondition: a clean emulator has no admitted workspace.
       expect(await _discover(t), isNull, reason: 'emulator not clean');
 
@@ -276,6 +322,35 @@ void main() {
       // Let the authenticated snapshot publish before the lock and offline checks.
       await _pump(t, 6000);
 
+      // Explicit user-gesture enrollment through the actual root's settings.
+      // This runs production composition, not a separately assembled coordinator.
+      await t.tap(find.byTooltip('Account & security'));
+      await _pump(t, 1000);
+      final accountSettings = find.byKey(
+        const Key('settings-settings/account-security'),
+      );
+      await _until(
+        t,
+        () => accountSettings.evaluate().isNotEmpty,
+        'account settings category',
+      );
+      await t.tap(accountSettings);
+      await _until(
+        t,
+        () => find.text('Set up on this device').evaluate().isNotEmpty,
+        'offline setup setting',
+      );
+      await t.ensureVisible(find.text('Set up on this device'));
+      await t.tap(find.text('Set up on this device'));
+      await _until(
+        t,
+        () => find.text('Check offline setup').evaluate().isNotEmpty,
+        'root-driven enrollment',
+        secs: 90,
+      );
+      _gate('root_enrollment_confirmed');
+      // Wait for the root's pull listener and prove it by a real local code after outage.
+      await _pump(t, 6000);
       // 3. Lock hides immediately.
       _lifecycle(t, [
         AppLifecycleState.inactive,
@@ -318,6 +393,15 @@ void main() {
       print(
         'VISIBLE-OFFLINE: ${t.widgetList<Text>(find.byType(Text)).map((v) => v.data ?? '').join(' | ')}',
       );
+      await _until(
+        t,
+        () =>
+            find.text('Local code unavailable').evaluate().isEmpty &&
+            _showsPublicRfcCode(t),
+        'root-downloaded offline TOTP',
+        secs: 60,
+      );
+      _gate('root_downloaded_offline_totp');
       await _shot(t, 'cold_local_view_offline_after_unlock');
       _gate('cold_local_view_offline_after_unlock');
       // Actual pause/resume with the server still unavailable, not a remount.
@@ -340,13 +424,60 @@ void main() {
         'paused offline cold reopening',
         secs: 90,
       );
+      expect(find.text('Local code unavailable'), findsNothing);
+      expect(_showsPublicRfcCode(t), isTrue);
       await _shot(t, 'paused_offline_reopened');
       _gate('paused_offline_reopened');
+      // Explicit D2 acceptance: lock-disabled background/resume cannot rely on
+      // a privacy-permission transition. Keep server unavailable throughout.
+      final disable = LocalLockController(ChannelLocalLock());
+      await t.runAsync(disable.load);
+      await t.runAsync(() => disable.change(false));
+      expect(disable.enabled, isFalse);
+      disable.dispose();
+      await _mountRoot(t);
+      await _until(
+        t,
+        () => find.text(_offlineMarker).evaluate().isNotEmpty,
+        'lock-disabled cold offline root',
+        secs: 90,
+      );
+      expect(_showsPublicRfcCode(t), isTrue);
+      _lifecycle(t, [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+      ]);
+      await t.pump();
+      expect(
+        find.text(_offlineMarker),
+        findsNothing,
+        reason: 'local view must close during paused before reopen',
+      );
+      expect(
+        _showsPublicRfcCode(t),
+        isFalse,
+        reason: 'offline code must not remain mounted while paused',
+      );
+      _lifecycle(t, [
+        AppLifecycleState.hidden,
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]);
+      await _until(
+        t,
+        () =>
+            find.text(_offlineMarker).evaluate().isNotEmpty &&
+            _showsPublicRfcCode(t),
+        'lock-disabled paused offline reopening',
+        secs: 90,
+      );
+      await _shot(t, 'lock_disabled_paused_offline_rfc');
+      _gate('lock_disabled_paused_offline_rfc');
       await _h('POST', '/__loopback/outage', '{"on":false}');
 
       // 5. Sign out invalidates the cold selection.
       await _mountRoot(t);
-      await _unlock(t);
       await _until(
         t,
         () =>

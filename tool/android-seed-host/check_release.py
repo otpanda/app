@@ -6,7 +6,7 @@ This is marker exclusion, not a general decompilation/security proof.
 import sys,zipfile
 from pathlib import Path
 apk=Path(sys.argv[1])
-markers=['SyntheticSeedSealer','SeedHostActivity','app/otpanda/seedfixture','app.otpanda.seedfixture','seedfx/driver','fixture-owner','seedfx-public','/__loopback/','LoopbackPasskeySource','LoopbackStatus','fixture_loopback_main','seed_loopback_network','127.0.0.1:8787']
+markers=['SyntheticSeedSealer','SeedHostActivity','app/otpanda/seedfixture','app.otpanda.seedfixture','seedfx/driver','fixture-owner','seedfx-public','/__loopback/','LoopbackPasskeySource','LoopbackStatus','fixture_loopback_main','seed_loopback_network','127.0.0.1:8787','root_enrollment_confirmed','lock_disabled_paused_offline_rfc']
 with zipfile.ZipFile(apk) as z:
  for name in z.namelist():
   if name.endswith('/'):continue

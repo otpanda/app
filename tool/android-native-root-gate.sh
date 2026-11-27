@@ -14,7 +14,7 @@ DEV="${DEVICE:-emulator-5554}"; A=(adb -s "$DEV")
 python3 tool/android-seed-host/install_loopback.py
 "${A[@]}" uninstall app.otpanda > "$OUT/uninstall-before.txt" 2>&1 || true
 # Build with the same target/flavor before deriving the actual signing certificate.
-flutter build apk --debug --flavor google -t integration_test/native_root_gate_test.dart --dart-define="OTPANDA_API_ORIGIN=http://127.0.0.1:$PORT" --dart-define="HARNESS=http://127.0.0.1:$PORT" > "$OUT/build.log" 2>&1
+flutter build apk --debug --flavor google -t integration_test/native_root_gate_test.dart --dart-define="OTPANDA_API_ORIGIN=http://127.0.0.1:$PORT" --dart-define="HARNESS=http://127.0.0.1:$PORT" --dart-define=NATIVE_SEED_SYNC_ENABLED=true > "$OUT/build.log" 2>&1
 signer=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner -type f | sort -V | tail -1)
 [ -n "$signer" ] || { echo 'HARNESS apksigner unavailable'; exit 2; }
 fp=$("$signer" verify --print-certs build/app/outputs/flutter-apk/app-google-debug.apk | sed -n 's/.*SHA-256 digest: *//p' | head -1 | tr -d '\r' | tr 'a-f' 'A-F' | sed 's/../&:/g;s/:$//')
@@ -48,7 +48,7 @@ for i in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/__loopback/counters" 
 RESP=$!
 set +e
 flutter test integration_test/native_root_gate_test.dart --flavor google -d "$DEV" \
-  --dart-define="OTPANDA_API_ORIGIN=http://127.0.0.1:$PORT" --dart-define="HARNESS=http://127.0.0.1:$PORT" 2>&1 | tee "$OUT/test.log"
+  --dart-define="OTPANDA_API_ORIGIN=http://127.0.0.1:$PORT" --dart-define="HARNESS=http://127.0.0.1:$PORT" --dart-define=NATIVE_SEED_SYNC_ENABLED=true 2>&1 | tee "$OUT/test.log"
 result=${PIPESTATUS[0]}
 set -e
 mkdir -p "$OUT/shots"
@@ -56,7 +56,7 @@ python3 tool/extract-shots.py "$OUT/test.log" "$OUT/shots"
 curl -fsS "http://127.0.0.1:$PORT/__loopback/counters" > "$OUT/counters-final.json" || true
 "${A[@]}" exec-out screencap -p > "$OUT/final.png" || true
 "${A[@]}" logcat -d -b crash > "$OUT/crash.txt" || true
-need="session_enrolled device_lock_enabled locked_no_owner_read_no_admission admitted_after_owner_and_unlock lock_hides_immediately cold_local_view_offline_after_unlock paused_offline_reopened signout_invalidated_cold_selection cold_root_after_signout_no_local_view complete"
+need="session_enrolled device_lock_enabled locked_no_owner_read_no_admission admitted_after_owner_and_unlock root_enrollment_confirmed lock_hides_immediately root_downloaded_offline_totp cold_local_view_offline_after_unlock paused_offline_reopened lock_disabled_paused_offline_rfc signout_invalidated_cold_selection cold_root_after_signout_no_local_view complete"
 missing=0
 for g in $need; do grep -q "GATE:$g" "$OUT/test.log" || { echo "MISSING GATE:$g"; missing=1; }; done
 [ "$result" -eq 0 ] && [ "$missing" -eq 0 ] || { echo "FAIL result=$result missing=$missing"; exit 1; }

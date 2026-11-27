@@ -9,15 +9,28 @@ import 'seed_status_coordinator.dart';
 /// closed and returns retry through the coordinator, never a purge.
 /// Unregistered until native channel and lifecycle qualification complete.
 final class SeedStatusHttp implements SeedStatusTransport {
-  SeedStatusHttp({this.timeout = const Duration(seconds: 15)});
+  SeedStatusHttp({
+    this.timeout = const Duration(seconds: 15),
+    String origin = 'https://otpanda-api.abrahammurciano.workers.dev',
+  }) : _origin = Uri.parse(origin) {
+    if (_origin.hasQuery ||
+        _origin.hasFragment ||
+        _origin.userInfo.isNotEmpty ||
+        (_origin.path.isNotEmpty && _origin.path != '/') ||
+        (_origin.scheme != 'https' &&
+            !(_origin.scheme == 'http' && _origin.host == '127.0.0.1')) ||
+        _origin.host.isEmpty) {
+      throw ArgumentError(
+        'status origin must be HTTPS or qualification loopback',
+      );
+    }
+  }
   final Duration timeout;
   // Engineering bound: retry at most hourly even if a proxy/server supplies a
   // multi-day delay, so revocation is not postponed for days. A 429 can never
   // cause a fast loop: coordinator takes max(local exponential, this delay).
   static const _maxRetryDelay = Duration(hours: 1);
-  static final _origin = Uri.parse(
-    'https://otpanda-api.abrahammurciano.workers.dev',
-  );
+  final Uri _origin;
   static const _paths = {
     '/v1/manage/seed-sync/status-begin',
     '/v1/manage/seed-sync/status-finish',

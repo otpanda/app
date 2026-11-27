@@ -371,7 +371,11 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     const seedChannel = MethodChannel('app.otpanda/seed-custody');
     final seedNative = SeedSyncChannel(seedChannel);
     final statusNative = SeedStatusChannel(seedChannel);
-    final statusTransport = SeedStatusHttp();
+    final statusTransport = SeedStatusHttp(
+      origin: nativeSeedSyncEnabled
+          ? apiOrigin
+          : 'https://otpanda-api.abrahammurciano.workers.dev',
+    );
     offlineStatus = SeedStatusCoordinator(statusTransport, statusNative);
     final seedApi = SeedEnrollmentHttp(
       post: bridge.seedEnrollmentPost,
