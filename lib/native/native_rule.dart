@@ -204,7 +204,7 @@ class NativeRuleDriver {
             ? 'Resume'
             : summary['operation'] == 'rule-edit'
             ? 'Change'
-            : 'Save'} matching rule for ${summary['label']}. Account: ${summary['accountName'] ?? ''}. Sender: ${summary['sender']}. Match: ${summary['basis'] == 'template' ? 'template' : summary['phrase']}. Future sharing: ${summary['futureRecipients']} people, ${summary['futureAutomations']} automations.';
+            : 'Save'} matching rule for ${summary['label']}. Account: ${summary['accountName'] ?? ''}. Connector: ${summary['sourceId']}. Sender: ${summary['sender']}. Match: ${summary['basis'] == 'template' ? 'template' : summary['phrase']}. Future sharing: ${summary['futureRecipients']} people, ${summary['futureAutomations']} automations.';
     if (prompt.length > maxPromptTextLength) throw const FormatException();
     return (
       _Pending(

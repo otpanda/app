@@ -189,4 +189,8 @@ String ruleDisclosure(Map<String, dynamic> s) =>
         ? 'Resume'
         : s['operation'] == 'rule-edit'
         ? 'Change'
-        : 'Save'} the rule for ${s['sender']} on this connector. Match: ${s['basis'] == 'template' ? 'saved message template' : 'phrase "${s['phrase']}"'}. Future codes go to ${s['label']}, shared with ${_plural(s['futureRecipients'], 'recipient', 'recipients')} and ${_plural(s['futureAutomations'], 'automation grant', 'automation grants')}. ${_plural(s['otherAccountRules'], 'other account has', 'other accounts have')} potentially overlapping rules. A tie stays unassigned.${s['operation'] == 'rule-edit' ? ' Changing the phrase may match other message templates.' : ''}${s['previewRemoved'] == true ? ' This removes the review preview, not code history.' : ''}';
+        : 'Save'} the rule for ${s['sender']} on connector ${s['sourceId']}. ${s['addressScope'] == 'receiving-address'
+        ? 'Only the original receiving address is covered.'
+        : s['addressScope'] == 'any-address-on-connector'
+        ? 'All receiving addresses on this connector are covered.'
+        : ''} Match: ${s['basis'] == 'template' ? 'saved message template' : 'phrase "${s['phrase']}"'}. Future codes go to ${s['label']}, shared with ${_plural(s['futureRecipients'], 'recipient', 'recipients')} and ${_plural(s['futureAutomations'], 'automation grant', 'automation grants')}. ${_plural(s['otherAccountRules'], 'other account has', 'other accounts have')} potentially overlapping rules. A tie stays unassigned.${s['operation'] == 'rule-edit' ? ' Previous match: ${s['basisBefore'] == 'template' ? 'message template' : s['phraseBefore']}. Changing the phrase may match other message templates.' : ''}${s['previewRemoved'] == true ? ' This removes the review preview, not code history.' : ''}';
