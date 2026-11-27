@@ -178,7 +178,13 @@ void main() {
         identity: identity,
       );
       bridge.rules = NativeRuleDriver(
-        post: bridge.rulePost,
+        post: (path, body) async {
+          final r = await bridge.rulePost(path, body);
+          debugPrint(
+            'SYNTHETIC_RULE_RESPONSE $path ${r.status} ${jsonEncode(r.body)}',
+          );
+          return r;
+        },
         source: proof,
         identity: identity,
       );
