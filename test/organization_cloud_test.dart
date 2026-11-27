@@ -19,7 +19,7 @@ void main() {
           {'entryId': 'b', 'pinned': true, 'tagIds': []},
         ],
         'ranking': [
-          {'entryId': 'a', 'score': 5},
+          {'entryId': 'a', 'score': 5, 'lastUsedAt': 86400000},
         ],
       },
       ['a', 'b', 'c'],
@@ -34,6 +34,8 @@ void main() {
       ['b', 'a', 'c'],
     );
     expect(s.document()['entries'], hasLength(3));
+    expect(s.lastUsedDayFor('a'), 86400000);
+    expect(s.scoreFor('a'), 5);
     expect(
       () => s.restore(
         {
@@ -53,6 +55,7 @@ void main() {
     expect(s.tags.single.label, 'Work');
     s.clear();
     expect(s.tags, isEmpty);
+    expect(s.lastUsedDayFor('a'), isNull);
     expect(s.revision, 0);
   });
   test('rank never introduces a nonaccessible entry or exposes raw counts', () {

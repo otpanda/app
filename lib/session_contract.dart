@@ -35,6 +35,9 @@ class ManagedEntry {
   final bool totp;
   final int? expectedDigits;
 
+  /// Server date-added metadata. Unknown on older servers, never inferred.
+  final int? createdAt;
+
   /// The catalogue service id the server stores (its primary domain), kept
   /// for cosmetic logo identity only. Null for custom entries.
   final String? catalogId;
@@ -50,6 +53,7 @@ class ManagedEntry {
     this.catalogId,
     this.issuer,
     this.expectedDigits,
+    this.createdAt,
   ]);
   factory ManagedEntry.fromJson(Map<String, dynamic> json) {
     final capabilities = json['capabilities'];
@@ -81,6 +85,9 @@ class ManagedEntry {
           : null,
       json['digits'] is int && json['digits'] >= 4 && json['digits'] <= 32
           ? json['digits'] as int
+          : null,
+      json['createdAt'] is int && json['createdAt'] >= 0
+          ? json['createdAt'] as int
           : null,
     );
   }
@@ -211,6 +218,7 @@ class CodeStore {
                 e.catalogId,
                 e.issuer,
                 e.expectedDigits,
+                e.createdAt,
               )
             : e,
     ];

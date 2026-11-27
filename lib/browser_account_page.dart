@@ -1,4 +1,7 @@
 import 'branding.dart';
+import 'display_settings.dart';
+import 'tile_display_preference.dart';
+import 'tile_display_store.dart';
 import 'about_page.dart';
 import 'auth_entry.dart';
 import 'product_shell.dart';
@@ -261,6 +264,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
+  final tileDisplay = TileDisplayPreference(createTileDisplayStore());
   int automaticTicks = 0;
   Timer? expiryTick;
   int now() => widget.clock?.call() ?? DateTime.now().millisecondsSinceEpoch;
@@ -1821,6 +1825,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                             ),
                     ),
                     SettingsCategory.devices: devicesPage(),
+                    SettingsCategory.display: DisplaySettings(
+                      preference: tileDisplay,
+                    ),
                     SettingsCategory.organization: organizationReady
                         ? organizationPage()
                         : organizationBusy

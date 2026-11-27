@@ -17,6 +17,12 @@ enum SettingsCategory {
     'Where you are signed in',
     Icons.devices_outlined,
   ),
+  display(
+    'settings/display',
+    'Display',
+    'Account tile appearance on this device',
+    Icons.view_compact_outlined,
+  ),
   organization(
     'settings/organization',
     'Organization',
