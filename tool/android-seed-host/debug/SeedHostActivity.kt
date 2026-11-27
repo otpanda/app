@@ -2,6 +2,7 @@ package app.otpanda.seedfixture
 
 import app.otpanda.MainActivity
 import app.otpanda.SeedCustodyHost
+import app.otpanda.WrappingKeyHost
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import org.otpanda.totp.SeedSyncWire
@@ -17,6 +18,7 @@ class SeedHostActivity : MainActivity() {
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
         SeedCustodyHost.register(this, engine.dartExecutor.binaryMessenger)
+        WrappingKeyHost.register(this, engine.dartExecutor.binaryMessenger)
         MethodChannel(engine.dartExecutor.binaryMessenger, "seedfx/driver").setMethodCallHandler { call, result ->
             when(call.method) {
                 "save" -> { java.io.File(noBackupFilesDir,"seedfx-public").writeText(call.arguments as String); result.success(null) }
