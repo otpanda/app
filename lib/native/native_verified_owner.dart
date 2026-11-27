@@ -17,3 +17,11 @@ final class NativeVerifiedOwner {
     _owner = null;
   }
 }
+
+/// A known different online account must not be labelled as the cold account.
+/// Null means cold start has no new account claim, so durable admission decides.
+final class NativeLocalOwnerDisplay {
+  String? _knownOwner;
+  void verified(String owner) => _knownOwner = owner;
+  bool allows(String owner) => _knownOwner == null || _knownOwner == owner;
+}

@@ -186,6 +186,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   }
 
   final _verifiedOwner = NativeVerifiedOwner();
+  final _localOwnerDisplay = NativeLocalOwnerDisplay();
   Future<bool> _currentOfflineOwner(String owner) async =>
       mounted &&
       _verifiedOwner.ownerFor(controller.session) == owner &&
@@ -229,6 +230,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
           return;
         }
         _verifiedOwner.bind(session!, owner);
+        _localOwnerDisplay.verified(owner);
         _prepareTransfer(owner);
         offlineEnrollment.bindOwner(owner);
         await offlineEnrollment.refresh();
@@ -511,7 +513,9 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
           googleAvailable: widget.google.available,
           version: const String.fromEnvironment('APP_VERSION'),
           authBridge: bridge,
-          localOfflineBuilder: (context) => workspace.hasLocalView
+          localOfflineBuilder: (context) =>
+              workspace.hasLocalView &&
+                  _localOwnerDisplay.allows(workspace.scope!.owner)
               ? NativeOfflineWorkspacePage(
                   runtime: offlineRuntime,
                   onReconnect: () => unawaited(controller.forceRenew()),
