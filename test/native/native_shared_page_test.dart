@@ -1,6 +1,14 @@
 import 'dart:convert';
-import 'dart:io' show Platform;
-import 'dart:typed_data';
+import 'dart:io' show Platform, File;
+import 'dart:ui' as ui;
+
+import 'package:flutter/rendering.dart';
+import 'package:otpanda_client/theme_choice.dart';
+import 'package:otpanda_client/theme_controller.dart';
+
+import '../theme_test.dart' show MemTheme;
+
+import 'package:flutter/services.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -53,9 +61,14 @@ class _G implements GoogleIdTokenSource {
 }
 
 void main() {
-  testWidgets(
-    'shared account page renders fictional Codes through the native bridge',
-    (t) async {
+  for (final dark in [false, true]) {
+    testWidgets('native shared codes and logout preserve theme dark=$dark', (
+      t,
+    ) async {
+      final preferenceStore = MemTheme();
+      final theme = ThemeController(preferenceStore);
+      if (dark) await theme.set(ThemeChoice.dark);
+      addTearDown(theme.dispose);
       final now = DateTime.now().millisecondsSinceEpoch;
       final calls = <String>[];
       final c = NativeSessionController(
@@ -142,9 +155,30 @@ void main() {
       t.view.physicalSize = const Size(390, 844);
       t.view.devicePixelRatio = 1;
       addTearDown(t.view.reset);
+      await t.runAsync(() async {
+        for (final pair in [
+          ('Figtree', 'assets/fonts/Figtree-400.ttf'),
+          ('GoogleSans', 'assets/fonts/GoogleSans.ttf'),
+          ('BricolageGrotesque', 'assets/fonts/BricolageGrotesque-700.ttf'),
+          ('CodeMono', 'assets/fonts/CodeMono-Regular.ttf'),
+          (
+            'MaterialIcons',
+            '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+          ),
+        ]) {
+          final loader = FontLoader(pair.$1)
+            ..addFont(
+              Future.value(
+                ByteData.sublistView(File(pair.$2).readAsBytesSync()),
+              ),
+            );
+          await loader.load();
+        }
+      });
       await t.pumpWidget(
         NativeApp(
           controller: c,
+          themeController: theme,
           googleAvailable: false,
           authBridge: bridge,
           signedInBuilder: (context) => BrowserAccountPage(
@@ -165,7 +199,12 @@ void main() {
       expect(find.byTooltip('Add authenticator'), findsNothing);
       // Pixel baseline is the Linux CI render; font rasterization differs on
       // Windows and macOS. Every functional assertion above runs on all OSes.
-      if (Platform.isLinux) {
+      expect(
+        Theme.of(t.element(find.byType(TextField))).brightness,
+        dark ? Brightness.dark : Brightness.light,
+      );
+      if (dark) await capture(t, 'native-dark-codes');
+      if (Platform.isLinux && !dark) {
         await expectLater(
           find.byType(MaterialApp),
           matchesGoldenFile('goldens/native_codes_390.png'),
@@ -181,7 +220,31 @@ void main() {
       expect(calls, contains('POST /auth/native/logout'));
       expect(c.phase, NativeSessionPhase.signedOut);
       expect(find.text('Welcome to OTPanda.'), findsOneWidget);
+      expect(theme.choice, dark ? ThemeChoice.dark : ThemeChoice.system);
+      final restart = ThemeController(preferenceStore);
+      await restart.load();
+      expect(restart.choice, theme.choice);
+      restart.dispose();
+      expect(
+        Theme.of(t.element(find.text('Welcome to OTPanda.'))).brightness,
+        dark ? Brightness.dark : Brightness.light,
+      );
+      if (dark) await capture(t, 'native-dark-signedout');
       await t.pumpWidget(const SizedBox.shrink());
-    },
-  );
+    });
+  }
+}
+
+Future<void> capture(WidgetTester t, String name) async {
+  final out = Platform.environment['SCREENSHOT_DIR'];
+  if (out == null) return;
+  await t.runAsync(() async {
+    final b = t.renderObject<RenderRepaintBoundary>(
+      find.byType(RepaintBoundary).first,
+    );
+    final image = await b.toImage();
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    await File('$out/$name.png').writeAsBytes(data!.buffer.asUint8List());
+    image.dispose();
+  });
 }

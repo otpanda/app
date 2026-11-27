@@ -138,6 +138,7 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
     return PopScope(
       canPop: false,
       child: AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 520),
         title: const Text('Assign this code'),
         content: SingleChildScrollView(
           child: Column(

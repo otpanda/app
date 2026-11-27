@@ -1,10 +1,14 @@
 import 'branding.dart';
+import 'display_settings.dart';
+import 'source_settings.dart';
+import 'tile_display_preference.dart';
+import 'tile_display_store.dart';
 import 'about_page.dart';
 import 'auth_entry.dart';
 import 'product_shell.dart';
 import 'totp_batch_contract.dart';
 import 'read_workspace_controller.dart';
-import 'main.dart' show ClientHome, ink, muted;
+import 'main.dart' show ClientHome;
 
 import 'dart:async';
 import 'dart:convert';
@@ -16,6 +20,8 @@ import 'organization_panel.dart';
 
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+
+import 'app_theme.dart';
 
 import 'browser_session.dart';
 import 'browser_session_contract.dart';
@@ -133,6 +139,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       } else if (!direct) {
         rememberView(tab);
       }
+      return;
+    }
+    if (id == SettingsCategory.organization.route && widget.workspaceEnabled) {
+      applyRoute('codes', direct: direct);
       return;
     }
     if (!isSettingsRoute(id)) return;
@@ -261,6 +271,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
+  final tileDisplay = TileDisplayPreference(createTileDisplayStore());
   int automaticTicks = 0;
   Timer? expiryTick;
   int now() => widget.clock?.call() ?? DateTime.now().millisecondsSinceEpoch;
@@ -268,6 +279,11 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(
+      tileDisplay.load().then((_) {
+        if (mounted) setState(() {});
+      }),
+    );
     bridge = widget.bridge ?? createBrowserSession();
     store = CodeStore(_ReadTransport(bridge));
     workspace = ReadWorkspaceController(bridge: bridge, clock: now);
@@ -396,6 +412,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       status = 'sign-in-required';
     } else if (!workspace.signedIn) {
       status = bridge.status;
+    }
+    if (workspace.hasLoaded &&
+        status == 'restored' &&
+        !organizationReady &&
+        !organizationBusy) {
+      unawaited(loadOrganizationSection());
     }
     setState(() {});
   }
@@ -1109,6 +1131,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     final target = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         title: const Text('Choose an owned entry'),
         children: [
           for (final entry in owned)
@@ -1354,12 +1377,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Google',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 16,
-                      color: ink,
+                      color: context.pal.ink,
                     ),
                   ),
                   loading
@@ -1370,7 +1393,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                               : _hasPasskey
                               ? 'Connected'
                               : 'Connected. Add a passkey to disconnect.',
-                          style: const TextStyle(color: muted),
+                          style: TextStyle(color: context.pal.muted),
                         ),
                 ],
               ),
@@ -1820,20 +1843,29 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                             ),
                     ),
                     SettingsCategory.devices: devicesPage(),
-                    SettingsCategory.organization: organizationReady
-                        ? organizationPage()
-                        : organizationBusy
-                        ? settingsCard('Organization', const [
-                            Text(
-                              'Loading organization...',
-                              key: Key('organization-loading'),
-                            ),
-                          ])
-                        : settingsCard('Organization', [
-                            const Text(
-                              'Organization could not load. Your saved choices have not changed.',
-                            ),
-                          ]),
+                    SettingsCategory.sources: SourceSettings(
+                      controller: workspace,
+                      onOpenAccount: () =>
+                          navigated(SettingsCategory.account.route),
+                    ),
+                    SettingsCategory.display: DisplaySettings(
+                      preference: tileDisplay,
+                    ),
+                    if (!widget.workspaceEnabled)
+                      SettingsCategory.organization: organizationReady
+                          ? organizationPage()
+                          : organizationBusy
+                          ? settingsCard('Organization', const [
+                              Text(
+                                'Loading organization...',
+                                key: Key('organization-loading'),
+                              ),
+                            ])
+                          : settingsCard('Organization', const [
+                              Text(
+                                'Organization could not load. Your saved choices have not changed.',
+                              ),
+                            ]),
                     SettingsCategory.about: const AboutPage(),
                   },
                 ),
@@ -1877,6 +1909,16 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         ['restored', 'session-paused', 'restoring'].contains(status) &&
         !accountOpen) {
       return ProductShell(
+        organization: organizationReady ? organization : null,
+        organizationBusy: organizationBusy,
+        onOrganizationChanged: saveOrganization,
+        organizationTools: organizationReady
+            ? ExpansionTile(
+                title: const Text('Manage tags'),
+                children: [organizationPage()],
+              )
+            : null,
+        showTileTags: tileDisplay.showTags,
         profileEmail: overview?['email'] as String? ?? cachedProfile?.email,
         profilePicture: overview != null
             ? (overview!['picture'] is String

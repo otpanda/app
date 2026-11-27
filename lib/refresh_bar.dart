@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'app_theme.dart';
+
 /// A thin bar along the bottom edge of a code tile that empties from right to
 /// left over the code's remaining lifetime. Give it a key that changes with
 /// the code's period so a new code restarts it full. Each rebuild re-derives
@@ -11,10 +13,12 @@ class RefreshBar extends StatelessWidget {
     super.key,
     required this.remainingMs,
     required this.periodMs,
-    this.color = const Color(0xff0a7955),
+    this.color,
   });
   final int remainingMs, periodMs;
-  final Color color;
+
+  /// Defaults to the theme's brand accent.
+  final Color? color;
 
   /// Fraction of the period left after [ms] milliseconds from now.
   double _fraction(int ms) => periodMs <= 0
@@ -29,7 +33,10 @@ class RefreshBar extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: FractionallySizedBox(
         widthFactor: f,
-        child: ColoredBox(color: color, child: const SizedBox(height: 3)),
+        child: ColoredBox(
+          color: color ?? context.pal.accent,
+          child: const SizedBox(height: 3),
+        ),
       ),
     );
     final lead = remaining < 1000 ? remaining : 1000;

@@ -221,7 +221,11 @@ class DeviceBrandIcon extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    final color = IconTheme.of(context).color ?? const Color(0xFF444444);
+    final color =
+        IconTheme.of(context).color ??
+        (Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFFB8CBC0)
+            : const Color(0xFF444444));
     final b = brand;
     final spec = b == null ? null : brandIconPaths[b.name];
     if (b == null || spec == null) return Icon(fallback, size: size);

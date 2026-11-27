@@ -216,6 +216,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (d) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         title: const Text('Name this passkey'),
         content: TextField(
           controller: c,
@@ -257,6 +258,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
   Future<void> explainLastPasskey() => showDialog<void>(
     context: context,
     builder: (c) => AlertDialog(
+      constraints: const BoxConstraints(maxWidth: 400),
       title: const Text('This is your only passkey'),
       content: const Text(
         'Removing a passkey needs a different passkey of yours to confirm, so your only passkey cannot be removed. Add another passkey first.',

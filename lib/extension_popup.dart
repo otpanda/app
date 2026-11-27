@@ -4,8 +4,9 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'app_theme.dart';
+
 import 'browser_session_contract.dart';
-import 'main.dart' show ink, muted;
 import 'session_contract.dart';
 import 'extension_autofill.dart';
 
@@ -250,12 +251,12 @@ class _ExtensionPopupViewState extends State<ExtensionPopupView> {
 
   @override
   Widget build(BuildContext context) {
-    final title = const Text(
+    final title = Text(
       'OTPanda',
       style: TextStyle(
         fontFamily: 'BricolageGrotesque',
         fontWeight: FontWeight.w800,
-        color: ink,
+        color: context.pal.ink,
       ),
     );
     if (booting) {
@@ -273,22 +274,22 @@ class _ExtensionPopupViewState extends State<ExtensionPopupView> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
+              Text(
                 'Sign in with your OTPanda account',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontFamily: 'BricolageGrotesque',
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
-                  color: ink,
+                  color: context.pal.ink,
                 ),
               ),
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'A browser window opens on OTPanda to confirm this '
                 'extension. Your codes then appear here.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: muted),
+                style: TextStyle(color: context.pal.muted),
               ),
               const SizedBox(height: 24),
               FilledButton(
@@ -322,17 +323,17 @@ class _ExtensionPopupViewState extends State<ExtensionPopupView> {
         padding: const EdgeInsets.all(16),
         children: [
           if (liveLost && bridge is RealtimeBridge)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(bottom: 12),
               child: Text(
                 'Live updates paused. Reconnecting...',
-                style: TextStyle(color: muted),
+                style: TextStyle(color: context.pal.muted),
               ),
             ),
           if (message.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: Text(message, style: const TextStyle(color: muted)),
+              child: Text(message, style: TextStyle(color: context.pal.muted)),
             ),
           if (!loaded && message.isEmpty)
             const Padding(
@@ -340,13 +341,13 @@ class _ExtensionPopupViewState extends State<ExtensionPopupView> {
               child: Center(child: Text('Loading your codes...')),
             ),
           if (loaded && active.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.all(24),
               child: Text(
                 'No codes right now. A new code appears here as soon as it '
                 'arrives.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: muted),
+                style: TextStyle(color: context.pal.muted),
               ),
             ),
           for (final c in active)

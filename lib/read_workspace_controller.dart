@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+
+import 'unassigned_context.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +31,7 @@ class ReadWorkspaceController extends ChangeNotifier {
   String message = '';
   bool rateLimited = false, sessionEnded = false, hasLoaded = false;
   int publishedRevision = 0;
+  List<UnassignedContext> contexts = const [];
   bool _transportLost = false, _readLost = false;
   bool get connectionLost => _transportLost || _readLost;
   int _readFailures = 0;
@@ -191,6 +195,26 @@ class ReadWorkspaceController extends ChangeNotifier {
     try {
       await staged.load(clock, includePrivateInbox: true);
       if (_disposed || epoch != _epoch) return;
+      List<UnassignedContext> reviews = const [];
+      try {
+        final response = await bridge.read('/v1/manage/unassigned-context');
+        if (response.status == 401) throw const ClientFailure(401);
+        if (response.status == 200) {
+          final rows =
+              (jsonDecode(response.body) as Map<String, dynamic>)['contexts'];
+          if (rows is! List || rows.length > 200) {
+            throw const FormatException('Invalid context list');
+          }
+          reviews = rows
+              .map((v) => UnassignedContext.fromJson(v as Map<String, dynamic>))
+              .toList();
+        }
+      } on ClientFailure {
+        rethrow;
+      } catch (_) {
+        /* Optional context never blocks usable codes. No raw fallback. */
+      }
+      if (_disposed || epoch != _epoch) return;
       if (!signedIn) {
         store.clear();
       } else {
@@ -210,6 +234,7 @@ class ReadWorkspaceController extends ChangeNotifier {
                 staged.replaceEntry(id, service: v.service, account: v.account),
           );
         }
+        contexts = List.unmodifiable(reviews);
         store = staged;
         publishedRevision++;
         hasLoaded = true;
@@ -219,6 +244,7 @@ class ReadWorkspaceController extends ChangeNotifier {
       if (_disposed || epoch != _epoch) return;
       if (error.signedOut) {
         store.clear();
+        contexts = const [];
         hasLoaded = false;
         sessionEnded = true;
         _stopRealtime();
@@ -276,6 +302,7 @@ class ReadWorkspaceController extends ChangeNotifier {
     _confirmed.clear();
     _cancelReadRetry();
     store.clear();
+    contexts = const [];
     _notify();
   }
 

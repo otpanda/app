@@ -94,13 +94,13 @@ void main() {
     await c.refresh();
     c.refreshAfterMutation();
     c.refreshAfterMutation();
-    expect(b.paths.length, 5);
+    expect(b.paths.length, 6);
     now += 15000;
     await tester.pump(const Duration(seconds: 15));
-    expect(b.paths.length, 10);
+    expect(b.paths.length, 12);
     now += 60000;
     await tester.pump(const Duration(seconds: 60));
-    expect(b.paths.length, 10);
+    expect(b.paths.length, 12);
     c.dispose();
   });
   testWidgets('transport loss clears across preserved settings lifecycle', (
@@ -146,10 +146,10 @@ void main() {
       now += 15000;
       await tester.pump(const Duration(seconds: 15));
       expect(c.hasLoaded, true);
-      expect(b.paths.length, 6);
+      expect(b.paths.length, 7);
       now += 180000;
       await tester.pump(const Duration(seconds: 180));
-      expect(b.paths.length, 6);
+      expect(b.paths.length, 7);
       expect(c.connectionLost, false);
       c.dispose();
     },
@@ -226,23 +226,23 @@ void main() {
       final c = ReadWorkspaceController(bridge: b, clock: () => now);
       c.resume();
       await c.refresh();
-      expect(b.paths.length, 5);
+      expect(b.paths.length, 6);
       for (var i = 0; i < 200; i++) {
         now += 1000;
         c.tick();
       }
       await settle();
-      expect(b.paths.length, 5);
+      expect(b.paths.length, 6);
       b.hint('connection-lost');
       expect(c.connectionLost, true);
       b.hint('unknown');
       b.hint('connection-restored');
       expect(c.connectionLost, false);
       await settle();
-      expect(b.paths.length, 5);
+      expect(b.paths.length, 6);
       b.hint('connect');
       await settle();
-      expect(b.paths.length, 10);
+      expect(b.paths.length, 12);
       b.hint('connection-lost');
       c.resetSession();
       expect(c.connectionLost, false);
@@ -279,7 +279,7 @@ void main() {
     now += 15000;
     b.hint();
     await settle();
-    expect(b.paths.length, before + 5);
+    expect(b.paths.length, before + 6);
     c.dispose();
   });
 
@@ -300,7 +300,7 @@ void main() {
     now += 15000;
     await Future<void>.delayed(const Duration(milliseconds: 15100));
     await settle();
-    expect(b.paths.length, before + 5, reason: 'exactly one trailing refresh');
+    expect(b.paths.length, before + 6, reason: 'exactly one trailing refresh');
     c.dispose();
   });
 

@@ -28,6 +28,21 @@ Map<String, Object> code(String id, {int received = 100, int expires = 200}) =>
       'expiresAt': expires,
     };
 void main() {
+  test('createdAt is optional exact server metadata', () {
+    expect(
+      ManagedEntry.fromJson({...entry('id'), 'createdAt': 123}).createdAt,
+      123,
+    );
+    expect(ManagedEntry.fromJson(entry('id')).createdAt, isNull);
+    expect(
+      ManagedEntry.fromJson({...entry('id'), 'createdAt': -1}).createdAt,
+      isNull,
+    );
+    expect(
+      ManagedEntry.fromJson({...entry('id'), 'createdAt': '123'}).createdAt,
+      isNull,
+    );
+  });
   test(
     'issuer stays distinct from display name and survives optimistic rename',
     () async {

@@ -94,6 +94,11 @@ final class OrganizationStore {
   }
 
   final Map<String, double> _scores = {};
+  final Map<String, int> _lastUsedDays = {};
+  double scoreFor(String id) => _scores[id] ?? 0;
+
+  /// UTC day start only, bounded by the server's 90-day history.
+  int? lastUsedDayFor(String id) => _lastUsedDays[id];
   int revision = 0;
   Map<String, dynamic> document() => {
     'tags': [
@@ -158,12 +163,17 @@ final class OrganizationStore {
       }
       if (next._entries.containsKey(score['entryId'])) {
         next._scores[score['entryId'] as String] = n;
+        final day = score['lastUsedAt'];
+        if (day is int && day >= 0 && day % 86400000 == 0) {
+          next._lastUsedDays[score['entryId'] as String] = day;
+        }
       }
     }
     clear();
     _tags.addAll(next._tags);
     _entries.addAll(next._entries);
     _scores.addAll(next._scores);
+    _lastUsedDays.addAll(next._lastUsedDays);
     revision = r;
   }
 
@@ -215,6 +225,7 @@ final class OrganizationStore {
     _tags.clear();
     _entries.clear();
     _scores.clear();
+    _lastUsedDays.clear();
     revision = 0;
   }
 

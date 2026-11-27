@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'app_theme.dart';
+
 import 'browser_session_contract.dart';
 import 'otpauth.dart';
 import 'public_service_catalog.dart';
@@ -108,6 +110,7 @@ class _TotpEntryDialogState extends State<TotpEntryDialog>
   Widget build(BuildContext context) {
     final code = store.visible(), left = store.remainingSeconds();
     return AlertDialog(
+      constraints: const BoxConstraints(maxWidth: 520),
       title: const Text('Authenticator code'),
       content: SizedBox(
         width: 360,
@@ -172,6 +175,7 @@ Future<bool> totpPrerequisite(
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 520),
         title: const Text('Add a passkey first'),
         content: const Text(
           'A passkey is needed to verify authenticator setup. Add one in Account & security, then return here. Your existing sign-in keeps working.',
@@ -194,6 +198,7 @@ Future<bool> totpPrerequisite(
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
+          constraints: const BoxConstraints(maxWidth: 520),
           title: const Text('Could not check passkeys'),
           content: const Text(
             'Check your connection and try adding the authenticator again.',
@@ -454,8 +459,8 @@ class _AddTotpState extends State<_AddTotp> {
           leading: ServiceAvatar(
             service: chosen!.name,
             serviceId: chosen!.id,
-            color: const Color(0xffdff3e8),
-            ink: const Color(0xff17372a),
+            color: context.pal.avatars.first,
+            ink: context.pal.avatarInk,
             directory: widget.directory,
           ),
           title: Text(chosen!.name),
@@ -501,6 +506,7 @@ class _AddTotpState extends State<_AddTotp> {
     // a finished add must always return its entry id so the shell can refresh.
     canPop: !busy,
     child: AlertDialog(
+      constraints: const BoxConstraints(maxWidth: 520),
       title: const Text('Add authenticator'),
       content: SizedBox(
         width: 420,

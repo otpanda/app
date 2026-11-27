@@ -13,6 +13,7 @@ class SourcePreview extends StatelessWidget {
     final yes = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 400),
         title: Row(
           children: [
             const Expanded(child: Text('Revoke this source?')),

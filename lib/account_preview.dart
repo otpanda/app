@@ -2,6 +2,8 @@ import 'browser_account_page.dart';
 
 import 'package:material_ui/material_ui.dart';
 
+import 'app_theme.dart';
+
 /// An explorable security setup preview. Never collects credentials or claims
 /// that a passkey, provider or recovery key has actually been enrolled.
 class AccountSecurityPreview extends StatefulWidget {
@@ -18,6 +20,7 @@ class _AccountSecurityPreviewState extends State<AccountSecurityPreview> {
       final remove = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
+          constraints: const BoxConstraints(maxWidth: 400),
           title: const Text('No recovery option left'),
           content: const Text(
             'In a real account, losing every passkey and enrolled recovery device would mean losing access. Email alone cannot restore your vault. This changes the preview only.',
@@ -94,7 +97,7 @@ class _AccountSecurityPreviewState extends State<AccountSecurityPreview> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xfffff6df),
+                  color: context.pal.warning,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Text(
@@ -176,9 +179,9 @@ class _AccountSecurityPreviewState extends State<AccountSecurityPreview> {
                 title: 'Stay signed in',
                 body: 'The planned session policy renews with use, so you should not need a new prompt on every visit. Browser cleanup, private browsing, revoked devices or suspicious credential reuse can still require sign-in. Device sessions and the durable Android recovery key are different.',
               ),
-              const Text(
+              Text(
                 'No SMS authentication, extra OTPanda password or manual backup-code burden is required by this design. Real account setup and device management are still being built.',
-                style: TextStyle(color: Color(0xff657e70)),
+                style: TextStyle(color: context.pal.mutedSoft),
               ),
               TextButton.icon(
                 onPressed: () => Navigator.push<void>(

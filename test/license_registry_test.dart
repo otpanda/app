@@ -6,8 +6,8 @@ void main() {
   testWidgets('every shipped third-party notice is registered with its text', (
     t,
   ) async {
-    app.main();
-    await t.pump();
+    await t.runAsync(() async => app.main());
+    await t.pumpAndSettle();
     final seen = <String, String>{};
     await for (final e in LicenseRegistry.licenses) {
       final name = e.packages.join(',');

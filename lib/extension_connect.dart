@@ -76,6 +76,7 @@ class _ExtensionConnectDialogState extends State<_ExtensionConnectDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    constraints: const BoxConstraints(maxWidth: 400),
     title: const Text('Connect browser extension?'),
     content: Column(
       mainAxisSize: MainAxisSize.min,

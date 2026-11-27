@@ -166,7 +166,7 @@ void main() {
           'passkeys': [
             {
               'id': 'fixture-key',
-              'createdAt': 1800000000000,
+              'createdAt': DateTime(2027, 1, 15, 8).millisecondsSinceEpoch,
               'label': 'Fixture phone',
             },
           ],

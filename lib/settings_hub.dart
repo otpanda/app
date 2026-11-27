@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
-import 'main.dart' show green, ink, line, muted, pale;
+import 'app_theme.dart';
+
 import 'profile_header.dart';
 
 /// The settings categories and the route ids primary's router allow-lists.
@@ -16,6 +17,18 @@ enum SettingsCategory {
     'Devices & sessions',
     'Where you are signed in',
     Icons.devices_outlined,
+  ),
+  sources(
+    'settings/sources',
+    'Sources',
+    'Mailboxes and phones that receive codes',
+    Icons.inbox_outlined,
+  ),
+  display(
+    'settings/display',
+    'Display',
+    'Account tile appearance on this device',
+    Icons.view_compact_outlined,
   ),
   organization(
     'settings/organization',
@@ -75,7 +88,7 @@ class RedactedText extends StatelessWidget {
       sample,
       style: TextStyle(
         color: Colors.transparent,
-        backgroundColor: line,
+        backgroundColor: context.pal.line,
         fontSize: fontSize,
       ),
     ),
@@ -116,27 +129,29 @@ class StableText extends StatelessWidget {
 }
 
 /// A titled card for one group of settings. Uses the app card theme.
-Widget settingsCard(String title, List<Widget> children) => Padding(
-  padding: const EdgeInsets.only(bottom: 12),
-  child: Card(
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: ink,
+Widget settingsCard(String title, List<Widget> children) => Builder(
+  builder: (context) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: context.pal.ink,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          const Divider(height: 1, color: line),
-          const SizedBox(height: 8),
-          ...children,
-        ],
+            const SizedBox(height: 8),
+            Divider(height: 1, color: context.pal.line),
+            const SizedBox(height: 8),
+            ...children,
+          ],
+        ),
       ),
     ),
   ),
@@ -186,11 +201,13 @@ class SettingsHub extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: Material(
-            color: c == current ? pale : Colors.white,
+            color: c == current ? context.pal.pale : context.pal.card,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
               side: BorderSide(
-                color: c == current ? green : line,
+                color: c == current
+                    ? context.pal.selectedBorder
+                    : context.pal.line,
                 width: c == current ? 1.5 : 1,
               ),
             ),
@@ -199,12 +216,18 @@ class SettingsHub extends StatelessWidget {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
-              leading: Icon(c.icon, color: green),
+              leading: Icon(c.icon, color: context.pal.accent),
               title: Text(
                 c.title,
-                style: const TextStyle(fontWeight: FontWeight.w700, color: ink),
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: context.pal.ink,
+                ),
               ),
-              subtitle: Text(c.summary, style: const TextStyle(color: muted)),
+              subtitle: Text(
+                c.summary,
+                style: TextStyle(color: context.pal.muted),
+              ),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => onSelect(c),
             ),

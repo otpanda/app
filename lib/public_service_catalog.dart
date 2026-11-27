@@ -159,6 +159,7 @@ class _PublicServicePickerState extends State<PublicServicePicker> {
   String query = '';
   @override
   Widget build(BuildContext context) => AlertDialog(
+    constraints: const BoxConstraints(maxWidth: 520),
     title: Row(
       children: [
         const Expanded(child: Text('Find a service')),

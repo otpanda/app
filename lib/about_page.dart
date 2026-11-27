@@ -1,7 +1,8 @@
 import 'package:material_ui/material_ui.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import 'main.dart' show green, ink, line, muted;
+import 'app_theme.dart';
+
+import 'package:url_launcher/url_launcher.dart';
 
 const String appVersion = String.fromEnvironment('APP_VERSION');
 
@@ -28,13 +29,13 @@ class AboutPage extends StatelessWidget {
     IconData trailing = Icons.chevron_right,
   }) => ListTile(
     key: key,
-    leading: Icon(icon, color: green),
+    leading: Icon(icon, color: context.pal.accent),
     title: Text(
       title,
-      style: const TextStyle(fontWeight: FontWeight.w700, color: ink),
+      style: TextStyle(fontWeight: FontWeight.w700, color: context.pal.ink),
     ),
-    subtitle: Text(subtitle, style: const TextStyle(color: muted)),
-    trailing: Icon(trailing, color: muted),
+    subtitle: Text(subtitle, style: TextStyle(color: context.pal.muted)),
+    trailing: Icon(trailing, color: context.pal.muted),
     onTap: onTap,
   );
 
@@ -43,24 +44,27 @@ class AboutPage extends StatelessWidget {
     final version = appVersion.isEmpty ? 'Development build' : appVersion;
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: context.pal.card,
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: line),
+        side: BorderSide(color: context.pal.line),
       ),
       child: Column(
         children: [
           ListTile(
             key: const Key('about-version'),
-            leading: const Icon(Icons.info_outline, color: green),
-            title: const Text(
+            leading: Icon(Icons.info_outline, color: context.pal.accent),
+            title: Text(
               'Version',
-              style: TextStyle(fontWeight: FontWeight.w700, color: ink),
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: context.pal.ink,
+              ),
             ),
-            subtitle: Text(version, style: const TextStyle(color: muted)),
+            subtitle: Text(version, style: TextStyle(color: context.pal.muted)),
           ),
-          const Divider(height: 1, color: line),
+          Divider(height: 1, color: context.pal.line),
           _row(
             context,
             key: const Key('about-website'),
@@ -70,7 +74,7 @@ class AboutPage extends StatelessWidget {
             trailing: Icons.open_in_new,
             onTap: () => open(landingUrl),
           ),
-          const Divider(height: 1, color: line),
+          Divider(height: 1, color: context.pal.line),
           _row(
             context,
             key: const Key('about-github'),
@@ -80,7 +84,7 @@ class AboutPage extends StatelessWidget {
             trailing: Icons.open_in_new,
             onTap: () => open(githubUrl),
           ),
-          const Divider(height: 1, color: line),
+          Divider(height: 1, color: context.pal.line),
           _row(
             context,
             key: const Key('about-icon-credit'),
@@ -90,7 +94,7 @@ class AboutPage extends StatelessWidget {
             trailing: Icons.open_in_new,
             onTap: () => open(iconLicenseUrl),
           ),
-          const Divider(height: 1, color: line),
+          Divider(height: 1, color: context.pal.line),
           _row(
             context,
             key: const Key('settings-licenses'),

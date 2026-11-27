@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'app_theme.dart';
+
 import 'browser_session_contract.dart';
 import 'entry_domains.dart';
 import 'session_contract.dart';
@@ -110,6 +112,7 @@ class _EntryDomainsDialogState extends State<EntryDomainsDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    constraints: const BoxConstraints(maxWidth: 400),
     key: const Key('entry-domains'),
     title: Text('Websites for ${widget.entry.service}'),
     content: ConstrainedBox(
@@ -199,7 +202,7 @@ class _EntryDomainsDialogState extends State<EntryDomainsDialog> {
                             child: Text(
                               error,
                               key: const Key('domains-error'),
-                              style: const TextStyle(color: Color(0xffb3261e)),
+                              style: TextStyle(color: context.pal.danger),
                             ),
                           ),
                   ),
