@@ -593,6 +593,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       }
       overviewFetchedAt = null;
       if (mounted) setState(() {});
+      drainOverviewAgain(attempt);
       return;
     }
     if (overview != null ||
@@ -611,6 +612,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     } catch (_) {
     } finally {
       if (mounted) setState(() => overviewLoading = false);
+      drainOverviewAgain(attempt);
     }
   }
 
@@ -808,6 +810,19 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
 
   bool overviewAgain = false;
 
+  void drainOverviewAgain(int attempt) {
+    if (!mounted ||
+        attempt != revision ||
+        status != 'restored' ||
+        busy ||
+        overviewInFlightRevision != -1 ||
+        !overviewAgain) {
+      return;
+    }
+    overviewAgain = false;
+    unawaited(refreshOverviewQuietly());
+  }
+
   /// Hint-driven overview read. It never sets busy and never overlaps a user
   /// action (run() reloads the account itself) or another overview read; a hint
   /// that lands meanwhile earns one trailing read.
@@ -980,6 +995,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   bool forceOverview = false;
 
   void resetIdentity() {
+    overviewAgain = false;
     overviewPreparedRevision = null;
     cachedProfile = null;
     overview = null;
