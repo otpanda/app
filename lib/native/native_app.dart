@@ -19,6 +19,7 @@ class NativeApp extends StatelessWidget {
     required this.googleAvailable,
     this.version = '',
     this.signedInBuilder,
+    this.localOfflineBuilder,
     this.authBridge,
     this.appWrapper,
     this.navigatorObservers = const [],
@@ -38,6 +39,10 @@ class NativeApp extends StatelessWidget {
   /// Replaces the status page when signed in (the shared account UI).
   final WidgetBuilder? signedInBuilder;
 
+  /// Independent local-unlock surface. Returning null preserves the ordinary
+  /// account screen. Never changes phase, bearer or server authority.
+  final Widget? Function(BuildContext)? localOfflineBuilder;
+
   @override
   Widget build(BuildContext context) => ThemeScope(
     controller: themeController ?? appThemeController,
@@ -54,6 +59,7 @@ class NativeApp extends StatelessWidget {
         googleAvailable: googleAvailable,
         version: version,
         signedInBuilder: signedInBuilder,
+        localOfflineBuilder: localOfflineBuilder,
         authBridge: authBridge,
       ),
     ),
@@ -67,12 +73,17 @@ class NativeSessionPage extends StatefulWidget {
     required this.googleAvailable,
     this.version = '',
     this.signedInBuilder,
+    this.localOfflineBuilder,
     this.authBridge,
   });
   final NativeSessionController controller;
   final bool googleAvailable;
   final String version;
   final WidgetBuilder? signedInBuilder;
+
+  /// Independent local-unlock surface. Returning null preserves the ordinary
+  /// account screen. Never changes phase, bearer or server authority.
+  final Widget? Function(BuildContext)? localOfflineBuilder;
   final BrowserSessionBridge? authBridge;
   @override
   State<NativeSessionPage> createState() => _State();
@@ -134,6 +145,11 @@ class _State extends State<NativeSessionPage> {
       if (c.phase == NativeSessionPhase.signedIn &&
           widget.signedInBuilder != null) {
         return widget.signedInBuilder!(context);
+      }
+      if (c.phase == NativeSessionPhase.offline ||
+          c.phase == NativeSessionPhase.unknown) {
+        final local = widget.localOfflineBuilder?.call(context);
+        if (local != null) return local;
       }
       final err = _error(c.lastError);
       final shared = widget.authBridge;

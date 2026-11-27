@@ -106,6 +106,27 @@ void main() {
     renewStatus = 200;
   });
 
+  testWidgets(
+    'cold offline local surface does not fabricate a server session',
+    (t) async {
+      st.id = 'DEV';
+      renewStatus = 503;
+      final c = ctl();
+      await t.pumpWidget(
+        NativeApp(
+          controller: c,
+          googleAvailable: false,
+          localOfflineBuilder: (_) => const SizedBox(key: Key('local-codes')),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('local-codes')), findsOneWidget);
+      expect(c.phase, NativeSessionPhase.offline);
+      expect(c.session, isNull);
+      await t.pumpWidget(const SizedBox());
+    },
+  );
+
   Future<void> pumpApp(
     WidgetTester t,
     NativeSessionController c, {
