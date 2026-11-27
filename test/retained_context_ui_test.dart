@@ -5,6 +5,56 @@ import 'product_shell_test.dart' show FakeTransport, routes, ok, pump, now;
 
 void main() {
   testWidgets(
+    'fresh private code and retained detail share exactly one arrival card',
+    (t) async {
+      final tr = FakeTransport({
+        ...routes(),
+        '/v1/manage/sources': ok({
+          'sources': [
+            {'source_id': 'src', 'kind': 'gmail', 'label': 'Personal'},
+          ],
+        }),
+        '/v1/manage/unassigned': ok({
+          'records': [
+            {
+              'sourceId': 'src',
+              'eventId': 'event',
+              'sourceLabel': 'Personal',
+              'code': '123456',
+              'receivedAt': now - 1,
+              'expiresAt': now + 60000,
+            },
+          ],
+        }),
+        '/v1/manage/unassigned-context': ok({
+          'contexts': [
+            {
+              'contextId': 'ctx',
+              'sourceId': 'src',
+              'eventId': 'event',
+              'kind': 'email',
+              'sender': 'example.test',
+              'sourceLabel': 'Personal',
+              'receivedAt': now - 1,
+              'arrivedAt': now - 1,
+              'retainedUntil': now + 100000,
+              'redactedText': 'Code [redacted]',
+              'contextUnavailable': false,
+              'truncated': false,
+            },
+          ],
+        }),
+      });
+      await pump(t, tr, assignmentEnabled: true);
+      expect(find.text('New arrivals'), findsOneWidget);
+      expect(find.text('123456'), findsOneWidget);
+      expect(find.byTooltip('Assign'), findsOneWidget);
+      expect(find.byTooltip('Details'), findsOneWidget);
+      expect(find.text('Needs assignment'), findsNothing);
+      expect(t.takeException(), isNull);
+    },
+  );
+  testWidgets(
     'expired retained context opens redacted details but no assign or copy',
     (t) async {
       final tr = FakeTransport({

@@ -720,8 +720,9 @@ class _ProductShellState extends State<ProductShell>
   Widget reviewTile(
     UnassignedContext review,
     List<UnassignedCode> codes,
-    int now,
-  ) {
+    int now, {
+    bool arrival = false,
+  }) {
     UnassignedCode? live;
     for (final code in codes) {
       if (code.sourceId == review.sourceId &&
@@ -743,7 +744,7 @@ class _ProductShellState extends State<ProductShell>
               return true;
             },
       true,
-      false,
+      arrival,
       Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1066,7 +1067,25 @@ class _ProductShellState extends State<ProductShell>
           ),
         section('New arrivals', [
           for (final e in fresh) account(e, arrival: true),
-          for (final c in freshPrivate) unassigned(c, arrival: true),
+          for (final c in freshPrivate)
+            widget.controller.contexts.any(
+                  (r) =>
+                      r.sourceId == c.sourceId &&
+                      r.eventId == c.eventId &&
+                      r.retained(now),
+                )
+                ? reviewTile(
+                    widget.controller.contexts.firstWhere(
+                      (r) =>
+                          r.sourceId == c.sourceId &&
+                          r.eventId == c.eventId &&
+                          r.retained(now),
+                    ),
+                    private,
+                    now,
+                    arrival: true,
+                  )
+                : unassigned(c, arrival: true),
         ]),
         section('Authenticator accounts', [
           for (final e in ordered.where((e) => e.totp))
@@ -1084,7 +1103,11 @@ class _ProductShellState extends State<ProductShell>
         if (filters.isEmpty && query.trim().isEmpty)
           section('Needs assignment', [
             for (final review in widget.controller.contexts.where(
-              (r) => r.retained(now),
+              (r) =>
+                  r.retained(now) &&
+                  !freshPrivate.any(
+                    (c) => c.sourceId == r.sourceId && c.eventId == r.eventId,
+                  ),
             ))
               reviewTile(review, private, now),
             for (final c in private.where(
