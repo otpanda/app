@@ -38,9 +38,9 @@ fun validInstallId(s: String) = INSTALL_ID.matches(s)
  * directories itself before returning an id. Any failure before the final confirmation fails closed (UNAVAILABLE) and returns no id; the published file is never deleted or
  * overwritten, even after a failed confirmation (its fate is unknown). An EXISTING id is returned only after [dirSync] has confirmed the base and [dir] once in this store
  * object. Never touched by logout, owner switch, session reset, erase or purge. UNVERIFIED on a device: file locking and rename on app data and the real [DirSync]. Stale
- * temp files are ignored (never an id) and not cleaned. BOUND: a create that dies or fails between writing its temp file and the rename leaves at most one `tmp-*.part` of at most
- * 64 bytes, and only while no id exists (once an id is published every later call returns before writing any temp), so the total is at most one small file per failed or killed create
- * attempt before the first success and none afterwards. */
+ * temp files are ignored (never an id) and not cleaned. BOUND: a create that dies or fails between the temp file write and the rename leaves at most one `tmp-*.part` of at most 64 bytes (when the directory is unwritable even
+ * its own cleanup fails). The next create that takes both locks while no id exists deletes every stale `tmp-*.part` (best effort) before writing its own. Bounded when the platform allows unlinking in this directory: then at most one stale file
+ * survives a failure streak plus the current one. If unlink is denied, stale temps (at most 64 bytes each) can accumulate, never read as an id and never a safety issue. Cleanup never touches the id or the lock file, and runs only while holding both locks. */
 class InstallIdFile(
     private val dir: File,
     private val dirSync: DirSync,
@@ -99,6 +99,8 @@ class InstallIdFile(
                     }
                     try {
                         readLocked()?.let { return confirmExisting(it) to false } // the winner of a race, or an id whose publication another process finished
+                        // Both locks are held and no id exists, so no other creator can be live: temp files from killed or failed creates are stale. Best effort, regular files only, never the id or the lock file.
+                        dir.listFiles()?.forEach { f -> if (f.name.startsWith("tmp-") && f.name.endsWith(".part") && Files.isRegularFile(f.toPath(), LinkOption.NOFOLLOW_LINKS)) f.delete() }
                         val temp = File.createTempFile("tmp-", ".part", dir)
                         try {
                             java.io.FileOutputStream(temp).use { s -> s.write(candidate.toByteArray(Charsets.US_ASCII)); fileSync(s) }

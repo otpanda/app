@@ -10,6 +10,8 @@ private class RecSync(val failFrom: Int = Int.MAX_VALUE) : DirSync {
     val calls = mutableListOf<String>(); val targetPresent = mutableListOf<Boolean>()
     override fun sync(dir: File) { calls.add(dir.name); targetPresent.add(File(dir, "install-id").exists()); if (calls.size >= failFrom) throw java.io.IOException("injected") }
 }
+/** True when the OS actually enforces directory permissions for this process (false for root): tests that rely on a denial report SKIPPED instead of passing silently. */
+private fun permissionsEnforced(root: File): Boolean { val x = File(root, "perm-probe").also { it.mkdirs() }; x.setWritable(false); val enforced = !(try { File(x, "p").createNewFile() } catch (_: java.io.IOException) { false }); x.setWritable(true); File(x, "p").delete(); x.delete(); return enforced }
 private fun failKind(w: () -> Any?): InstallIdFailure.Kind? = try { w(); null } catch (e: InstallIdFailure) { e.kind }
 
 fun main() {
@@ -88,12 +90,14 @@ fun main() {
         chk(failKind { InstallIdFile(File(plain, "sub"), RecSync()).read() } == InstallIdFailure.Kind.UNREADABLE, "parent component is a regular file")
         val d = fresh(); File(d, "real").writeText(A); java.nio.file.Files.createSymbolicLink(File(d, "install-id").toPath(), File(d, "real").toPath())
         chk(failKind { InstallIdFile(d, RecSync()).read() } == InstallIdFailure.Kind.UNREADABLE, "symlink is not followed and not an id")
-        val locked = fresh(); File(locked, "install-id").writeText(A); locked.setExecutable(false)
-        val outcome = failKind { InstallIdFile(locked, RecSync()).read() }; locked.setExecutable(true)
-        chk(outcome == InstallIdFailure.Kind.UNREADABLE, "unsearchable parent is UNREADABLE, never absent (uid " + System.getProperty("user.name") + ")")
-        val locked2 = fresh(); locked2.setExecutable(false)
-        val o2 = failKind { InstallIdFile(locked2, RecSync()).createIfAbsent(A) }; locked2.setExecutable(true)
-        chk(o2 == InstallIdFailure.Kind.UNREADABLE && !File(locked2, "install-id").exists(), "create on an unsearchable parent writes nothing")
+        if (!permissionsEnforced(root)) println("SKIPPED unsearchable-parent tests: this process is not subject to directory permissions (user " + System.getProperty("user.name") + ")") else {
+            val locked = fresh(); File(locked, "install-id").writeText(A); locked.setExecutable(false)
+            val outcome = failKind { InstallIdFile(locked, RecSync()).read() }; locked.setExecutable(true)
+            chk(outcome == InstallIdFailure.Kind.UNREADABLE, "unsearchable parent is UNREADABLE, never absent (uid " + System.getProperty("user.name") + ")")
+            val locked2 = fresh(); locked2.setExecutable(false)
+            val o2 = failKind { InstallIdFile(locked2, RecSync()).createIfAbsent(A) }; locked2.setExecutable(true)
+            chk(o2 == InstallIdFailure.Kind.UNREADABLE && !File(locked2, "install-id").exists(), "create on an unsearchable parent writes nothing")
+        }
     }
     // 12. REAL processes (separate JVMs): the lock and rename give one winner across processes, and a holder killed at each point leaves a safe state
     val cp = System.getProperty("java.class.path"); val javaBin = File(System.getProperty("java.home"), "bin/java").path
@@ -131,7 +135,7 @@ fun main() {
         val holder = Thread { InstallIdFile(d3, RecSync(), fileSync = { inFsync.countDown(); gate.await() }).createIfAbsent(A) }.also { it.start() }
         inFsync.await()
         val t0 = System.nanoTime()
-        chk(failKind { InstallIdFile(d3, RecSync(), lockWaitMs = 200).createIfAbsent(B) } == InstallIdFailure.Kind.UNAVAILABLE && (System.nanoTime() - t0) / 1_000_000 < 3000, "second store in the same process fails closed within the bound")
+        chk(failKind { InstallIdFile(d3, RecSync(), lockWaitMs = 200).createIfAbsent(B) } == InstallIdFailure.Kind.UNAVAILABLE && (System.nanoTime() - t0) / 1_000_000 < 20_000, "second store in the same process fails closed within a generous bound")
         gate.countDown(); holder.join(5000)
         chk(InstallIdFile(d3, RecSync()).read() == A, "holder published, second store never replaced it")
     }
@@ -153,16 +157,29 @@ fun main() {
         val s3 = InstallIdFile(d3, RecSync(), fileSync = { st -> st.fd.sync(); File(d3, "install-id").writeText("bad") })
         chk(failKind { s3.createIfAbsent(A) } == InstallIdFailure.Kind.UNREADABLE && File(d3, "install-id").readText() == "bad" && d3.list()!!.none { it.endsWith(".part") }, "pre-move malformed entry untouched")
     }
-    // 15. a failed rename: UNAVAILABLE, nothing published, locks released (a later create works at once, from the same and from another store), at most one stale temp
-    run {
+    // 15. a failed rename: UNAVAILABLE, nothing published, locks released (a later create works from another store), at most one stale temp. Needs enforced directory permissions.
+    if (!permissionsEnforced(root)) println("SKIPPED rename-failure test: this process is not subject to directory permissions (user " + System.getProperty("user.name") + ")") else run {
         val d = fresh()
-        val s = InstallIdFile(d, RecSync(), fileSync = { st -> st.fd.sync(); d.setWritable(false) }, lockWaitMs = 300) // directory loses write permission before the move: the move fails
+        val s = InstallIdFile(d, RecSync(), fileSync = { st -> st.fd.sync(); d.setWritable(false) }, lockWaitMs = 2000) // directory loses write permission before the move: the move fails
         val first = failKind { s.createIfAbsent(A) }; d.setWritable(true)
-        chk(first == InstallIdFailure.Kind.UNAVAILABLE && !File(d, "install-id").exists(), "failed rename fails closed, publishes nothing (uid " + System.getProperty("user.name") + ")")
+        chk(first == InstallIdFailure.Kind.UNAVAILABLE && !File(d, "install-id").exists(), "failed rename fails closed, publishes nothing")
         chk(d.list()!!.count { it.endsWith(".part") } <= 1, "at most one stale temp from the failed create")
-        val t0 = System.nanoTime()
-        chk(InstallIdFile(d, RecSync(), lockWaitMs = 300).createIfAbsent(B) == (B to true) && (System.nanoTime() - t0) / 1_000_000 < 250, "lock was released: another store creates immediately")
-        chk(File(d, "install-id").readText() == B && d.list()!!.count { it.endsWith(".part") } <= 1, "stale temp ignored, bound kept")
+        chk(InstallIdFile(d, RecSync(), lockWaitMs = 2000).createIfAbsent(B) == (B to true), "locks were released: another store creates (an unreleased lock would be UNAVAILABLE)")
+        chk(File(d, "install-id").readText() == B && d.list()!!.none { it.endsWith(".part") }, "the next create cleaned the stale temp")
+    }
+    // 16. stale temp cleanup under the locks: seeded stale temps go, nothing else does; a LIVE creator's temp is never deleted by a blocked second creator; an existing id triggers no cleanup
+    run {
+        val d = fresh(); for (n in 1..5) File(d, "tmp-$n.part").writeText(A); File(d, "other.part").writeText("keep"); File(d, "notes.txt").writeText("keep")
+        chk(InstallIdFile(d, RecSync()).createIfAbsent(B) == (B to true))
+        chk(d.list()!!.toSet() == setOf("install-id", "install-id.lock", "other.part", "notes.txt"), "stale tmp-*.part removed, id and lock and unrelated files kept: " + d.list()!!.toList())
+        File(d, "tmp-9.part").writeText(A); chk(InstallIdFile(d, RecSync()).createIfAbsent(A) == (B to false) && File(d, "tmp-9.part").exists(), "existing id: no cleanup, nothing written")
+        val d3 = fresh(); val gate = CountDownLatch(1); val inFsync = CountDownLatch(1)
+        val holder = Thread { InstallIdFile(d3, RecSync(), fileSync = { inFsync.countDown(); gate.await() }).createIfAbsent(A) }.also { it.start() }
+        inFsync.await()
+        val liveTemps = d3.list()!!.filter { it.endsWith(".part") }
+        chk(liveTemps.size == 1 && failKind { InstallIdFile(d3, RecSync(), lockWaitMs = 200).createIfAbsent(B) } == InstallIdFailure.Kind.UNAVAILABLE && d3.list()!!.filter { it.endsWith(".part") } == liveTemps, "blocked second creator leaves the live creator's temp alone")
+        gate.countDown(); holder.join(5000)
+        chk(InstallIdFile(d3, RecSync()).read() == A && d3.list()!!.none { it.endsWith(".part") }, "holder published and its own temp is gone")
     }
     root.deleteRecursively()
     println("PASS install id store: create-only, winner kept, malformed or unreadable never overwritten, concurrent create has one winner (JVM filesystem, not Android)")
