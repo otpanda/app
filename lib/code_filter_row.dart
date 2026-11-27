@@ -51,7 +51,11 @@ class CodeFilterRow extends StatelessWidget {
       // Explicit chip padding makes measurement match the rendered chips.
       final widths = [
         for (final item in items)
-          textWidth(item.label) + 24 + (selected.contains(item.id) ? 24 : 0),
+          textWidth(item.label).ceilToDouble() +
+              25 +
+              (selected.contains(item.id)
+                  ? MediaQuery.textScalerOf(context).scale(24)
+                  : 0),
       ];
       double occupied(int count) =>
           widths.take(count).fold(0.0, (a, b) => a + b) +
@@ -79,7 +83,7 @@ class CodeFilterRow extends StatelessWidget {
               padding: EdgeInsets.only(
                 right: item != visible.last || hidden.isNotEmpty ? gap : 0,
               ),
-              child: _chip(item),
+              child: _chip(item, style),
             ),
           if (hidden.isNotEmpty)
             SizedBox(
@@ -105,9 +109,10 @@ class CodeFilterRow extends StatelessWidget {
     },
   );
 
-  Widget _chip(CodeFilterChoice c) => FilterChip(
+  Widget _chip(CodeFilterChoice c, TextStyle style) => FilterChip(
     key: ValueKey('filter-${c.id}'),
     label: Text(c.label),
+    labelStyle: style,
     padding: const EdgeInsets.all(4),
     labelPadding: const EdgeInsets.symmetric(horizontal: 8),
     selected: selected.contains(c.id),
@@ -147,6 +152,7 @@ class CodeFilterRow extends StatelessWidget {
                         FilterChip(
                           key: ValueKey('dialog-filter-${c.id}'),
                           label: Text(c.label),
+
                           padding: const EdgeInsets.all(4),
                           labelPadding: const EdgeInsets.symmetric(
                             horizontal: 8,
