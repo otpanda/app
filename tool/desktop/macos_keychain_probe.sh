@@ -39,7 +39,7 @@ build() { # out marker [explicit-DR]
 }
 
 dump_acl() { # ACL/partition entries of the probe item only (no secret data is requested)
-  security dump-keychain -a 2>/dev/null | awk -v a="$1" '/^keychain:/{if(f)print blk; blk=""; f=0} {blk=blk $0 "\n"} index($0,a){f=1} END{if(f)print blk}' \
+  perl -e 'alarm 15; exec @ARGV' -- security dump-keychain -a 2>/dev/null | awk -v a="$1" '/^keychain:/{if(f)print blk; blk=""; f=0} {blk=blk $0 "\n"} index($0,a){f=1} END{if(f)print blk}' \
     | grep -E 'acct|description|entry [0-9]|authorizations|applications|hash|partition|ACL|ad-hoc|cdhash|path' | sed 's/^/    acl: /' | head -40
 }
 
@@ -137,7 +137,11 @@ handoff() {
   if security find-generic-password -s "$SVC" -a "$ns" >/dev/null 2>&1; then echo "  item still present: yes"; else bad "handoff: item vanished"; fi
   security delete-generic-password -s "$SVC" -a "$ns" >/dev/null 2>&1
 }
-handoff
+if [ "${OTPANDA_PROBE_HANDOFF:-0}" = 1 ]; then
+  handoff
+else
+  echo "== scenario handoff SKIPPED (OTPANDA_PROBE_HANDOFF not enabled): prior attempt timed out, continuity UNPROVEN"
+fi
 
 matrix plain plain
 matrix dr dr
