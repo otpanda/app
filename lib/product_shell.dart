@@ -25,7 +25,6 @@ import 'page_reload_stub.dart'
     if (dart.library.js_interop) 'page_reload_web.dart'
     as platform;
 import 'app_theme.dart';
-import 'pull_to_refresh.dart';
 import 'refresh_bar.dart';
 import 'service_logo.dart';
 import 'session_contract.dart';
@@ -1865,9 +1864,6 @@ class _ProductShellState extends State<ProductShell>
           if (_canAddTotp) const SizedBox(height: 80),
         ],
       );
-      final scrollContent = widget.pageReload == null
-          ? list
-          : PullToRefresh(onRefresh: pull, child: list);
       final org = widget.organization;
       final tags = [...?org?.tags];
       int tagCount(String id) => widget.controller.store.entries.where((e) {
@@ -1908,7 +1904,8 @@ class _ProductShellState extends State<ProductShell>
             ],
           ),
         ),
-        child: scrollContent,
+        onRefresh: widget.pageReload == null ? null : pull,
+        child: list,
       );
       final accountButton = IconButton(
         tooltip: 'Account & security',
