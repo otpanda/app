@@ -428,7 +428,16 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       _retireTransfer();
       _verifiedOwner.clear();
       offlineEnrollment.bindOwner(null);
-      workspace.lock();
+      final phase = controller.phase;
+      if (phase == NativeSessionPhase.signedOut ||
+          phase == NativeSessionPhase.signInRequired) {
+        workspace.lock();
+      } else if (phase == NativeSessionPhase.signedIn) {
+        workspace.lock();
+        // Local display does not require a server session. Reopen only through
+        // durable cold admission while the replacement owner is verified.
+        workspace.localLockChanged();
+      }
     }
     switch (controller.phase) {
       case NativeSessionPhase.signedIn:

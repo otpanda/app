@@ -81,9 +81,14 @@ class NativeWorkspaceCoordinator extends ChangeNotifier {
       install: found.install,
       epoch: found.epoch,
       admittedFreshWorkspace: create,
-      stillLocallyUnlocked: current,
+      stillLocallyUnlocked: () => active(generation),
     );
-    if (!current()) return;
+    if (!current()) {
+      // A stale open must not retain a live database. A later cold discovery
+      // uses durable local authority, independently of this server session.
+      runtime.lock();
+      return;
+    }
     if (runtime.phase != NativeOfflineWorkspacePhase.ready) {
       throw StateError('Workspace unavailable');
     }
