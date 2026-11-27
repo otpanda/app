@@ -14,6 +14,9 @@ import 'package:otpanda_client/theme_choice.dart';
 import 'package:otpanda_client/theme_controller.dart';
 import 'package:otpanda_client/tile_display_preference.dart';
 
+import 'package:otpanda_client/totp_enrollment.dart';
+
+import 'totp_enrollment_test.dart' show Bridge;
 import 'product_shell_test.dart' show FakeTransport, routes;
 import 'theme_test.dart' show MemTheme, MemTiles;
 
@@ -154,6 +157,52 @@ void main() {
         await shot(t, 'tagdialog-${choice.name}-${width.toInt()}');
       });
     }
+    testWidgets('authenticator enrollment ${choice.name}', (t) async {
+      t.view.physicalSize = const Size(390, 900);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      await fonts(t);
+      final theme = ThemeController(MemTheme());
+      await theme.set(choice);
+      addTearDown(theme.dispose);
+      await t.pumpWidget(
+        RepaintBoundary(
+          key: const Key('shot-root'),
+          child: ThemeScope(
+            controller: theme,
+            builder: (context, light, dark, mode) => MaterialApp(
+              theme: light,
+              darkTheme: dark,
+              themeMode: mode,
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) => Center(
+                    child: FilledButton(
+                      onPressed: () => addTotpDialog(
+                        context,
+                        Bridge(),
+                        camera: (onText, onError) => const SizedBox(
+                          height: 200,
+                          child: Center(child: Icon(Icons.camera_alt_outlined)),
+                        ),
+                      ),
+                      child: const Text('Add authenticator'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await t.tap(find.text('Add authenticator'));
+      await t.pumpAndSettle();
+      await shot(t, 'enrollment-camera-${choice.name}');
+      await t.tap(find.text('Enter key manually'));
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+      await shot(t, 'enrollment-manual-${choice.name}');
+    });
     testWidgets('settings and dialog ${choice.name}', (t) async {
       t.view.physicalSize = const Size(560, 760);
       t.view.devicePixelRatio = 1;
