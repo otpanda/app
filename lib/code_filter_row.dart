@@ -14,14 +14,10 @@ class CodeFilterRow extends StatelessWidget {
     required this.choices,
     required this.selected,
     required this.onChanged,
-    this.matchAll = false,
-    this.onMatchAllChanged,
   });
   final List<CodeFilterChoice> choices;
   final Set<String> selected;
   final ValueChanged<Set<String>> onChanged;
-  final bool matchAll;
-  final ValueChanged<bool>? onMatchAllChanged;
 
   List<CodeFilterChoice> get ordered => [
     ...choices.where((c) => selected.contains(c.id)),
@@ -32,34 +28,57 @@ class CodeFilterRow extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final items = ordered;
-      // Always reserve a real button-sized area before admitting each chip.
-      // More has a fixed width so its counter cannot cause row oscillation.
-      const moreWidth = 148.0, gap = 8.0;
+      const gap = 8.0;
       final style =
           Theme.of(context).textTheme.labelLarge ??
           const TextStyle(fontSize: 14);
-      var used = 0.0;
-      final visible = <CodeFilterChoice>[];
-      for (final item in items) {
+      double textWidth(String label) {
         final painter = TextPainter(
-          text: TextSpan(text: item.label, style: style),
+          text: TextSpan(text: label, style: style),
           textDirection: Directionality.of(context),
           textScaler: MediaQuery.textScalerOf(context),
         )..layout();
-        // ChoiceChip: 8px label padding each side, 4px chip padding,
-        // selected checkmark up to 24px, plus conservative edge allowance.
-        final width = painter.width + 64;
+        final width = painter.width;
         painter.dispose();
-        if (used + width + moreWidth + gap > constraints.maxWidth) break;
-        visible.add(item);
-        used += width + gap;
+        return width;
       }
+
+      String moreLabel(List<CodeFilterChoice> hidden) {
+        final count = hidden.where((c) => selected.contains(c.id)).length;
+        return '${hidden.length} more${count > 0 ? ' · $count selected' : ''}';
+      }
+
+      // Explicit chip padding makes measurement match the rendered chips.
+      final widths = [
+        for (final item in items)
+          textWidth(item.label) + 24 + (selected.contains(item.id) ? 24 : 0),
+      ];
+      double occupied(int count) =>
+          widths.take(count).fold(0.0, (a, b) => a + b) +
+          (count > 0 ? (count - 1) * gap : 0);
+      var count = items.length;
+      var moreWidth = 0.0;
+      if (occupied(count) > constraints.maxWidth) {
+        // Try the whole row first. Reserve a compact overflow control only
+        // when at least one chip genuinely does not fit.
+        for (count = items.length - 1; count >= 0; count--) {
+          moreWidth = (textWidth(moreLabel(items.skip(count).toList())) + 32)
+              .clamp(0.0, constraints.maxWidth);
+          if (occupied(count) + (count > 0 ? gap : 0) + moreWidth <=
+              constraints.maxWidth) {
+            break;
+          }
+        }
+      }
+      final visible = items.take(count < 0 ? 0 : count).toList();
       final hidden = items.skip(visible.length).toList();
       return Row(
         children: [
           for (final item in visible)
             Padding(
-              padding: const EdgeInsets.only(right: gap),
+              padding: EdgeInsets.only(
+                right: item != visible.last || hidden.isNotEmpty ? gap : 0,
+              ),
               child: _chip(item),
             ),
           if (hidden.isNotEmpty)
@@ -69,9 +88,13 @@ class CodeFilterRow extends StatelessWidget {
                   : moreWidth,
               child: OutlinedButton(
                 key: const Key('code-filter-more'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  textStyle: style,
+                ),
                 onPressed: () => _more(context),
                 child: Text(
-                  '${hidden.length} more${hidden.any((c) => selected.contains(c.id)) ? ' · ${hidden.where((c) => selected.contains(c.id)).length} selected' : ''}',
+                  moreLabel(hidden),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -85,6 +108,8 @@ class CodeFilterRow extends StatelessWidget {
   Widget _chip(CodeFilterChoice c) => FilterChip(
     key: ValueKey('filter-${c.id}'),
     label: Text(c.label),
+    padding: const EdgeInsets.all(4),
+    labelPadding: const EdgeInsets.symmetric(horizontal: 8),
     selected: selected.contains(c.id),
     onSelected: (enabled) {
       final next = {...selected};
@@ -102,7 +127,6 @@ class CodeFilterRow extends StatelessWidget {
     // lets taps update immediately even when the parent row is offstage.
     var current = {...selected};
     final frozenOrder = ordered;
-    var all = matchAll;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -115,15 +139,6 @@ class CodeFilterRow extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (onMatchAllChanged != null)
-                    SwitchListTile(
-                      title: const Text('Match all selected tags'),
-                      value: all,
-                      onChanged: (v) {
-                        refresh(() => all = v);
-                        onMatchAllChanged!(v);
-                      },
-                    ),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -132,6 +147,10 @@ class CodeFilterRow extends StatelessWidget {
                         FilterChip(
                           key: ValueKey('dialog-filter-${c.id}'),
                           label: Text(c.label),
+                          padding: const EdgeInsets.all(4),
+                          labelPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                          ),
                           selected: current.contains(c.id),
                           onSelected: (enabled) {
                             refresh(() {
