@@ -1,4 +1,5 @@
 import '../transfer/transfer_routes.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -106,6 +107,19 @@ class NativeSessionBridge
     }
   }
 
+  bool _localReadAllowed = true;
+
+  /// Local lock is an immediate transport boundary, unlike background grace.
+  void setLocalReadAllowed(bool allowed) {
+    _localReadAllowed = allowed;
+    if (!allowed) {
+      _realtime?.sessionEnded();
+    } else if (controller.phase == NativeSessionPhase.signedIn &&
+        controller.session?.access != _rejectedAccess) {
+      _realtime?.sessionRestored();
+    }
+  }
+
   NativeSessionPhase? _lastPhase;
   String? _rejectedAccess;
 
@@ -121,7 +135,9 @@ class NativeSessionBridge
       // Only a session the server has not already rejected can restart an
       // ended run: a fresh sign-in, or a renewal that issued a new token.
       final a = controller.session?.access;
-      if (a != null && a != _rejectedAccess) _realtime?.sessionRestored();
+      if (_localReadAllowed && a != null && a != _rejectedAccess) {
+        _realtime?.sessionRestored();
+      }
     }
   }
 
@@ -141,6 +157,7 @@ class NativeSessionBridge
   /// bridge's own pause answer is never mistaken for a server 503: a signed
   /// out or rejected session ends realtime, a restoring or offline one waits.
   Future<SessionResponse> _mintTicket() async {
+    if (!_localReadAllowed) throw const TicketPause(ended: true);
     // The server already rejected this exact token twice: no request, wait for
     // a renewal or sign-in that yields a different one.
     if (_rejectedAccess != null &&

@@ -386,6 +386,45 @@ void main() {
           : answers.removeAt(0);
     }, realtimeConnector: connect);
 
+    test(
+      'local lock blocks tickets across subscribers and renewal until unlock',
+      () async {
+        final c = await signedIn();
+        final log = <String>[];
+        var connects = 0;
+        final b = rt(
+          c,
+          log,
+          [
+            SessionResponse(
+              200,
+              jsonEncode({'ticket': 'rt1.${'A' * 16}.${'B' * 43}'}),
+            ),
+          ],
+          (p) async {
+            connects++;
+            return _NoSock();
+          },
+        );
+        b.setLocalReadAllowed(false);
+        final stop = b.realtimeSubscribe((_) {});
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await c.forceRenew();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(log, isEmpty);
+        expect(connects, 0);
+        b.setLocalReadAllowed(true);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(log.length, 1);
+        expect(connects, 1);
+        b.setLocalReadAllowed(false);
+        await c.forceRenew();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(log.length, 1);
+        stop();
+        b.disposeRealtime();
+      },
+    );
     test('mints with the bearer, empty body, no Origin; connects with subprotocols', () async {
       final c = await signedIn();
       final log = <String>[];

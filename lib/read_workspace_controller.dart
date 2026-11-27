@@ -29,6 +29,30 @@ class ReadWorkspaceController extends ChangeNotifier {
   final int Function() clock;
   late CodeStore store = CodeStore(_BrowserReadTransport(bridge));
   bool loading = false, suspended = false, _disposed = false;
+  bool _externalHold = false;
+  bool get externallyHeld => _externalHold;
+  void setExternalHold(bool value) {
+    if (_externalHold == value) return;
+    _externalHold = value;
+    if (value) {
+      suspend(preserve: true);
+    } else {
+      resume();
+      if (clock() < _nextRefreshAt) {
+        _readRetryTimer?.cancel();
+        _readRetryTimer = Timer(
+          Duration(milliseconds: _nextRefreshAt - clock()),
+          () {
+            _readRetryTimer = null;
+            if (!_disposed && !suspended && signedIn) unawaited(refresh());
+          },
+        );
+      } else {
+        unawaited(refresh());
+      }
+    }
+  }
+
   String message = '';
   bool rateLimited = false, sessionEnded = false, hasLoaded = false;
   int publishedRevision = 0;
@@ -359,13 +383,13 @@ class ReadWorkspaceController extends ChangeNotifier {
   void resetSession() {
     clear();
     sessionEnded = false;
-    suspended = false;
+    suspended = _externalHold;
     message = '';
     _nextRefreshAt = 0;
   }
 
   void resume() {
-    if (_disposed) return;
+    if (_disposed || _externalHold) return;
     suspended = false;
     if (bridge is SessionContinuityBridge) {
       store.updateSessionExpiry(

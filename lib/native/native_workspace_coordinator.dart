@@ -149,12 +149,22 @@ class NativeWorkspaceCoordinator extends ChangeNotifier {
     }
   }
 
+  bool _readsSuspended = false;
+  void setReadsSuspended(bool value) {
+    if (_readsSuspended == value) return;
+    _readsSuspended = value;
+    final controller = _controller;
+    if (controller == null) return;
+    controller.setExternalHold(value);
+  }
+
   void bind(ReadWorkspaceController controller) {
     if (_controller == controller) return;
     _controller?.removeListener(_published);
     _controller = controller;
     _savedRevision = -1;
     controller.addListener(_published);
+    controller.setExternalHold(_readsSuspended);
     _published();
   }
 

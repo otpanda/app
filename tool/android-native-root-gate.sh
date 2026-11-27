@@ -56,7 +56,7 @@ python3 tool/extract-shots.py "$OUT/test.log" "$OUT/shots"
 curl -fsS "http://127.0.0.1:$PORT/__loopback/counters" > "$OUT/counters-final.json" || true
 "${A[@]}" exec-out screencap -p > "$OUT/final.png" || true
 "${A[@]}" logcat -d -b crash > "$OUT/crash.txt" || true
-need="session_enrolled device_lock_enabled locked_no_owner_read_no_admission admitted_after_owner_and_unlock lock_hides_immediately cold_local_view_offline_after_unlock signout_invalidated_cold_selection cold_root_after_signout_no_local_view complete"
+need="session_enrolled device_lock_enabled locked_no_owner_read_no_admission admitted_after_owner_and_unlock lock_hides_immediately cold_local_view_offline_after_unlock paused_offline_reopened signout_invalidated_cold_selection cold_root_after_signout_no_local_view complete"
 missing=0
 for g in $need; do grep -q "GATE:$g" "$OUT/test.log" || { echo "MISSING GATE:$g"; missing=1; }; done
 [ "$result" -eq 0 ] && [ "$missing" -eq 0 ] || { echo "FAIL result=$result missing=$missing"; exit 1; }

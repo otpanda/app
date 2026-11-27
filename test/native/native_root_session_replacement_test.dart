@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:otpanda_client/native/native_auth.dart';
+import 'package:otpanda_client/browser_account_page.dart';
 import 'package:otpanda_client/native/native_root_io.dart';
 import 'package:otpanda_client/native/native_workspace_admission.dart';
 import 'package:otpanda_client/native/native_workspace_coordinator.dart';
@@ -16,7 +17,7 @@ import 'package:otpanda_client/session_contract.dart';
 
 import '../offline_totp/fake_seed_custody.dart';
 
-// UNRUN CANDIDATE (no Flutter SDK in the authoring sandbox). Actual _Boot root through buildAndroidNativeRootForTest with synthetic transport and
+// Actual _Boot root through buildAndroidNativeRootForTest with synthetic transport and
 // mocked platform channels. Proves session-identity fencing of owner verification and workspace admission when the NativeSession is replaced (renewal),
 // including a replacement whose access value equals the old one. Does not prove Android channel behavior.
 //
@@ -471,6 +472,49 @@ void main() {
       r.coord!.hasLocalView &&
       r.rt!.snapshot?.entries.single.service == 'Saved service';
 
+  testWidgets(
+    'lock-disabled inactive and app switch retain account widget state',
+    (t) async {
+      final r = _Rig(equalAccess: false)..install();
+      await _mount(t, r);
+      await _pump(t);
+      final before = t.state(find.byType(BrowserAccountPage));
+      for (final phase in [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+        AppLifecycleState.resumed,
+      ]) {
+        t.binding.handleAppLifecycleStateChanged(phase);
+        await t.pump();
+        expect(
+          t.state(find.byType(BrowserAccountPage, skipOffstage: false)),
+          same(before),
+        );
+      }
+      await _teardown(t, r);
+    },
+  );
+  testWidgets(
+    'five lock-disabled inactive cycles preserve real local view without hold',
+    (t) async {
+      final r = _Rig(equalAccess: false)..install();
+      await _mount(t, r);
+      await _pump(t);
+      await seedLocalView(t, r);
+      for (var i = 0; i < 5; i++) {
+        t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        await t.pump();
+        expect(r.rt!.phase, NativeOfflineWorkspacePhase.ready);
+        expect(r.coord!.hasLocalView, isTrue);
+        t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await t.pump();
+        expect(r.rt!.phase, NativeOfflineWorkspacePhase.ready);
+        expect(r.coord!.hasLocalView, isTrue);
+      }
+      await _teardown(t, r);
+    },
+  );
   for (final mode in ['same', 'different', 'unverified']) {
     testWidgets(
       'root render: cold scope owner, verification $mode, then outage',

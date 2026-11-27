@@ -29,6 +29,20 @@ class Fake implements LocalLockPlatform {
 }
 
 void main() {
+  test('foreground transitions notify with device lock disabled', () async {
+    final p = Fake()..saved = false;
+    final c = LocalLockController(p);
+    await c.load();
+    var events = 0;
+    c.addListener(() => events++);
+    c.background();
+    expect(c.foreground, isFalse);
+    c.resume();
+    expect(c.foreground, isTrue);
+    expect(events, 2);
+    c.dispose();
+  });
+
   testWidgets(
     'actual MaterialApp builder lock blocks hidden dialog and account history Back',
     (t) async {

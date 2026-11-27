@@ -320,6 +320,28 @@ void main() {
       );
       await _shot(t, 'cold_local_view_offline_after_unlock');
       _gate('cold_local_view_offline_after_unlock');
+      // Actual pause/resume with the server still unavailable, not a remount.
+      _lifecycle(t, [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+      ]);
+      await t.pump();
+      expect(find.text(_offlineMarker), findsNothing);
+      _lifecycle(t, [
+        AppLifecycleState.hidden,
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]);
+      await _unlock(t);
+      await _until(
+        t,
+        () => find.text(_offlineMarker).evaluate().isNotEmpty,
+        'paused offline cold reopening',
+        secs: 90,
+      );
+      await _shot(t, 'paused_offline_reopened');
+      _gate('paused_offline_reopened');
       await _h('POST', '/__loopback/outage', '{"on":false}');
 
       // 5. Sign out invalidates the cold selection.
@@ -340,7 +362,7 @@ void main() {
         print(
           'SETTINGS-ROUTE-NEEDED: ${t.widgetList<Text>(find.byType(Text)).map((v) => v.data ?? '').join(' | ')}',
         );
-        final tip = find.byTooltip('Settings');
+        final tip = find.byTooltip('Account & security');
         if (tip.evaluate().isNotEmpty) await t.tap(tip.first);
         await _pump(t, 1500);
       }
