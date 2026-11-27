@@ -24,8 +24,10 @@ jobs:
           run-id: '45912120298'
           github-token: ${{ github.token }}
           path: candidate
+          merge-multiple: true
       - name: Pin exact alpha12 APK bytes and original source
         run: |
+          set -euo pipefail
           mkdir -p repair-out original-alpha6
           printf '%s\n' 'cc2733a90897c92a8f58fa6bdaee4a2a9831e3e4a7517f5e9c7e876ed52100ea  candidate/otpanda-android-google-v0.1.0-alpha.12.apk' 'f5908a40b357334e5b3c7f0f0680e09298e9a692d5cc1e558be1ff17ab5042ac  candidate/otpanda-android-fdroid-v0.1.0-alpha.12.apk' | sha256sum -c - | tee repair-out/exact-alpha12-input.txt
           printf '%s\n' 'release45912120298 artifact15161187082 source90d9034ed5bf96f7adf2c6ae9976305e2f160a38 tagv0.1.0-alpha.12' > repair-out/provenance.txt
