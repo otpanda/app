@@ -45,6 +45,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & build/wrapping/Debug/wrapping_native.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: macOS real Keychain qualification
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash tool/desktop/macos_keychain_probe.sh
       - run: flutter analyze
       - run: flutter test
       - name: Compile fictional development app

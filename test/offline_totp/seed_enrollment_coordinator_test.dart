@@ -116,6 +116,7 @@ class FakeApi implements SeedEnrollmentApi {
   int generation = 3;
   bool contextFails = false, stepUpFails = false, enrollBeginFails = false;
   bool finishCommits = true, finishThrows = false;
+  bool committed = false, commitBeforeThrow = false;
   SeedServerKeyState status = SeedServerKeyState.unknown;
   bool statusThrows = false;
   String challengeOwner = 'owner', challengeKey = _key;
@@ -158,7 +159,7 @@ class FakeApi implements SeedEnrollmentApi {
     required String token,
   }) async {
     _log('enrollBegin');
-    if (enrollBeginFails) throw StateError('409');
+    if (enrollBeginFails || committed) throw StateError('409');
     return SeedEnrollChallenge(
       token: 'tok2',
       ownerId: challengeOwner,
@@ -177,7 +178,11 @@ class FakeApi implements SeedEnrollmentApi {
     required String token,
   }) async {
     _log('finish');
-    if (finishThrows) throw StateError('lost response');
+    if (finishThrows) {
+      if (commitBeforeThrow) committed = true;
+      throw StateError('lost response');
+    }
+    if (finishCommits) committed = true;
     return finishCommits;
   }
 
@@ -281,22 +286,86 @@ void main() {
       },
     );
 
+    test('signed, lost finish, never committed: resumes the SAME key with a fresh challenge', () async {
+      api.finishThrows = true;
+      expect((await run()).outcome, SeedEnrollOutcome.pendingServerOutcome);
+      expect(native.stored!.phase, SeedEnrollmentPhase.signed);
+      final digestBefore = native.stored!.actionDigest;
+      api.finishThrows = false;
+      api.calls.clear();
+      native.calls.clear();
+      final r = await run(build());
+      expect(r.outcome, SeedEnrollOutcome.confirmed);
+      expect(r.keyId, _key);
+      expect(api.calls.first, 'status');
+      expect(count(api.calls, 'finish'), 1);
+      expect(count(native.calls, 'prepare'), 0);
+      expect(count(native.calls, 'sign'), 1);
+      expect(passkey.count, 2);
+      expect(native.stored!.keyId, _key);
+      expect(native.stored!.actionDigest, digestBefore);
+      expect(native.stored!.phase, SeedEnrollmentPhase.confirmed);
+    });
+
+    test('signed, lost finish that DID commit: opaque status never makes a second key, active confirms', () async {
+      api.finishThrows = true;
+      api.commitBeforeThrow = true;
+      await run();
+      expect(api.committed, true);
+      api.calls.clear();
+      native.calls.clear();
+      // status is opaque (transient); the server refuses a key id that exists
+      final r = await run(build());
+      expect(r.outcome, SeedEnrollOutcome.pendingServerOutcome);
+      expect(api.calls.contains('finish'), false);
+      expect(native.calls.contains('sign'), false);
+      expect(native.stored!.phase, SeedEnrollmentPhase.signed);
+      api.status = SeedServerKeyState.active;
+      final c = await run(build());
+      expect(c.outcome, SeedEnrollOutcome.confirmed);
+      expect(count(api.calls, 'finish'), 0);
+      expect(count(native.calls, 'prepare'), 0);
+    });
+
+    test('signed, resume is refused when the generation moved: preserved for the fenced reset', () async {
+      api.finishThrows = true;
+      await run();
+      api.finishThrows = false;
+      api.generation = 9;
+      api.calls.clear();
+      final r = await run(build());
+      expect(r.outcome, SeedEnrollOutcome.staleGeneration);
+      expect(api.calls, ['status', 'context']);
+      expect(native.stored!.phase, SeedEnrollmentPhase.signed);
+      expect(native.stored!.generation, 3);
+    });
+
     test(
-      'signed: restart reconciles only, never signs or finishes again',
+      'signed, resume where native refuses the server digest: nothing finished',
       () async {
         api.finishThrows = true;
-        expect((await run()).outcome, SeedEnrollOutcome.pendingServerOutcome);
-        expect(native.stored!.phase, SeedEnrollmentPhase.signed);
+        await run();
+        api.finishThrows = false;
+        native.refuseDigest = true;
         api.calls.clear();
-        native.calls.clear();
-        api.status = SeedServerKeyState.unknown;
+        expect((await run(build())).outcome, SeedEnrollOutcome.actionMismatch);
+        expect(api.calls.contains('finish'), false);
+        expect(native.stored!.phase, SeedEnrollmentPhase.signed);
+      },
+    );
+
+    test(
+      'signed, resume while offline stays signed and sends nothing',
+      () async {
+        api.finishThrows = true;
+        await run();
+        api.statusThrows = true;
+        api.calls.clear();
         expect(
           (await run(build())).outcome,
           SeedEnrollOutcome.pendingServerOutcome,
         );
         expect(api.calls, ['status']);
-        expect(native.calls.contains('sign'), false);
-        expect(native.stored!.phase, SeedEnrollmentPhase.signed);
       },
     );
 
@@ -365,25 +434,22 @@ void main() {
       expect(native.calls.contains('confirm'), false);
     });
 
-    test(
-      'native sign reply lost after journaling: no finish, state kept',
-      () async {
-        native.signFail = SeedSyncFailureKind.unknownOutcome;
-        native.signLandsBeforeFail = true;
-        final r = await run();
-        expect(r.outcome, SeedEnrollOutcome.pendingServerOutcome);
-        expect(api.calls.contains('finish'), false);
-        expect(native.stored!.phase, SeedEnrollmentPhase.signed);
-        native.signFail = null;
-        api.calls.clear();
-        expect(
-          (await run(build())).outcome,
-          SeedEnrollOutcome.pendingServerOutcome,
-        );
-        expect(api.calls, ['status']);
-        expect(count(native.calls, 'sign'), 1);
-      },
-    );
+    test('native sign reply lost after journaling: no finish; next run signs the same key again', () async {
+      native.signFail = SeedSyncFailureKind.unknownOutcome;
+      native.signLandsBeforeFail = true;
+      final r = await run();
+      expect(r.outcome, SeedEnrollOutcome.pendingServerOutcome);
+      expect(api.calls.contains('finish'), false);
+      expect(native.stored!.phase, SeedEnrollmentPhase.signed);
+      native.signFail = null;
+      api.calls.clear();
+      final again = await run(build());
+      expect(again.outcome, SeedEnrollOutcome.confirmed);
+      expect(again.keyId, _key);
+      expect(count(native.calls, 'sign'), 2);
+      expect(count(native.calls, 'prepare'), 1);
+      expect(count(api.calls, 'finish'), 1);
+    });
 
     test(
       'prepare reply lost but key created: continues from journal, one prepare',

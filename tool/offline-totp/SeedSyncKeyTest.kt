@@ -671,10 +671,19 @@ private fun handleChecks() {
             val ch2 = SeedSyncChannelHandler(r.restart(), r.custody, { clock })
             val j1 = ok(ch2.handle("syncEnrollmentJournal", mapOf("owner" to "o"))) as Map<*, *>
             check(j1["phase"] == "signed" && j1["actionDigest"] == dig && j1["keyId"] == keyId)
+            // resume: after the restart the SAME key signs a fresh server challenge; the journal stays signed with the same digest and no new key exists
+            val chl2 = "Z".repeat(43)
+            check((ok(ch2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl2, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to keyId))) as String).length == 86)
+            check(err(ch2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl2, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to "f".repeat(32)))) == "WIRE_KEY")
+            check(err(ch2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl2, "actionDigest" to "0".repeat(64), "expiresAt" to now + 60_000, "keyId" to keyId))) == "WIRE_ACTIONDIGEST")
+            val j2 = ok(ch2.handle("syncEnrollmentJournal", mapOf("owner" to "o"))) as Map<*, *>
+            check(j2["phase"] == "signed" && j2["actionDigest"] == dig && j2["keyId"] == keyId)
             check(ok(ch2.handle("syncConfirmEnrollment", mapOf("owner" to "o", "keyId" to "f".repeat(32), "actionDigest" to dig))) == false)
             check(ok(ch2.handle("syncConfirmEnrollment", mapOf("owner" to "o", "keyId" to keyId, "actionDigest" to "0".repeat(64)))) == false)
             check(ok(ch2.handle("syncConfirmEnrollment", mapOf("owner" to "o", "keyId" to keyId, "actionDigest" to dig))) == true)
             check((ok(ch2.handle("syncEnrollmentJournal", mapOf("owner" to "o"))) as Map<*, *>)["phase"] == "confirmed")
+            check(err(ch2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to keyId))) != "")
+            check(ch2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to keyId)) is ChannelReply.Err)
             check(err(ch2.handle("syncPrepareEnrollment", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) == "ERASE_INCOMPLETE") // confirmed key is not replaced either
         }
         // W14. unregistered channel contract: native clock, strict argument sets, no secrets in replies, whole flow incl. provision into custody, status key targeting,
@@ -784,7 +793,8 @@ private fun handleChecks() {
                 val st = ok(h2.handle("syncEnrollmentState", mapOf("owner" to "o"))) as Map<*, *>
                 check(st["keyId"] == e1["keyId"] && st["provable"] == false)
                 val dig = SeedSyncWire.enrollActionDigest("o", INST, e1["keyId"] as String, e1["publicKey"] as ByteArray, 1)
-                check(err(h2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to e1["keyId"]))) == "WIRE_KEY")
+                // the durable journal now carries the public point, so the SAME key can sign a fresh server challenge after a restart ("provable" stays an in-process flag)
+                check((ok(h2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to e1["keyId"]))) as String).length == 86)
                 check(err(h2.handle("syncEnroll", mapOf("owner" to "o", "installId" to "X".repeat(22), "generation" to 1L))) == "INSTALL_ID_MISMATCH") // install id is pinned
                 check(r.sv.keys.size == 1)
                 val seedsBefore = r.cv.keys.size

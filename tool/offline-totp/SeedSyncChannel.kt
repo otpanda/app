@@ -46,7 +46,7 @@ import java.security.SecureRandom
 //    gone with nothing pending: TERMINAL, do not retry. "pending": an erase or key delete is already owed: call syncRetryPending, send no new status request.
 //    "unreadable": the enrollment document cannot be read, nothing changed: retry later, never treat as purge. WIRE_STATUS (unknown state string): retry later.
 //  * Half enrollment: syncEnroll makes a durable ACTIVE key but only this process holds the public point the enroll proof needs. After a process death before the
-//    server replied, syncEnrollmentState gives provable=false and syncSignEnrollProof gives WIRE_KEY. This does NOT prove that the server did not commit.
+//    server replied, syncEnrollmentState gives provable=false; syncSignEnrollProof still signs for the SAME journaled key (public point is durable) against a fresh server challenge. This does NOT prove that the server did not commit.
 //    Preserve the same durable key and pending attempt, reconcile through key-signed status, and never auto-replace on timeout, opaque status or capped-list absence.
 //  * installId: Dart is the single source (a random per-install id it persists, 22 to 64 chars of [A-Za-z0-9_-]). Native pins it in the enrollment record and refuses
 //    a different id for the same owner while an enrollment is active (INVALID_INPUT). There is no native install id in this base.
@@ -139,7 +139,11 @@ class SeedSyncChannelHandler(
                     ChannelReply.Ok(mapOf("keyId" to kid, "provable" to (kid != null && enrolled[owner]?.keyId == kid))) } }
                 "syncSignEnrollProof" -> { a.exact("owner", "challenge", "actionDigest", "expiresAt", "keyId"); val owner = a.str("owner")
                     // the asked keyId must be the enrollment this process made; signEnrollProof then requires it to still be the ACTIVE key
-                    val en = synchronized(lock) { enrolled[owner] }?.takeIf { it.keyId == a.str("keyId") } ?: throw WireException("key")
+                    // After a restart the in-memory enrollment is gone; the durable journal holds the same key id and public point, so an unconfirmed (prepared or
+                    // signed) attempt can be signed again for the SAME key. A confirmed journal is refused inside signEnrollment.
+                    val en = synchronized(lock) { enrolled[owner] }?.takeIf { it.keyId == a.str("keyId") }
+                        ?: synchronized(lock) { core.enrollmentJournal(owner) }?.takeIf { it.keyId == a.str("keyId") && it.phase != "confirmed" }
+                            ?.let { Enrollment(it.keyId, it.publicKey, it.generation, it.installId) } ?: throw WireException("key")
                     ChannelReply.Ok(SeedSyncWire.signEnrollProof(core, owner, en, a.str("challenge"), a.str("actionDigest"), a.long("expiresAt"), now)) }
                 "syncSignSnapshotProof" -> { a.exact("owner", "deviceId", "generation", "epoch", "challenge", "expiresAt", "keyId")
                     ChannelReply.Ok(SeedSyncWire.signProof(core, a.str("owner"), SyncPurpose.SNAPSHOT, mapOf("deviceId" to a.str("deviceId"), "generation" to a.long("generation"),

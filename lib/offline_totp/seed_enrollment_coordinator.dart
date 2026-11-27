@@ -14,8 +14,13 @@ import 'seed_sync_channel.dart';
 ///  * Nothing replaces, resets or purges a key. A stale generation, a missing server
 ///    answer or an opaque status preserves state and returns a recoverable outcome.
 ///    A separately fenced reset is a different, explicitly approved operation.
-///  * A signed attempt is an unknown outcome. Sign and finish are never repeated for
-///    it. Only a key-signed status `active` for the exact key id confirms.
+///  * A signed attempt is an unknown outcome. Only a key-signed status `active` for
+///    the exact key id confirms. Status gives no definite "absent" answer (an unknown
+///    key looks like a transient failure), so absence is never assumed. An unconfirmed
+///    signed attempt resumes with the SAME key id, public point and action digest
+///    through a fresh challenge. The server commits one row per key id (insert-only, one
+///    shared predicate), so a repeat can never create a second key: it either commits
+///    this key once or is refused. No stored token or signature is replayed.
 ///  * The account and the sync setting are re-checked before every step that
 ///    spends a challenge, signs or finishes.
 
@@ -26,7 +31,7 @@ enum SeedEnrollOutcome {
   /// Journal was already confirmed. No network was used.
   alreadyConfirmed,
 
-  /// A signature exists. The server result is unknown. Reconcile through status later.
+  /// A signature exists. The server result is unknown and status cannot say yet.
   pendingServerOutcome,
 
   /// Server generation moved since the key was prepared. State preserved.
@@ -311,7 +316,8 @@ final class SeedEnrollmentCoordinator {
       case SeedServerKeyState.generationChanged:
         return _r(SeedEnrollOutcome.generationChangedUnconfirmed, j.keyId);
       case SeedServerKeyState.unknown:
-        return _r(SeedEnrollOutcome.pendingServerOutcome, j.keyId);
+        // Not provably committed and not provably absent. Retry the same key.
+        return _enroll(owner, j, resumed: true);
     }
   }
 
@@ -338,8 +344,9 @@ final class SeedEnrollmentCoordinator {
 
   Future<SeedEnrollResult> _enroll(
     String owner,
-    SeedEnrollmentJournal j,
-  ) async {
+    SeedEnrollmentJournal j, {
+    bool resumed = false,
+  }) async {
     final jwk = seedPublicJwk(j.publicKey);
     final int generation;
     try {
@@ -351,15 +358,21 @@ final class SeedEnrollmentCoordinator {
       return _r(SeedEnrollOutcome.staleGeneration, j.keyId);
     }
     if (!await _current(owner)) return _r(SeedEnrollOutcome.notCurrent);
-    final SeedEnrollChallenge challenge;
+    final SeedStepUpBegin step;
+    final Object assertion;
     try {
-      final step = await api.stepUpBegin(
+      step = await api.stepUpBegin(
         installId: j.installId,
         keyId: j.keyId,
         publicJwk: jwk,
       );
-      final assertion = await passkey.assertStepUp(step.options);
-      if (!await _current(owner)) return _r(SeedEnrollOutcome.notCurrent);
+      assertion = await passkey.assertStepUp(step.options);
+    } catch (_) {
+      return _r(SeedEnrollOutcome.serverUnavailable, j.keyId);
+    }
+    if (!await _current(owner)) return _r(SeedEnrollOutcome.notCurrent);
+    final SeedEnrollChallenge challenge;
+    try {
       challenge = await api.enrollBegin(
         installId: j.installId,
         keyId: j.keyId,
@@ -368,7 +381,14 @@ final class SeedEnrollmentCoordinator {
         token: step.token,
       );
     } catch (_) {
-      return _r(SeedEnrollOutcome.serverUnavailable, j.keyId);
+      // On a resume the refusal can mean the earlier attempt did commit (the server
+      // refuses a key id that already exists). Stay pending, reconcile by status.
+      return _r(
+        resumed
+            ? SeedEnrollOutcome.pendingServerOutcome
+            : SeedEnrollOutcome.serverUnavailable,
+        j.keyId,
+      );
     }
     if (challenge.ownerId != owner ||
         challenge.keyId != j.keyId ||

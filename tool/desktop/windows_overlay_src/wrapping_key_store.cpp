@@ -24,7 +24,13 @@ std::wstring Widen(const std::string& ascii) {
 }
 
 std::string Narrow(const std::wstring& w) {
-  return std::string(w.begin(), w.end());
+  std::string result;
+  result.reserve(w.size());
+  for (wchar_t c : w) {
+    if (c < 0 || c > 127) return {};  // Owned names are strictly ASCII.
+    result.push_back(static_cast<char>(c));
+  }
+  return result;
 }
 
 Io FromError(DWORD e) {
