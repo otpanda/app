@@ -237,71 +237,150 @@ fun main() {
         s2.onPicked { Tracked("after-background".toByteArray()) }
         check(b.events == listOf("text:after-background"), "selection after the app returns from the picker is delivered")
     }
-    // Controller: per-launch request codes, engine recreation, rotation, normal return.
+    // Controller and durable allocator: engine recreation, process death, rotation, normal return.
     run {
-        val counter = AtomicInteger()
+        class Disk : CodeStore {
+            var saved: IntArray? = IntArray(0); var failSave = false; var saves = 0
+            override fun load(): IntArray? = saved?.copyOf()
+            override fun save(codes: IntArray): Boolean { if (failSave) return false; saved = codes.copyOf(); saves++; return true }
+        }
+        val disk = Disk()
         val codes = ArrayList<Int>()
-        fun ctl(ok: Boolean = true) = ImportController({ codes.add(it); ok }, inline, post, counter)
+        // "process": one PickerRequests over the disk; controllers share it (engine recreation inside one process)
+        fun proc(size: Int = PickerRequests.SIZE) = PickerRequests(disk, size)
+        fun ctl(r: PickerRequests, ok: Boolean = true) = ImportController({ codes.add(it); ok }, inline, post, r)
+        val p1 = proc()
         // normal return
-        val a = ctl(); val la = Log(); a.begin(la)
+        val a = ctl(p1); val la = Log(); a.begin(la)
+        check(disk.saved!!.size == 1, "code saved durably before the launch")
         check(a.onResult(codes.last(), { Tracked("ok".toByteArray()) }) && la.events == listOf("text:ok"), "normal picker return delivers once")
+        check(p1.inFlightCount() == 0 && disk.saved!!.isEmpty(), "code freed once its result was seen")
         a.onResult(codes.last(), { Tracked("again".toByteArray()) })
         check(la.events == listOf("text:ok"), "a second result for the same launch is not delivered")
-        // foreign request codes are left to other listeners
         check(!a.onResult(1234, null) && !a.onResult(PickerRequests.BASE - 1, null) && !a.onResult(PickerRequests.BASE + PickerRequests.SIZE, null), "foreign codes not consumed")
+        check(PickerRequests.BASE >= 0 && PickerRequests.BASE + PickerRequests.SIZE <= 0x10000, "block fits the lower 16 bits")
         // rotation: same controller, result arrives later with the launch's code
-        val r = ctl(); val lr = Log(); r.begin(lr); val rc = codes.last()
+        val r = ctl(p1); val lr = Log(); r.begin(lr); val rc = codes.last()
         check(lr.events.isEmpty() && r.active(), "rotation keeps the request waiting")
         check(r.onResult(rc, { Tracked("rotated".toByteArray()) }) && lr.events == listOf("text:rotated"), "result after rotation delivered")
-        // permanent recreation: old engine retired, new engine begins its own picker, then the OLD picker's result arrives
-        val oldEngine = ctl(); val lo = Log(); oldEngine.begin(lo); val oldCode = codes.last()
+        // engine recreation inside one process: old controller retires, new one begins, OLD result arrives
+        val oldEngine = ctl(p1); val lo = Log(); oldEngine.begin(lo); val oldCode = codes.last()
         oldEngine.retire()
-        check(lo.events == listOf("cancelled"), "retired engine's request answered cancelled")
-        val newEngine = ctl(); val ln = Log(); newEngine.begin(ln); val newCode = codes.last()
-        check(oldCode != newCode, "new launch has a different request code than the old one")
+        check(lo.events == listOf("cancelled") && p1.inFlightCount() == 1, "retired engine's request answered cancelled, its code still reserved")
+        val newEngine = ctl(p1); val ln = Log(); newEngine.begin(ln); val newCode = codes.last()
+        check(oldCode != newCode, "new launch has a different code while the old picker may still answer")
         var opened = 0
         check(newEngine.onResult(oldCode, { opened++; Tracked("OLD".toByteArray()) }), "old result consumed")
-        check(opened == 0 && ln.events.isEmpty() && newEngine.active(), "old picker result after recreation never reaches the new request")
-        check(newEngine.onResult(newCode, { Tracked("NEW".toByteArray()) }) && ln.events == listOf("text:NEW"), "the new picker's own result is delivered")
-        // old result reaches a fresh engine that has not begun anything
-        val old2 = ctl(); old2.begin(Log()); val c2 = codes.last(); old2.retire()
-        val idle = ctl()
-        check(idle.onResult(c2, { opened++; Tracked("x".toByteArray()) }) && opened == 0, "old result to an idle engine dropped unread")
-        // cancel then new begin on same engine: busy, and the old result still cannot reach anyone
-        val c = ctl(); val lc = Log(); c.begin(lc); val cc = codes.last(); c.cancel()
+        check(opened == 0 && ln.events.isEmpty() && newEngine.active() && p1.inFlightCount() == 1, "old picker result after recreation never reaches the new request, and its code is freed")
+        check(newEngine.onResult(newCode, { Tracked("NEW".toByteArray()) }) && ln.events == listOf("text:NEW") && p1.inFlightCount() == 0, "the new picker's own result is delivered")
+        // PROCESS DEATH with the picker alive: new process, fresh in-memory state, same disk
+        val dead = ctl(p1); val ld = Log(); dead.begin(ld); val deadCode = codes.last()
+        val p2 = proc()                                  // new process: cursor restarts at 0
+        val reborn = ctl(p2); val lrb = Log(); reborn.begin(lrb); val newCode2 = codes.last()
+        check(newCode2 != deadCode, "after process death a new launch never reuses a code that may still answer")
+        check(reborn.onResult(deadCode, { opened++; Tracked("STALE".toByteArray()) }) && opened == 0 && lrb.events.isEmpty(), "old picker's result after process death is dropped unread and does not reach the new request")
+        check(reborn.onResult(newCode2, { Tracked("FRESH".toByteArray()) }) && lrb.events == listOf("text:FRESH"), "new request still gets its own result")
+        check(disk.saved!!.isEmpty(), "no codes left reserved")
+        // old result reaches a fresh process with no request: dropped, code freed
+        val q1 = proc(); val dead2 = ctl(q1); dead2.begin(Log()); val c2 = codes.last()
+        val idle = ctl(proc())
+        check(idle.onResult(c2, { opened++; Tracked("x".toByteArray()) }) && opened == 0 && disk.saved!!.isEmpty(), "old result to an idle new process dropped unread")
+        // cancel then begin: busy, old result dropped
+        val c = ctl(proc()); val lc = Log(); c.begin(lc); val cc = codes.last(); c.cancel()
         val lb = Log(); c.begin(lb)
         check(lb.events == listOf("error:busy") && codes.last() == cc, "begin after cancel with old picker open is busy, no new launch")
-        check(c.onResult(cc, { opened++; Tracked("c".toByteArray()) }) && opened == 0 && lc.events == listOf("cancelled"), "old result after cancel dropped")
-        // failed launch forgets the code
-        val f = ctl(false); val lf = Log(); f.begin(lf)
-        val failedCode = codes.last()
-        check(lf.events == listOf("error:unavailable"), "failed launch reports unavailable")
-        f.onResult(failedCode, { Tracked("z".toByteArray()) })
-        check(lf.events == listOf("error:unavailable"), "result for a failed launch is dropped")
-        check(PickerRequests.BASE >= 0 && PickerRequests.BASE + PickerRequests.SIZE <= 0x10000, "block fits the lower 16 bits")
-        // exhaustion fails closed and never reuses a code, even after retire and a new controller
-        val small = AtomicInteger(); val used = ArrayList<Int>()
-        fun sc() = ImportController({ used.add(it); true }, inline, post, small, 3)
-        val e1 = sc(); val l1 = Log(); e1.begin(l1); e1.onResult(used.last(), null)
-        val l2 = Log(); e1.begin(l2); e1.cancel(); e1.retire()
-        val e2 = sc(); val l3 = Log(); e2.begin(l3)
-        check(used == listOf(PickerRequests.BASE, PickerRequests.BASE + 1, PickerRequests.BASE + 2), "codes advance, none reused across controllers")
-        e2.onResult(used.last(), { Tracked("last".toByteArray()) })
-        val e3 = sc(); val l4 = Log(); e3.begin(l4)
-        check(l4.events == listOf("error:unavailable") && used.size == 3 && !e3.active(), "exhausted block fails closed with no launch")
-        val before = l4.events.size
-        check(!e3.onResult(PickerRequests.BASE + 3, { Tracked("q".toByteArray()) }) && l4.events.size == before, "code beyond the block is not owned")
-        for (c in used) { var o = 0; e3.onResult(c, { o++; Tracked("stale".toByteArray()) }); check(o == 0, "stale code $c cannot reach a later request") }
-        // counter never moves past the block, even under repeated exhausted begins
-        repeat(5) { sc().begin(Log()) }
-        check(small.get() == 3, "counter stops at the block size")
-        // concurrent issue: all distinct, none beyond the block
-        val big = AtomicInteger(); val seenCodes = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
-        val ts = (1..8).map { Thread { val r = PickerRequests(big, 200); repeat(40) { val c = r.issue(); if (c != PickerRequests.NONE) check(seenCodes.add(c), "duplicate code") } } }
+        check(c.onResult(cc, { opened++; Tracked("c".toByteArray()) }) && opened == 0 && lc.events == listOf("cancelled") && disk.saved!!.isEmpty(), "old result after cancel dropped and freed")
+        // failed launch frees its code
+        val f = ctl(proc(), false); val lf = Log(); f.begin(lf)
+        check(lf.events == listOf("error:unavailable") && disk.saved!!.isEmpty(), "failed launch reports unavailable and frees its code")
+        // save failure fails closed with no launch
+        val before = codes.size
+        disk.failSave = true
+        val sf = ctl(proc()); val lsf = Log(); sf.begin(lsf)
+        check(lsf.events == listOf("error:unavailable") && codes.size == before && disk.saved!!.isEmpty(), "unsaved code means no launch")
+        disk.failSave = false
+        // unreadable record fails closed and never treats it as empty
+        disk.saved = null
+        val un = ctl(proc()); val lu = Log(); un.begin(lu)
+        check(lu.events == listOf("error:unavailable") && codes.size == before, "corrupt record fails closed")
+        disk.saved = intArrayOf(PickerRequests.SIZE + 5)
+        val un2 = ctl(proc()); val lu2 = Log(); un2.begin(lu2)
+        check(lu2.events == listOf("error:unavailable") && codes.size == before, "out-of-range record fails closed")
+        disk.saved = IntArray(0)
+        // exhaustion: every code possibly in flight fails closed; abandoned codes persist across processes
+        val small = 3
+        val sp = proc(small); val s1 = ctl(sp); s1.begin(Log()); s1.retire()
+        val s2 = ctl(sp); s2.begin(Log()); s2.retire()
+        val s3 = ctl(proc(small)); s3.begin(Log()); s3.retire()
+        val used = codes.takeLast(3)
+        check(used.toSet().size == 3 && disk.saved!!.size == 3, "three launches reserve three distinct codes, durably")
+        val s4 = ctl(proc(small)); val l4 = Log(); val n4 = codes.size; s4.begin(l4)
+        check(l4.events == listOf("error:unavailable") && codes.size == n4, "exhausted block fails closed with no launch")
+        val s5 = ctl(proc(small)); check(s5.onResult(used[1], null) && disk.saved!!.size == 2, "a seen result frees only its own code")
+        val l5 = Log(); s5.begin(l5)
+        check(codes.last() == used[1], "a freed code can be reused only after its result was seen")
+        // multi-controller: a live controller never takes another live controller's result
+        run {
+            disk.saved = IntArray(0)
+            val sp2 = proc(); val owner = ctl(sp2); val other = ctl(sp2)
+            val lo2 = Log(); owner.begin(lo2); val oc = codes.last()
+            var o2 = 0
+            check(!other.onResult(oc, { o2++; Tracked("steal".toByteArray()) }) && o2 == 0 && sp2.inFlightCount() == 1, "another live controller does not consume or free a live launch")
+            check(owner.onResult(oc, { Tracked("mine".toByteArray()) }) && lo2.events == listOf("text:mine") && sp2.inFlightCount() == 0, "the owner still gets its result")
+            // once the owner retires its launch is an orphan and anyone may drop it
+            val lo3 = Log(); owner.begin(lo3); val oc3 = codes.last(); owner.retire()
+            check(other.onResult(oc3, { o2++; Tracked("orphan".toByteArray()) }) && o2 == 0 && sp2.inFlightCount() == 0, "an orphaned launch is dropped unread and freed by a live controller")
+        }
+        // failed durable release keeps the code reserved (memory and disk agree), so it cannot be reused
+        run {
+            disk.saved = IntArray(0)
+            val sp2 = proc(3); val c = ctl(sp2); val l = Log(); c.begin(l); val code1 = codes.last()
+            disk.failSave = true
+            check(c.onResult(code1, { Tracked("ok".toByteArray()) }) && l.events == listOf("text:ok"), "result is still delivered when the release cannot be saved")
+            check(sp2.inFlightCount() == 1 && disk.saved!!.size == 1, "reservation retained in memory and on disk")
+            disk.failSave = false
+            val seen = HashSet<Int>()
+            repeat(2) { val x = ctl(sp2); x.begin(Log()); seen.add(codes.last()); x.retire() }
+            check(code1 !in seen && sp2.inFlightCount() == 3, "a code whose release failed is not handed out again")
+            val y = ctl(sp2); val ly = Log(); y.begin(ly)
+            check(ly.events == listOf("error:unavailable"), "block with a stuck reservation exhausts closed")
+            check(sp2.release(code1) && sp2.inFlightCount() == 2 && disk.saved!!.size == 2, "a later successful release frees it")
+            disk.saved = IntArray(0)
+        }
+        // concurrent issue through one shared instance: distinct codes
+        val cd = Disk(); val shared = PickerRequests(cd, 200); val seenCodes = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+        val ts = (1..8).map { Thread { repeat(40) { val x = shared.issue(Any()); if (x != PickerRequests.NONE) check(seenCodes.add(x), "duplicate code") } } }
         ts.forEach { it.start() }; ts.forEach { it.join() }
-        check(seenCodes.size == 200 && big.get() == 200, "concurrent issuers get 200 distinct codes and stop")
-        val seen = codes.toSet().size
-        check(seen == codes.size, "every launch in the process used a distinct code")
+        check(seenCodes.size == 200 && cd.saved!!.size == 200, "concurrent issuers get 200 distinct durable codes and stop")
+    }
+    // FileCodeStore: durable record format, atomic replace, strict load
+    run {
+        val d = java.nio.file.Files.createTempDirectory("codes").toFile()
+        val s = FileCodeStore(d)
+        check(s.load()!!.isEmpty(), "missing record is empty")
+        check(s.save(intArrayOf(5, 17, 1023)) && s.load()!!.toList() == listOf(5, 17, 1023), "record round trips")
+        check(s.save(IntArray(0)) && s.load()!!.isEmpty(), "empty record round trips")
+        s.save(intArrayOf(9))
+        java.io.File(d, FileCodeStore.NAME + ".tmp").writeText("garbage from an interrupted write")
+        check(FileCodeStore(d).load()!!.toList() == listOf(9), "an interrupted temp file never replaces the record")
+        val rec = java.io.File(d, FileCodeStore.NAME)
+        for ((name, body) in listOf("no tag" to "5\n", "wrong tag" to "x\n5\n", "no trailing newline" to "otpanda-import-picker-codes-1\n5",
+                "non-number" to "otpanda-import-picker-codes-1\nabc\n", "negative" to "otpanda-import-picker-codes-1\n-1\n", "empty line" to "otpanda-import-picker-codes-1\n\n")) {
+            rec.writeText(body)
+            check(FileCodeStore(d).load() == null, "corrupt record ($name) is unreadable, not empty")
+        }
+        check(rec.readBytes().all { it >= 0 }, "record is plain ASCII")
+        s.save(intArrayOf(3)); check(rec.readText().none { it.code > 127 } && rec.readText().lines().size == 3, "record holds only the tag and codes")
+        // directory flush happens after the rename, and a failed flush fails the save
+        val d2 = java.nio.file.Files.createTempDirectory("codes2").toFile()
+        var sawRenamed = false; var syncs = 0
+        val ok = FileCodeStore(d2, { sawRenamed = java.io.File(d2, FileCodeStore.NAME).exists() && !java.io.File(d2, FileCodeStore.NAME + ".tmp").exists(); syncs++; true })
+        check(ok.save(intArrayOf(4)) && sawRenamed && syncs == 1, "directory is flushed after the rename")
+        val bad = FileCodeStore(d2, { false })
+        check(!bad.save(intArrayOf(4, 6)), "a failed directory flush reports the save as failed")
+        check(syncDirectoryNio(d2) && !syncDirectoryNio(java.io.File(d2, "missing")), "default directory flush works on a real directory and fails on a missing one")
+        d2.deleteRecursively()
+        d.deleteRecursively()
     }
     // a slow read finishing after cancel and after a new begin is dropped
     run {

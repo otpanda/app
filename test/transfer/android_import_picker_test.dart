@@ -105,4 +105,55 @@ void main() {
     handler = (_) async => throw PlatformException(code: 'unavailable');
     await AndroidImportPicker().cancel();
   });
+
+  test(
+    'a second pick while one is pending is busy and does not drop the first',
+    () async {
+      final done = Completer<Object?>();
+      handler = (_) => done.future;
+      final p = AndroidImportPicker();
+      final first = p.pick();
+      await expectLater(
+        p.pick(),
+        throwsA(
+          isA<ImportPickerException>().having(
+            (x) => x.error,
+            'error',
+            ImportPickerError.busy,
+          ),
+        ),
+      );
+      expect(calls, ['pickImportFile']);
+      done.complete('kept');
+      expect(await first, 'kept');
+      handler = (_) async => 'again';
+      expect(await p.pick(), 'again');
+    },
+  );
+
+  test('pick after cancel reaches native (which answers busy while the old picker is open)', () async {
+    final old = Completer<Object?>();
+    var n = 0;
+    handler = (c) {
+      if (c.method == 'cancelImportFile') return Future.value(null);
+      return ++n == 1
+          ? old.future
+          : Future<Object?>.error(PlatformException(code: 'busy'));
+    };
+    final p = AndroidImportPicker();
+    final f = p.pick();
+    await p.cancel();
+    await expectLater(
+      p.pick(),
+      throwsA(
+        isA<ImportPickerException>().having(
+          (x) => x.error,
+          'error',
+          ImportPickerError.busy,
+        ),
+      ),
+    );
+    old.complete('stale');
+    expect(await f, isNull);
+  });
 }

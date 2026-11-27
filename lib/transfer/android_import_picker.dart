@@ -21,9 +21,22 @@ final class AndroidImportPicker {
 
   final MethodChannel _channel;
   int _generation = 0;
+  bool _pending = false;
 
   Future<String?> pick() async {
+    // One native request at a time. A second call while one is pending must not supersede it: the pending call keeps its
+    // generation and still gets its result.
+    if (_pending) throw const ImportPickerException(ImportPickerError.busy);
+    _pending = true;
     final mine = ++_generation;
+    try {
+      return await _pick(mine);
+    } finally {
+      if (mine == _generation) _pending = false;
+    }
+  }
+
+  Future<String?> _pick(int mine) async {
     final Object? reply;
     try {
       reply = await _channel.invokeMethod<Object?>('pickImportFile');
@@ -44,6 +57,7 @@ final class AndroidImportPicker {
   /// Cancels any pending pick. The system picker UI cannot be closed; a result chosen later is ignored.
   Future<void> cancel() async {
     _generation++;
+    _pending = false;
     try {
       await _channel.invokeMethod<Object?>('cancelImportFile');
     } on PlatformException {

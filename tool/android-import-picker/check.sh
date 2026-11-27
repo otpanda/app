@@ -14,6 +14,8 @@ if [ -n "${ANDROID_JAR:-}" ] && [ -n "${FLUTTER_EMBEDDING_JAR:-}" ]; then
   printf '%s\n' 'PASS host compiles against android.jar and the Flutter embedding jar (API surface only)'
 fi
 # Production code must not log, persist a URI grant, or reference the test hook's stand-ins.
-if grep -nE 'Log\.|println|takePersistableUriPermission|SharedPreferences|FileOutputStream|openFileOutput' "$root/DocumentImport.kt" "$root/host/ImportPickerHost.kt"; then echo 'FAIL production source logs or persists' >&2; exit 1; fi
+if grep -nE 'Log\.|println|takePersistableUriPermission|SharedPreferences|openFileOutput' "$root/DocumentImport.kt" "$root/host/ImportPickerHost.kt"; then echo 'FAIL production source logs or persists' >&2; exit 1; fi
+# The only file write is the request-code record (FileCodeStore): one FileOutputStream, on the temp file, integers only.
+if [ "$(grep -c 'FileOutputStream' "$root/DocumentImport.kt" "$root/host/ImportPickerHost.kt" | awk -F: '{s+=$2} END {print s}')" != 1 ] || ! grep -q 'FileOutputStream(tmp)' "$root/DocumentImport.kt"; then echo 'FAIL unexpected file writes in production source' >&2; exit 1; fi
 if grep -lE 'Tracked|Blocking|Failing|Trickle' "$root/DocumentImport.kt" "$root/host/ImportPickerHost.kt"; then echo 'FAIL test stand-in referenced from production source' >&2; exit 1; fi
 python3 "$root/../android_import_picker_overlay_test.py"

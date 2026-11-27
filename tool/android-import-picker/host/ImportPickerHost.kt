@@ -13,7 +13,9 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
 import org.otpanda.documentimport.ImportReply
+import org.otpanda.documentimport.FileCodeStore
 import org.otpanda.documentimport.ImportController
+import org.otpanda.documentimport.PickerRequests
 import java.util.concurrent.Executors
 
 /**
@@ -31,20 +33,18 @@ class ImportPickerHost : FlutterPlugin, ActivityAware, PluginRegistry.ActivityRe
     private val worker = Executors.newSingleThreadExecutor()
     private var binding: ActivityPluginBinding? = null
     private var channel: MethodChannel? = null
-    private val session = ImportController(
-        startActivity = ::startPicker,
-        worker = worker,
-        post = { main.post(it) },
-    )
+    private var controller: ImportController? = null
 
     override fun onAttachedToEngine(b: FlutterPlugin.FlutterPluginBinding) {
+        controller = ImportController(::startPicker, worker, { main.post(it) }, requestsFor(b.applicationContext))
         channel = MethodChannel(b.binaryMessenger, CHANNEL).also { it.setMethodCallHandler(::onCall) }
     }
 
     override fun onDetachedFromEngine(b: FlutterPlugin.FlutterPluginBinding) {
-        session.retire()
+        controller?.retire()
         channel?.setMethodCallHandler(null)
         channel = null
+        controller = null
     }
 
     override fun onAttachedToActivity(b: ActivityPluginBinding) { binding = b; b.addActivityResultListener(this) }
@@ -53,17 +53,17 @@ class ImportPickerHost : FlutterPlugin, ActivityAware, PluginRegistry.ActivityRe
     override fun onReattachedToActivityForConfigChanges(b: ActivityPluginBinding) { binding = b; b.addActivityResultListener(this) }
     // The activity is gone for good: nothing can receive the result. Backgrounding (the picker itself is another activity, so
     // this app pauses and may stop) never reaches here and is deliberately not treated as cancellation.
-    override fun onDetachedFromActivity() { binding?.removeActivityResultListener(this); binding = null; session.retire() }
+    override fun onDetachedFromActivity() { binding?.removeActivityResultListener(this); binding = null; controller?.retire() }
 
     private fun onCall(call: MethodCall, result: MethodChannel.Result) {
         if (call.arguments != null) { result.error("unavailable", null, null); return }
         when (call.method) {
-            "pickImportFile" -> session.begin(object : ImportReply {
+            "pickImportFile" -> controller!!.begin(object : ImportReply {
                 override fun text(value: String) = result.success(value)
                 override fun cancelled() = result.success(null)
                 override fun error(code: String) = result.error(code, null, null)
             })
-            "cancelImportFile" -> { session.cancel(); result.success(null) }
+            "cancelImportFile" -> { controller!!.cancel(); result.success(null) }
             else -> result.notImplemented()
         }
     }
@@ -87,12 +87,28 @@ class ImportPickerHost : FlutterPlugin, ActivityAware, PluginRegistry.ActivityRe
         // Codes are per launch (see PickerRequests); a result from an older launch is consumed and dropped unread.
         val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
         val activity = binding?.activity
-        if (uri == null || activity == null) return session.onResult(requestCode, null)
+        if (uri == null || activity == null) return controller?.onResult(requestCode, null) ?: false
         val resolver = activity.applicationContext.contentResolver
-        return session.onResult(requestCode) { resolver.openInputStream(uri) }
+        return controller?.onResult(requestCode) { resolver.openInputStream(uri) } ?: false
     }
 
     companion object {
+        @Volatile private var processRequests: PickerRequests? = null
+
+        /** One allocator per process, backed by a file in the app's noBackup directory (request codes only). */
+        private fun requestsFor(context: android.content.Context): PickerRequests =
+            processRequests ?: synchronized(this) {
+                processRequests ?: PickerRequests(FileCodeStore(context.noBackupFilesDir, ::syncDirectory)).also { processRequests = it }
+            }
+
+
+        /** Flushes the directory entry after the record is renamed into place. */
+        private fun syncDirectory(dir: java.io.File): Boolean = try {
+            val fd = android.system.Os.open(dir.path, android.system.OsConstants.O_RDONLY, 0)
+            try { android.system.Os.fsync(fd) } finally { android.system.Os.close(fd) }
+            true
+        } catch (_: Exception) { false }
+
         const val CHANNEL = "app.otpanda/import-file"
         /** One line in MainActivity.configureFlutterEngine, after the other hosts. */
         fun register(engine: FlutterEngine) { engine.plugins.add(ImportPickerHost()) }
