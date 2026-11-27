@@ -13,6 +13,59 @@ import 'package:otpanda_client/read_workspace_controller.dart';
 import 'product_shell_test.dart' show FakeTransport, routes;
 
 void main() {
+  testWidgets(
+    'active filters explain hidden codes instead of an empty account',
+    (t) async {
+      final bridge = FakeTransport(
+        routes(
+          entries: [
+            {
+              'entry_id': 'e',
+              'service_name': 'Bank',
+              'account_name': 'person',
+              'capabilities': {'manage': true},
+              'createdAt': 100,
+            },
+          ],
+          codes: [
+            {
+              'entryId': 'e',
+              'code': '123456',
+              'receivedAt': 999999,
+              'expiresAt': 1100000,
+            },
+          ],
+        ),
+      );
+      final controller = ReadWorkspaceController(
+        bridge: bridge,
+        clock: () => 1000000,
+      );
+      addTearDown(controller.dispose);
+      await controller.refresh();
+      await t.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: controller,
+            onCopyAssigned: (_) async {},
+            onCopyPrivate: (_) async {},
+            clock: () => 1000000,
+            onSignedOut: () {},
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const ValueKey('filter-shared')));
+      await t.pumpAndSettle();
+      expect(find.text('No codes match your filters'), findsOneWidget);
+      expect(find.text('No codes yet'), findsNothing);
+      await t.tap(find.text('Clear all filters'));
+      await t.pumpAndSettle();
+      expect(find.text('No codes match your filters'), findsNothing);
+      expect(find.text('123 456'), findsOneWidget);
+    },
+  );
   for (final width in [390.0, 1280.0]) {
     testWidgets('integrated unified grid at $width', (t) async {
       t.view.physicalSize = Size(width, 900);
