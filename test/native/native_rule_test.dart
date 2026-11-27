@@ -142,6 +142,44 @@ Map<String, dynamic> target([String op = 'resume']) => {
   if (op == 'edit') 'phrase': 'bank',
 };
 void main() {
+  test(
+    'realistic UUID connector and account fit signed shared prompt',
+    () async {
+      final b = begin(), a = jsonDecode(begin()['action']) as List;
+      final d = jsonDecode(a[15] as String) as List;
+      d[4] = '7c5431d6-1099-4489-a11c-91c5314236cd';
+      d[2] = 'noreply@accounts.example.test';
+      a[15] = jsonEncode(d);
+      a[16] = 'Personal bank';
+      a[17] = 'abraham@example.test';
+      b['action'] = jsonEncode(a);
+      b['summary']['label'] = a[16];
+      b['summary']['accountName'] = a[17];
+      b['summary']['sender'] = d[2];
+      b['challenge']['actionDigest'] = hashText(b['action']);
+      final source = Source();
+      final driver = NativeRuleDriver(
+        source: source,
+        identity: () async =>
+            (ownerId: 'owner', deviceId: 'device', keyId: 'key'),
+        now: () => now,
+        post: (p, body) async => (
+          status: 200,
+          body: p.endsWith('/begin')
+              ? b
+              : {
+                  'status': 'applied',
+                  'rule': {'status': 'resumed'},
+                },
+        ),
+      );
+      await driver.prepare(jsonEncode(target()));
+      expect(await driver.confirm(), 'applied');
+      expect(source.prompt, contains(d[4]));
+      expect(source.prompt, contains(a[17]));
+      expect(source.prompt, contains(d[2]));
+    },
+  );
   test('v5/v6 review edit resume canonical parser and native labels', () {
     for (final op in ['review', 'edit', 'resume']) {
       for (final shared in [false, true]) {
