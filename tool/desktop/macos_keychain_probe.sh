@@ -129,7 +129,7 @@ handoff() {
   build "$st" b plain
   r=$(run "$st" read "$ns");      echo "  DATA staged read BEFORE trust (expect denied): $r"
   r=$(run "$v1" trust "$ns" "$st"); echo "  DATA v1 trust staged  : $r"
-  dump_acl "$ns"
+  # Never run diagnostics after the ACL mutation: the isolated v4 attempt hung here.
   r=$(run "$st" read "$ns");      echo "  DATA staged read AFTER trust : $r"
   mv -f "$st" "$v1"
   r=$(run "$v1" read "$ns");      echo "  DATA in-place replaced read  : $r"
