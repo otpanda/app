@@ -7,7 +7,7 @@
 // (Miniflare), synthetic account only. Then the actual NativeSessionBridge and
 // the actual BrowserAccountPage (the page native_root_io mounts) read Codes
 // and Entries, copy a code to the real clipboard, and rename an entry through
-// the Edit dialog. D1 is read back directly. Screenshots are PNGs of the
+// routed Details Edit. D1 is read back directly. Screenshots are PNGs of the
 // rendered page, printed as SHOTPART lines and extracted by
 // tool/extract-shots.py. Doubles: the Custom Tab (harness mints the code) and
 // the in-memory device-id store, as in native_roundtrip_test.dart.
@@ -135,7 +135,7 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-    'signed-in shared page: Codes, Entries, copy, rename on a real Worker/D1',
+    'signed-in unified page: tap-copy, hold Details and rename on a real Worker/D1',
     (t) async {
       expect((await _h('GET', '/__harness/health'))['ok'], isTrue);
       final seed = await _h('POST', '/__harness/seed');
@@ -199,19 +199,39 @@ void main() {
 
       // Copy: the real clipboard holds the code.
       await Clipboard.setData(const ClipboardData(text: ''));
-      await t.tap(find.byTooltip('Copy code').first);
+      await t.tap(find.text('Fictional service'));
       await t.pump(const Duration(milliseconds: 500));
       expect((await Clipboard.getData(Clipboard.kTextPlain))?.text, '123456');
       await _shot(t, 'copied');
 
-      // Entries tab and the Edit dialog.
-      await t.tap(find.text('Entries').last);
-      await _until(t, find.byKey(Key('edit-$entryId')));
-      await _shot(t, 'entries');
-      await t.tap(find.byKey(Key('edit-$entryId')));
+      // Mobile hold selection opens stable routed, read-only Details.
+      await t.longPress(find.text('Fictional service'));
+      await _until(t, find.text('1 selected'));
+      await t.tap(find.text('Details'));
+      await _until(t, find.byKey(const Key('account-details')));
+      expect(find.byKey(const Key('entry-name')), findsNothing);
+      await _shot(t, 'details-view');
+      await t.tap(find.byKey(const Key('entry-edit')));
       await _until(t, find.byKey(const Key('entry-name')));
+      expect(find.byKey(const Key('entry-edit-bar')), findsOneWidget);
+      // Integration tests keep the real IME by default. Register injection
+      // explicitly so Android cannot overwrite the injected value on attach.
+      t.testTextInput.register();
+      addTearDown(t.testTextInput.unregister);
       await t.enterText(find.byKey(const Key('entry-name')), 'Renamed in UI');
-      await _shot(t, 'edit-dialog');
+      await t.pump(const Duration(milliseconds: 300));
+      expect(
+        t
+            .widget<TextField>(find.byKey(const Key('entry-name')))
+            .controller!
+            .text,
+        'Renamed in UI',
+      );
+      expect(
+        t.widget<FilledButton>(find.byKey(const Key('entry-save'))).onPressed,
+        isNotNull,
+      );
+      await _shot(t, 'details-edit');
       await t.tap(find.byKey(const Key('entry-save')));
       await _until(t, find.text('Renamed in UI'));
       await _shot(t, 'renamed');

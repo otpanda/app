@@ -13,6 +13,7 @@ import 'package:otpanda_client/totp_batch_contract.dart';
 import 'package:otpanda_client/product_shell.dart';
 import 'package:otpanda_client/read_workspace_controller.dart';
 import 'package:otpanda_client/main.dart';
+import 'package:otpanda_client/branding.dart' show bareOttyImage;
 import 'package:material_ui/material_ui.dart';
 
 import 'product_shell_test.dart' show FakeTransport, TestCopyHint;
@@ -730,6 +731,99 @@ void main() {
   });
 
   testWidgets(
+    'one account keeps received arrival and generated TOTP separately with raw copy paths',
+    (t) async {
+      t.view.physicalSize = const Size(390, 900);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      var clip = '', receivedCopies = 0;
+      t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            clip = (call.arguments as Map)['text'] as String;
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      SessionResponse ok(Object o) => SessionResponse(200, jsonEncode(o));
+      final bridge = BatchBridge({
+        '/v1/manage/session': ok({'ownerId': 'owner', 'expiresAt': 9999999}),
+        '/v1/manage/entries': ok({
+          'entries': [
+            {
+              'entry_id': 'a',
+              'label': 'Combined',
+              'service_id': 'custom-totp',
+              'capabilities': {'manage': true},
+              'account_name': 'me',
+              'totp': true,
+            },
+          ],
+        }),
+        '/v1/manage/active-codes': ok({
+          'records': [
+            {
+              'entryId': 'a',
+              'code': '654321',
+              'receivedAt': 44000,
+              'expiresAt': 55000,
+            },
+          ],
+        }),
+        '/v1/manage/sources': ok({'sources': []}),
+        '/v1/manage/unassigned': ok({'records': []}),
+      });
+      final c = ReadWorkspaceController(bridge: bridge, clock: () => 45000);
+      addTearDown(c.dispose);
+      await c.refresh();
+      await t.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: ProductShell(
+            controller: c,
+            batchClock: () => 0,
+            onCopyAssigned: (_) async {
+              receivedCopies++;
+            },
+            onCopyPrivate: (_) async {},
+            clock: () => 45000,
+            onSignedOut: () {},
+            copyHintStore: TestCopyHint(),
+            batchPolicy: const BatchPolicy(
+              maxEntries: 1,
+              maxTotalCodes: 32,
+              minPeriodSeconds: 20,
+              maxPeriodSeconds: 86400,
+              maxWindowSeconds: 600,
+              minRemainingMs: 1000,
+            ),
+          ),
+        ),
+      );
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 50));
+      expect(find.text('New arrivals'), findsOneWidget);
+      expect(find.text('Authenticator accounts'), findsOneWidget);
+      expect(find.text('Combined'), findsNWidgets(2));
+      expect(find.text('654 321'), findsOneWidget);
+      expect(find.text('0000001'), findsOneWidget);
+      await t.tap(find.text('654 321'));
+      await t.pump();
+      expect(receivedCopies, 1);
+      await t.tap(find.text('0000001'));
+      await t.pump();
+      expect(clip, '0000001');
+      expect(receivedCopies, 1);
+    },
+  );
+  testWidgets(
     'main page automatically requests a batch and shows padded generated code with copy control',
     (tester) async {
       if (Platform.isLinux && !_fontsLoaded) {
@@ -824,7 +918,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       expect(bridge.batches, 1);
       expect(find.text('0000001'), findsOneWidget);
-      expect(find.byTooltip('Copy code'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsNothing);
       expect(find.text('No active code'), findsNothing);
       expect(find.byType(RefreshBar), findsOneWidget);
       final bar = tester.widget<RefreshBar>(find.byType(RefreshBar));
@@ -957,7 +1051,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(bridge.singles, 0);
-    expect(find.text('123456'), findsNothing);
+    expect(find.text('123 456'), findsNothing);
     expect(find.byType(AlertDialog), findsNothing);
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
@@ -1481,6 +1575,15 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(390, 844));
       await tester.pump();
       if (Platform.isLinux) {
+        // Decode the memory mascot in real async time before pixel assertions.
+        // Fake-clock pumps do not guarantee an image codec has completed.
+        await tester.runAsync(() async {
+          await precacheImage(
+            MemoryImage(bareOttyImage),
+            tester.element(find.byType(ProductShell)),
+          );
+        });
+        await tester.pump();
         await expectLater(
           find.byType(ProductShell),
           matchesGoldenFile('goldens/batch-next-early-mobile.png'),
@@ -1526,7 +1629,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       expect(find.text('Renewing code...'), findsNothing);
       expect(find.text('0000001'), findsOneWidget);
-      expect(find.byTooltip('Copy code'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     },

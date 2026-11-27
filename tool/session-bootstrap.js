@@ -50,9 +50,14 @@
   // Factories are loaded before this closure only in a separately enabled host.
   // No bearer or ceremony is persisted or passed to Flutter.
   const assignment=typeof globalThis.OTPandaAssignmentController==='function'&&typeof globalThis.OTPandaAssignmentTransport==='function'?new globalThis.OTPandaAssignmentController(globalThis.OTPandaAssignmentTransport({access:()=>serverNow()<expires?access:undefined,generation:()=>generation,fetchImpl:(...args)=>fetch(...args),credentials:{get:options=>globalThis.navigator.credentials.get(options)}})):null;
-  // Route identifiers contain no record ids, query, proof or free-form return URL.
-  const ROUTES=['codes','sources','unassigned','entries','settings','settings/account-security','settings/devices','settings/organization','settings/about','settings/account-security/passkeys','recovery','recovery/start','recovery/finish','demo'];
-  const ROUTE_KEY='otpanda.route.tab.v1',validRoute=r=>ROUTES.includes(r);
+  // Detail routes contain opaque record identifiers only, never a proof or return URL.
+  const ROUTES=['codes','settings','settings/account-security','settings/devices','settings/sources','settings/display','settings/about','settings/account-security/passkeys','recovery','recovery/start','recovery/finish','demo'];
+  const validDetailId=value=>{
+    if(!/^[A-Za-z0-9_-]{2,1366}$/.test(value))return false;
+    try{const bytes=Uint8Array.from(atob(value.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0));const id=new TextDecoder('utf-8',{fatal:true}).decode(bytes);return id.length>0&&id.length<=1024&&!/[\x00-\x1f\x7f]/.test(id)&&encode(bytes)===value;}catch{return false;}
+  };
+  const validDetailRoute=r=>{if(typeof r!=='string')return false;const p=r.split('/');return p.length===2&&p[0]==='accounts'&&validDetailId(p[1])||p.length===3&&p[0]==='unassigned-details'&&validDetailId(p[1])&&validDetailId(p[2]);};
+  const ROUTE_KEY='otpanda.route.tab.v1',validRoute=r=>ROUTES.includes(r)||validDetailRoute(r);
   let route;const routeListeners=new Set();
   const persistentRoute=r=>validRoute(r)&&!r.startsWith('recovery')&&r!=='demo';
   try{const r=sessionStorage.getItem(ROUTE_KEY);if(persistentRoute(r))route=r;}catch{}
@@ -67,8 +72,8 @@
   const showRoute=(r,replace=false)=>{if(!validRoute(r))throw Error('Known route required');route=r;const hash='#/'+r;if(location.hash!==hash)history[replace?'replaceState':'pushState'](null,'',location.pathname+location.search+hash);routeChanged();};
   const receiveRoute=()=>{if(!location.hash.startsWith('#/'))return;const r=location.hash.slice(2),next=validRoute(r)?r:'codes';if(route!==next||location.hash!=='#/'+next){const wasPublic=route?.startsWith('recovery')||route==='demo';showRoute(next,true);if(wasPublic&&persistentRoute(next)&&status==='idle'){let hint=false;try{hint=localStorage.getItem('otpanda-session-present')==='yes';}catch{}if(hint)Promise.resolve().then(()=>globalThis.OTPandaSession.start('restore'));}}};
   globalThis.addEventListener?.('popstate',receiveRoute);globalThis.addEventListener?.('hashchange',receiveRoute);
-  Object.defineProperty(globalThis,'OTPandaNavigation',{value:Object.freeze({current:()=>route??ROUTES[Math.min(view,4)],go:r=>{const wasPublic=route?.startsWith('recovery')||route==='demo';showRoute(r);if(wasPublic&&persistentRoute(r)&&status==='idle'){let hint=false;try{hint=localStorage.getItem('otpanda-session-present')==='yes';}catch{}if(hint)Promise.resolve().then(()=>globalThis.OTPandaSession.start('restore'));}},listen:f=>routeListeners.add(f),unlisten:f=>routeListeners.delete(f)}),writable:false,configurable:false});
-  if(routeHash)saveRoute();
+  Object.defineProperty(globalThis,'OTPandaNavigation',{value:Object.freeze({current:()=>route??(view===4?'settings':'codes'),go:r=>{const wasPublic=route?.startsWith('recovery')||route==='demo';showRoute(r);if(wasPublic&&persistentRoute(r)&&status==='idle'){let hint=false;try{hint=localStorage.getItem('otpanda-session-present')==='yes';}catch{}if(hint)Promise.resolve().then(()=>globalThis.OTPandaSession.start('restore'));}},listen:f=>routeListeners.add(f),unlisten:f=>routeListeners.delete(f)}),writable:false,configurable:false});
+  if(routeHash){saveRoute();if(location.hash!=='#/'+route)showRoute(route,true);}
   // Native app handoff. The fragment carries only a one-use challenge and state. It is parsed strictly,
   // removed before any promise, fetch or Flutter load, and kept only in this tab's sessionStorage (10
   // minutes) until a sign-in finishes here. Nothing is forwarded except those two values to the API-owned
@@ -184,7 +189,7 @@
       const values = new URLSearchParams(pending.slice(1));
       const state=values.get('state'),p=JSON.parse(saved),now=Date.now();
       if(!/^[A-Za-z0-9_-]{43}$/.test(state)||state!==p.state||!/^[A-Za-z0-9_-]{43}$/.test(p.verifier)||!Number.isSafeInteger(p.created)||now<p.created||now-p.created>((values.has('signup')||values.has('auth'))?900000:300000))throw Error();
-      if(p.route!==undefined&&!validRoute(p.route))throw Error();
+      if(p.route!==undefined&&!validRoute(p.route)){if(typeof p.route!=='string'||! /^[a-z]+(?:\/[a-z-]+)*$/.test(p.route))throw Error();p.route='codes';}
       if(p.linkNotice!==undefined&&!LINK_NOTICES.includes(p.linkNotice))throw Error();
       if(p.route!==undefined){route=p.route;saveRoute();}
       if([...values.keys()].sort().join(',')==='auth,state'){
@@ -361,7 +366,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
   // Optional recovery bridge, loaded before this file. It gets narrow capabilities
   // only; the access token stays in this closure and is never handed to Flutter.
   const recovery=typeof globalThis.OTPandaRecoveryFactory==='function'?Object.freeze(globalThis.OTPandaRecoveryFactory({api:API,access:()=>serverNow()<expires?access:undefined,generation:()=>generation,readBounded,encode,decode:v=>Uint8Array.from(atob(v.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0)),random,fetchImpl:(...args)=>fetch(...args),credentials:{get:o=>navigator.credentials.get(o),create:o=>navigator.credentials.create(o)},storage:sessionStorage})):undefined;
-  ready.then(()=>{if(typeof history.pushState==='function'&&(status==='restored'||(!pending&&status==='idle')))showRoute(route??ROUTES[Math.min(view,4)],true);},()=>{});
+  ready.then(()=>{if(typeof history.pushState==='function'&&(status==='restored'||(!pending&&status==='idle')))showRoute(route??(view===4?'settings':'codes'),true);},()=>{});
   // Optional realtime change hints. Inert unless realtime-client.js was loaded first. The hint carries no data:
   // listeners only re-read through the normal authorized reads. The ticket 401 path reuses the ordinary session read.
   const realtimeListeners=new Set(),connectionListeners=new Set();let lostShown=false;

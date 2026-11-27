@@ -50,6 +50,32 @@ void main() {
       expect(t.takeException(), isNull);
     },
   );
+  testWidgets('short list at top reveals from an actual downward pull', (
+    t,
+  ) async {
+    await t.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.android),
+        home: Scaffold(
+          body: RevealedFilterList(
+            mobile: true,
+            filters: const Text('Filter row'),
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: const [
+                SizedBox(height: 70, child: Text('Only account')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Filter row'), findsNothing);
+    await t.drag(find.byType(ListView), const Offset(0, 100));
+    await t.pumpAndSettle();
+    expect(find.text('Filter row'), findsOneWidget);
+    expect(t.takeException(), isNull);
+  });
   testWidgets('desktop row always visible', (t) async {
     await t.pumpWidget(
       const MaterialApp(

@@ -113,6 +113,39 @@ final class OrganizationStore {
         },
     ],
   };
+
+  /// Compare and atomically replace a locally edited document. Concurrent unseen
+  /// changes refuse the whole edit; validation happens before any mutation.
+  bool applyDraft(Map<String, dynamic> expected, Map<String, dynamic> draft) {
+    bool same(Object? a, Object? b) {
+      if (a is Map && b is Map) {
+        return a.length == b.length &&
+            a.keys.every((k) => b.containsKey(k) && same(a[k], b[k]));
+      }
+      if (a is List && b is List) {
+        return a.length == b.length &&
+            List.generate(a.length, (i) => i).every((i) => same(a[i], b[i]));
+      }
+      return a == b;
+    }
+
+    if (!same(document(), expected)) return false;
+    restore({
+      'revision': revision,
+      ...draft,
+      'ranking': [
+        for (final e in _scores.entries)
+          {
+            'entryId': e.key,
+            'score': e.value,
+            if (_lastUsedDays[e.key] != null)
+              'lastUsedAt': _lastUsedDays[e.key],
+          },
+      ],
+    }, _entries.keys.toList());
+    return true;
+  }
+
   void restore(Map<String, dynamic> snapshot, Iterable<String> accessible) {
     final next = OrganizationStore()..reconcileEntries(accessible);
     final r = snapshot['revision'],

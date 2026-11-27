@@ -356,10 +356,24 @@ void main() {
   ) async {
     final b = CacheBridge()..status = 'restored';
     await t.pumpWidget(
-      MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          navigation: 'settings',
+          loginEnabled: true,
+        ),
+      ),
     );
     await t.pumpAndSettle();
-    await t.tap(find.text('Sign out'));
+    await t.scrollUntilVisible(
+      find.text('Sign out'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await t.ensureVisible(find.byKey(const Key('browser-sign-out')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('browser-sign-out')));
     await t.pumpAndSettle();
     expect(b.logouts, 1);
     expect(find.text('live@example.test'), findsNothing);
