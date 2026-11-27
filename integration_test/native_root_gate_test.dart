@@ -420,8 +420,10 @@ void main() {
       await _unlock(t);
       await _until(
         t,
-        () => find.text(_offlineMarker).evaluate().isNotEmpty,
-        'paused offline cold reopening',
+        () =>
+            find.text(_offlineMarker).evaluate().isNotEmpty &&
+            _showsPublicRfcCode(t),
+        'paused offline cold reopening with current RFC code',
         secs: 90,
       );
       expect(find.text('Local code unavailable'), findsNothing);
@@ -438,8 +440,10 @@ void main() {
       await _mountRoot(t);
       await _until(
         t,
-        () => find.text(_offlineMarker).evaluate().isNotEmpty,
-        'lock-disabled cold offline root',
+        () =>
+            find.text(_offlineMarker).evaluate().isNotEmpty &&
+            _showsPublicRfcCode(t),
+        'lock-disabled cold offline root with current RFC code',
         secs: 90,
       );
       expect(_showsPublicRfcCode(t), isTrue);
