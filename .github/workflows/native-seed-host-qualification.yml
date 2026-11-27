@@ -2,7 +2,7 @@ name: Native seed host channel qualification (synthetic)
 on:
   workflow_dispatch:
   push:
-    branches: [feat/native-seed-host-composition, feat/native-seed-sync-client-adapter]
+    branches: [feat/native-seed-host-composition, feat/native-seed-sync-client-adapter, test/native-sealed-seed-channel]
 permissions:
   contents: read
 jobs:

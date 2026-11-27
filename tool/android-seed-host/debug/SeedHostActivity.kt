@@ -21,6 +21,10 @@ class SeedHostActivity : MainActivity() {
             when(call.method) {
                 "save" -> { java.io.File(noBackupFilesDir,"seedfx-public").writeText(call.arguments as String); result.success(null) }
                 "load" -> result.success(java.io.File(noBackupFilesDir,"seedfx-public").readText())
+                "seal" -> {
+                    try { result.success(SyntheticSeedSealer.seal(call.argument<String>("ephemeral")!!)) }
+                    catch (_: Throwable) { result.error("FIXTURE_SEAL",null,null) }
+                }
                 "config" -> result.success(intent.getStringExtra("phase") ?: "create")
                 "verify" -> {
                     try {
