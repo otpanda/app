@@ -32,8 +32,9 @@ class _DisplaySettingsState extends State<DisplaySettings> {
       await widget.preference.setShowTags(enabled);
       widget.onChanged?.call();
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => error = 'Could not save this setting. Try again.');
+      }
     } finally {
       if (mounted) setState(() => saving = false);
     }
