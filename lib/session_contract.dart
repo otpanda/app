@@ -198,6 +198,43 @@ class CodeStore {
     _unassigned.where((c) => !sessionExpired(now) && c.active(now)),
   );
   CodeStore(this.transport);
+
+  /// Local UI hydration is not a session or permission grant. The caller must
+  /// have unlocked and fenced the encrypted owner/install workspace first.
+  /// Cached metadata never enables management before a fresh server read.
+  void hydrateLocalView({
+    required String owner,
+    required Iterable<ManagedEntry> entries,
+    required Iterable<ReceivedCode> codes,
+    required Iterable<PrivateSource> sources,
+    required Iterable<UnassignedCode> unassigned,
+  }) {
+    clear();
+    _ownerId = owner;
+    _entries = List.unmodifiable(
+      entries.map(
+        (e) => ManagedEntry(
+          e.id,
+          e.service,
+          e.account,
+          false,
+          e.totp,
+          e.catalogId,
+          e.issuer,
+          e.expectedDigits,
+          e.createdAt,
+        ),
+      ),
+    );
+    final known = _entries.map((e) => e.id).toSet();
+    _codes = List.unmodifiable(codes.where((c) => known.contains(c.entryId)));
+    _sources = List.unmodifiable(sources);
+    final knownSources = _sources.map((e) => e.id).toSet();
+    _unassigned = List.unmodifiable(
+      unassigned.where((c) => knownSources.contains(c.sourceId)),
+    );
+  }
+
   List<ManagedEntry> get entries => List.unmodifiable(_entries);
   List<ReceivedCode> visibleCodes(int now) => List.unmodifiable(
     _codes.where((code) => !sessionExpired(now) && code.active(now)),

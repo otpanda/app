@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'unassigned_context.dart';
+import 'offline_totp/native_workspace_snapshot.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -42,6 +43,40 @@ class ReadWorkspaceController extends ChangeNotifier {
   bool _hintPending = false;
   ReadWorkspaceController({required this.bridge, int Function()? clock})
     : clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
+
+  bool locallyHydrated = false;
+
+  /// Hydrates only after an explicit successful owner/install/epoch unlock.
+  /// Never changes bridge/session state or replays pending mutations.
+  void hydrateUnlocked(
+    NativeWorkspaceSnapshot snapshot, {
+    required String owner,
+    required String install,
+    required int epoch,
+  }) {
+    if (_disposed ||
+        !signedIn ||
+        snapshot.ownerId != owner ||
+        snapshot.installId != install ||
+        snapshot.epoch != epoch ||
+        (store.ownerId != null && store.ownerId != owner)) {
+      throw StateError('Workspace unlock scope mismatch');
+    }
+    ++_epoch;
+    loading = false;
+    contexts = const [];
+    store.hydrateLocalView(
+      owner: owner,
+      entries: snapshot.entries,
+      codes: snapshot.activeCodes(clock()),
+      sources: snapshot.sources,
+      unassigned: snapshot.activeUnassigned(clock()),
+    );
+    locallyHydrated = true;
+    hasLoaded = true;
+    publishedRevision++;
+    _notify();
+  }
 
   bool get signedIn =>
       !sessionEnded &&
@@ -236,6 +271,7 @@ class ReadWorkspaceController extends ChangeNotifier {
         }
         contexts = List.unmodifiable(reviews);
         store = staged;
+        locallyHydrated = false;
         publishedRevision++;
         hasLoaded = true;
         _cancelReadRetry();
@@ -298,6 +334,7 @@ class ReadWorkspaceController extends ChangeNotifier {
     ++_epoch;
     loading = false;
     hasLoaded = false;
+    locallyHydrated = false;
     _transportLost = false;
     _confirmed.clear();
     _cancelReadRetry();
