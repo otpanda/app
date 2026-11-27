@@ -102,6 +102,7 @@ Future<void> workspaceCheck(bool create) async {
     MaterialApp(
       home: NativeOfflineWorkspacePage(
         runtime: localRuntime,
+        clock: () => 59000,
         onReconnect: () {},
       ),
     ),
