@@ -136,6 +136,46 @@ void main() {
         now: () => now,
       );
 
+  test(
+    'transfer post has exact gate and never retries finish after401',
+    () async {
+      final c = await signedIn();
+      var requests = 0;
+      final b = NativeSessionBridge(c, (
+        m,
+        p, {
+        body,
+        query,
+        required bearer,
+      }) async {
+        requests++;
+        return const SessionResponse(401, '{}');
+      });
+      expect(
+        (await b.transferPost('/v1/manage/totp/batch-finish', {
+          'batchNonce': 'A' * 32,
+          'items': [],
+          'token': 'x',
+          'response': {},
+        })).status,
+        401,
+      );
+      expect(requests, 1);
+      expect(
+        () => b.transferPost('/v1/manage/totp/batch-finish?x=1', {}),
+        throwsStateError,
+      );
+      expect(
+        () => b.transferPost('/v1/manage/totp/export-begin', {
+          'ephemeralKey': 'x',
+          'url': 'https://example.invalid',
+        }),
+        throwsStateError,
+      );
+      expect(requests, 1);
+    },
+  );
+
   test('batch uses exact repeated entry query, GET, no body and renewed native bearer', () async {
     final c = await signedIn();
     String? method, path, token, requestBody;

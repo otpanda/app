@@ -10,13 +10,18 @@ final class ImportPreviewItem {
     this.digits,
     this.period,
     this.secretBits,
-    this.duplicateOfExisting,
-  );
+    this.duplicateOfExisting, {
+    this.assumed = const {},
+  });
   final String? issuer;
   final String accountName;
   final OtpAlgorithm algorithm;
   final int digits, period, secretBits;
   final bool duplicateOfExisting;
+
+  /// Parameters defaulted because the source lacked them (for example the
+  /// period in a Google export). The user can edit them before or after import.
+  final Set<OtpAssumption> assumed;
 }
 
 /// [existingKeys] are (issuer, account) pairs already held; duplicates are
@@ -37,6 +42,7 @@ List<ImportPreviewItem> previewImport(
         a.period,
         a.secretBytes().length * 8,
         !seen.add((a.issuer, a.accountName)),
+        assumed: a.assumed,
       ),
   ];
 }

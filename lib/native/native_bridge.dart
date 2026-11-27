@@ -1,3 +1,4 @@
+import '../transfer/transfer_routes.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -714,6 +715,40 @@ class NativeSessionBridge
       parsed = null;
     }
     return (status: r.status, body: parsed);
+  }
+
+  /// Transfer finish is never auto-replayed after a 401 or lost reply. The
+  /// saver owns the nonce/outcome recovery; export requires a new ceremony.
+  Future<({int status, Map<String, dynamic>? body})> transferPost(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    if (!transferRequestAllowed(path, body)) {
+      throw StateError('Transfer request required');
+    }
+    final token = await controller.accessToken();
+    if (token == null) return (status: 401, body: null);
+    final session = controller.session;
+    final response = await _request(
+      'POST',
+      path,
+      body: jsonEncode(body),
+      bearer: token,
+    );
+    if (controller.session != session ||
+        controller.phase != NativeSessionPhase.signedIn) {
+      return (status: 503, body: null);
+    }
+    Map<String, dynamic>? parsed;
+    try {
+      final v = utf8.encode(response.body).length <= 1048576
+          ? jsonDecode(response.body)
+          : null;
+      if (v is Map<String, dynamic>) parsed = v;
+    } on FormatException {
+      parsed = null;
+    }
+    return (status: response.status, body: parsed);
   }
 
   @override

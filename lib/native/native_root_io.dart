@@ -1,3 +1,8 @@
+import '../transfer/batch_import_saver.dart';
+import '../transfer/passkey_export_transport.dart';
+import '../transfer/sealed_export_source.dart';
+import '../transfer/transfer_flow.dart';
+
 import 'dart:convert';
 import 'dart:async';
 
@@ -52,6 +57,8 @@ import 'native_session.dart';
 /// separately gated until its independent qualification is complete.
 // Staging switch until the matching server seed-sync routes are deployed and
 // authenticated enrollment is qualified. Local cold storage has its own host.
+const nativeTransferEnabled = bool.fromEnvironment('NATIVE_TRANSFER_ENABLED');
+
 const nativeSeedSyncEnabled = bool.fromEnvironment('NATIVE_SEED_SYNC_ENABLED');
 
 const String apiOrigin = String.fromEnvironment(
@@ -128,6 +135,46 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     if (offlineEnrollment.confirmed) unawaited(_pullOfflineCodes());
   }
 
+  int _transferFence = 0;
+  BatchImportSaver? _transferSaver;
+  SealedSeedExportSource? _transferSource;
+  Object? _transferSession;
+  void _retireTransfer() {
+    _transferFence++;
+    _transferSource?.cancel();
+    _transferSource = null;
+    _transferSaver = null;
+    _transferSession = null;
+  }
+
+  void _prepareTransfer(String owner) {
+    if (!nativeTransferEnabled || _transferSession == controller.session) {
+      return;
+    }
+    _retireTransfer();
+    final session = controller.session, fence = _transferFence;
+    if (session == null) return;
+    _transferSession = session;
+    Future<bool> current() async =>
+        fence == _transferFence &&
+        controller.session == session &&
+        await _currentOfflineOwner(owner);
+    _transferSaver = BatchImportSaver(
+      post: bridge.transferPost,
+      passkeys: passkeys,
+      current: current,
+    );
+    _transferSource = SealedSeedExportSource(
+      PasskeyExportTransport(
+        post: bridge.transferPost,
+        passkeys: passkeys,
+        ownerId: owner,
+        deviceId: session.deviceId,
+        current: current,
+      ),
+    );
+  }
+
   String? _onlineOwner;
   Future<bool> _currentOfflineOwner(String owner) async =>
       mounted &&
@@ -168,6 +215,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
           return;
         }
         _onlineOwner = owner;
+        _prepareTransfer(owner);
         offlineEnrollment.bindOwner(owner);
         await offlineEnrollment.refresh();
         await workspace.admitAuthenticated(owner);
@@ -181,6 +229,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
 
   Future<void> _signOut() async {
     try {
+      _retireTransfer();
       _onlineOwner = null;
       offlineEnrollment.bindOwner(null);
       await workspace.invalidate();
@@ -196,6 +245,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   late final lockNavigation = LockNavigationObserver(localLock);
   void _lockChanged() {
     navigationHistory.blocked = !localLock.ready || localLock.locked;
+    if (_workspaceInitialized && localLock.locked) _retireTransfer();
     if (_workspaceInitialized) {
       workspace.localLockChanged();
       if (localLock.ready && !localLock.locked) unawaited(_admitWorkspace());
@@ -359,6 +409,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     // Only a real sign-out or sign-in-required clears state and the retry
     // floor. unknown (starting) and offline are transient: nothing changes.
     if (controller.phase != NativeSessionPhase.signedIn) {
+      _retireTransfer();
       _onlineOwner = null;
       offlineEnrollment.bindOwner(null);
     }
@@ -387,6 +438,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       workspace.localLockChanged();
       unawaited(_admitWorkspace());
     } else if (state != AppLifecycleState.inactive) {
+      _retireTransfer();
       bridge.realtimeSetForeground(false);
       workspace.lock();
     }
@@ -394,6 +446,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _retireTransfer();
     WidgetsBinding.instance.removeObserver(this);
     controller.removeListener(_maybeRecover);
     startup.dispose();
@@ -433,6 +486,22 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
             builder: (context, route, navigate) {
               final page = BrowserAccountPage(
                 bridge: bridge,
+                importSaver: _transferSaver,
+                transferPage: _transferSaver != null && _transferSource != null
+                    ? TransferFlow(
+                        key: ValueKey('transfer-$_transferFence'),
+                        saver: _transferSaver!,
+                        exportSource: _transferSource!,
+                        onSaved: () async {
+                          await _admitWorkspace();
+                        },
+                      )
+                    : const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text(
+                          'Transfer codes is not available until this client and its server support are activated.',
+                        ),
+                      ),
                 onWorkspaceReady: workspace.bind,
                 onWorkspaceClosed: workspace.unbind,
                 localSecuritySetting: Column(

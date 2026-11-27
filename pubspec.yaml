@@ -37,6 +37,7 @@ dependencies:
   url_launcher: ^6.3.3
   http: ^1.6.0
   crypto: ^3.0.6
+  pointycastle: ^4.0.0
   flutter_svg: ^2.5.1
   path_provider: ^2.1.6
   sqlite3: 3.9.2
