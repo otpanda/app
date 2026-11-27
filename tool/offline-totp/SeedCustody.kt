@@ -15,6 +15,9 @@ interface KeyVault {
     /** The handle, or null when the alias is absent. Throws VaultException(INVALIDATED/LOCKED/UNAVAILABLE) for platform refusals. */
     fun key(alias: String): SecretKey?
     fun delete(alias: String)
+    /** Imports a throwaway random key under a temporary alias, reports what the platform says about it, and deletes it. Never a real seed.
+     * Default: unsupported, so older fakes keep compiling. */
+    fun probe(): ProtectionReport = throw VaultException(VaultException.Kind.UNAVAILABLE, "probe_unsupported")
 }
 
 class VaultException(val kind: Kind, message: String, cause: Throwable? = null) : Exception(message, cause) {

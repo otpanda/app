@@ -51,6 +51,13 @@ class AndroidSeedVault : KeyVault {
         }
     }
 
+    override fun probe(): ProtectionReport {
+        val alias = "otpanda.totp.probe." + java.util.UUID.randomUUID()
+        val throwaway = ByteArray(20).also { java.security.SecureRandom().nextBytes(it) }
+        try { return importSeed(alias, throwaway, TotpCalculator.Algorithm.SHA1) }
+        finally { throwaway.fill(0); runCatching { store().deleteEntry(alias) } }
+    }
+
     override fun key(alias: String): SecretKey? = try {
         store().getKey(alias, null) as SecretKey?
     } catch (e: KeyPermanentlyInvalidatedException) { throw VaultException(VaultException.Kind.INVALIDATED, "invalidated", e)
