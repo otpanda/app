@@ -1,0 +1,56 @@
+name: Recheck immutable released Android APKs
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        required: true
+        default: v0.1.0-alpha.13
+permissions:
+  contents: read
+jobs:
+  installed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Download immutable release and fixtures
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          test "$RELEASE_TAG" = v0.1.0-alpha.13
+          mkdir -p candidate repair-out original-alpha6 previous-alpha12
+          base=https://github.com/otpanda/app/releases/download
+          curl -fLsS "$base/qualification-fixtures-2026-11-26/original-alpha6-google.apk" -o original-alpha6/otpanda-android-google-native-candidate.apk
+          curl -fLsS "$base/qualification-fixtures-2026-11-26/original-alpha6-fdroid.apk" -o original-alpha6/otpanda-android-fdroid-native-candidate.apk
+          curl -fLsS "$base/qualification-fixtures-2026-11-26/broken-alpha7-google.apk" -o broken-alpha7.apk
+          for flavor in google fdroid;do
+            curl -fLsS "$base/v0.1.0-alpha.12/otpanda-android-$flavor-v0.1.0-alpha.12.apk" -o "previous-alpha12/$flavor.apk"
+            curl -fLsS "$base/$RELEASE_TAG/otpanda-android-$flavor-$RELEASE_TAG.apk" -o "candidate/otpanda-android-$flavor-$RELEASE_TAG.apk"
+          done
+          printf '%s\n' 'f436cc8fe764ff48ec649c93432410f80974b07afe87f3146fbd823e01e22ddf  candidate/otpanda-android-google-v0.1.0-alpha.13.apk' '0f8c3c83e9cfce923083898c85874ee2f2223cb6213f113cd9bad2a30b1246e3  candidate/otpanda-android-fdroid-v0.1.0-alpha.13.apk' | sha256sum -c -
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: GITHUB_REF_NAME=v0.1.0-alpha.13 bash tool/release-apk-acceptance.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: immutable-alpha13-installed-frame-proof
+          path: repair-out
