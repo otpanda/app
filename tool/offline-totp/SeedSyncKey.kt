@@ -103,6 +103,9 @@ internal class SyncState(val owner: String) {
     var active: SyncKeyRef? = null
     var activeGeneration = 0L
     var activeInstall = ""
+    var publicPoint: String? = null
+    var enrollmentPhase = "prepared"
+    var signedAction: String? = null
     var owed = Owed.NONE
     var owedEpoch: Long? = null
     val deny = ArrayList<SyncKeyRef>()
@@ -112,6 +115,7 @@ internal class SyncState(val owner: String) {
         append(active?.let { "active ${it.keyId} ${it.alias} $activeGeneration $activeInstall" } ?: "active none").append('\n')
         append("owed ").append(owed.name.lowercase()).append('\n')
         append("epoch ").append(owedEpoch?.toString() ?: "none").append('\n')
+        if (active != null && publicPoint != null) append("enrollment $enrollmentPhase $publicPoint ${signedAction ?: "none"}\n")
         for (d in deny.sortedWith(compareBy({ it.alias }, { it.keyId }))) append("deny ${d.keyId} ${d.alias}\n")
         append("end\n")
     }
@@ -134,7 +138,17 @@ internal class SyncState(val owner: String) {
             require(lines[4].startsWith("epoch "))
             s.owedEpoch = lines[4].removePrefix("epoch ").let { if (it == "none") null else it.toLong().also { n -> require(n >= 0 && n < Long.MAX_VALUE) } }
             require(s.owed != Owed.NONE || s.owedEpoch == null)
-            for (i in 5 until lines.size - 2) {
+            var start = 5
+            if (lines[5].startsWith("enrollment ")) {
+                val p = lines[5].split(' ')
+                require(s.active != null && p.size == 4 && p[1] in setOf("prepared", "signed", "confirmed"))
+                val raw = SeedSyncWire.unb64(p[2], 65); SeedSyncWire.checkPoint(raw)
+                require(p[3] == "none" || p[3].matches(Regex("[0-9a-f]{64}")))
+                require((p[1] == "prepared") == (p[3] == "none"))
+                s.publicPoint = p[2]; s.enrollmentPhase = p[1]; s.signedAction = p[3].takeUnless { it == "none" }; start++
+                if (s.signedAction != null) require(s.signedAction == SeedSyncWire.enrollActionDigest(owner, s.activeInstall, s.active!!.keyId, raw, s.activeGeneration))
+            }
+            for (i in start until lines.size - 2) {
                 val p = lines[i].split(' '); require(p.size == 3 && p[0] == "deny" && p[1].matches(SYNC_KEY_ID) && p[2].matches(SYNC_ALIAS))
                 s.deny.add(SyncKeyRef(p[1], p[2]))
             }
@@ -193,9 +207,49 @@ class SeedSyncKeyCore(
         val old = state.active
         if (old != null) state.deny.add(old)
         state.active = ref; state.activeGeneration = generation; state.activeInstall = installId
+        state.publicPoint = SeedSyncWire.b64(pub); state.enrollmentPhase = "prepared"; state.signedAction = null
         try { save(state) } catch (e: SyncKeyFailure) { try { vault.delete(ref.alias) } catch (_: Exception) {}; throw e }
         if (old != null) confirmDeleted(state, old)
         Enrollment(ref.keyId, pub, generation, installId)
+    }
+
+    /** Feature enrollment is create-only. Existing/pending keys are never replacement candidates. */
+    fun prepareEnrollment(owner: String, installId: String, generation: Long): Enrollment = synchronized(lock) {
+        checkOwner(owner)
+        if (load(owner).active != null) fail(SyncKeyError.ERASE_INCOMPLETE)
+        enroll(owner, installId, generation)
+    }
+
+    data class EnrollmentJournal(val keyId: String, val publicKey: ByteArray, val installId: String, val generation: Long, val phase: String, val actionDigest: String?)
+    fun enrollmentJournal(owner: String): EnrollmentJournal? = synchronized(lock) {
+        checkOwner(owner)
+        if (owner in intents) fail(SyncKeyError.ERASE_INCOMPLETE)
+        val s = load(owner)
+        if (s.owed != Owed.NONE) fail(SyncKeyError.ERASE_INCOMPLETE)
+        val a = s.active ?: return null
+        val point = s.publicPoint ?: fail(SyncKeyError.METADATA_UNAVAILABLE) // old state is never adopted
+        EnrollmentJournal(a.keyId, SeedSyncWire.unb64(point, 65), s.activeInstall, s.activeGeneration, s.enrollmentPhase, s.signedAction)
+    }
+
+    /** The signature cannot leave native until its full tuple is durably journaled.
+     * The outer lock also fences erase between signature creation and the journal write. */
+    internal fun signEnrollment(owner: String, keyId: String, actionDigest: String, build: (SignContext) -> ByteArray): ByteArray = synchronized(lock) {
+        val j = enrollmentJournal(owner) ?: fail(SyncKeyError.NOT_ENROLLED)
+        if (j.keyId != keyId) throw WireException("key")
+        if (j.phase == "confirmed") fail(SyncKeyError.INVALID_INPUT)
+        val signature = signBuilt(owner, build)
+        val s = load(owner)
+        s.enrollmentPhase = "signed"; s.signedAction = actionDigest
+        save(s) // on failure no signature returned, pending tuple remains
+        signature
+    }
+
+    /** Called only after exact successful finish or key-signed status active. No KEEP result is authority here. */
+    fun confirmEnrollment(owner: String, keyId: String, actionDigest: String): Boolean = synchronized(lock) {
+        val j = enrollmentJournal(owner) ?: return false
+        if (j.keyId != keyId || j.actionDigest != actionDigest || j.phase !in setOf("signed", "confirmed")) return false
+        val s = load(owner)
+        s.enrollmentPhase = "confirmed"; save(s); true
     }
 
     /** TEST ONLY: signs raw bytes. No production code may call it (release guard); production signing is [signBuilt] through SeedSyncWire, where native builds

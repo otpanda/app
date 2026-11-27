@@ -84,6 +84,7 @@ final class NativeCustodySync {
               complete: snapshot.complete,
               versions: snapshot.versions,
               tombstones: snapshot.tombstones,
+              preserve: snapshot.preserve,
             ),
           );
         } catch (_) {

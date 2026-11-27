@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.otpanda.wrappingkey.fixture">
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="34" />
+    <application android:label="otpanda-wk-fixture" android:debuggable="true" android:allowBackup="false">
+        <service android:name="org.otpanda.wrappingkey.fixture.RaceService1" android:process=":race1" android:exported="false" />
+        <service android:name="org.otpanda.wrappingkey.fixture.RaceService2" android:process=":race2" android:exported="false" />
+        <service android:name="org.otpanda.wrappingkey.fixture.RaceService3" android:process=":race3" android:exported="false" />
+        <service android:name="org.otpanda.wrappingkey.fixture.CrashService" android:process=":crash" android:exported="false" />
+    </application>
+    <instrumentation android:name="org.otpanda.wrappingkey.fixture.FixtureRunner" android:targetPackage="org.otpanda.wrappingkey.fixture" android:label="otpanda-wk-fixture" />
+</manifest>

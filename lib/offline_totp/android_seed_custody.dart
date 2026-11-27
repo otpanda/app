@@ -310,6 +310,7 @@ final class AndroidSeedCustody implements NativeSeedCustody {
           'complete': snapshot.complete,
           'versions': snapshot.versions,
           'tombstones': snapshot.tombstones,
+          'preserve': snapshot.preserve.toList()..sort(),
         },
       }),
       {'removed', 'superseded', 'needsProvision', 'pendingPurge'},

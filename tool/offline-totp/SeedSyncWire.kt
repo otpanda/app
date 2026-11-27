@@ -21,8 +21,7 @@ import javax.crypto.spec.SecretKeySpec
 // Native side of the seed-sync wire contract (API vector 7e2e6f9c, proof 99f136d3, seal 9032af4f). INACTIVE: pure JVM/JCA, no Android API, no network, nothing wired.
 // Native BUILDS the signed bytes itself from its own state; callers pass only the server-checked values. Every field is validated with the server's own regexes
 // before anything is signed or opened. Errors carry a reason code only, never a value, key or seed.
-// Not covered here: the enrollment actionDigest bytes (accepted only as validated 64-hex input until the exact contract is supplied), and the ephemeral-handle
-// lifecycle (begin/bind/consume/expire) that must gate [signBatchProof]; those belong to the unbuilt channel layer.
+// Enrollment action bytes are recomputed from the native key and pinned context. SeedSyncBatchHandle gates one-use ephemeral lifecycle.
 
 class WireException(val reason: String) : Exception(reason)
 private fun bad(reason: String): Nothing = throw WireException(reason)
@@ -48,6 +47,10 @@ object SeedSyncWire {
     const val PROOF_LABEL = "otpanda-seed-sync-v1"
     const val SEAL_LABEL = "otpanda-seed-sync-seal-v1"
     const val PROOF_TTL_MS = 120_000L
+    // Same one-sided tolerance as native passkeys. Server expiry is never extended.
+    // Ahead clocks still fail closed. Batch local lifetime is separately receipt-capped.
+    const val CLOCK_SKEW_MS = 300_000L
+    const val PROOF_MAX_AHEAD_MS = PROOF_TTL_MS + CLOCK_SKEW_MS
     const val MAX_SAFE = 9_007_199_254_740_991L
     private val ID = Regex("[A-Za-z0-9_-]{1,128}")
     private val INSTALL = Regex("[A-Za-z0-9_-]{22,64}")
@@ -127,13 +130,13 @@ object SeedSyncWire {
     /** Native-built proof signed with the dedicated seed-sync key of [owner]. [fields] holds ONLY values that come from outside: deviceId, challenge, expiresAt, and
      * (for snapshot, batch, revoke) the generation the server expects, plus the epoch the caller believes for snapshot and batch. ownerId, keyId and, for enroll,
      * installId are NATIVE (the durable enrollment record). Generation must EQUAL the enrollment's recorded generation, and epoch must EQUAL the owner's real native
-     * epoch read from custody: a different value is refused before any signature. expiresAt must be in (now, now + 120 s]. Returns 86-char base64url P1363. */
+     * epoch read from custody: a different value is refused before any signature. expiresAt must be in (now, now + 420 s], allowing a device clock up to five minutes behind. Returns 86-char base64url P1363. */
     fun signProof(core: SeedSyncKeyCore, owner: String, purpose: SyncPurpose, fields: Map<String, Any>, nowMs: Long, expectKeyId: String? = null): String {
         val native = setOf("ownerId", "keyId", "installId")
         if (purpose == SyncPurpose.ENROLL) bad("purpose") // enroll goes through signEnrollProof only: its digest is recomputed there
         if (fields.keys != purpose.fields.toSet() - native) bad("fields")
         val exp = fields["expiresAt"]
-        if (exp !is Long || nowMs < 0 || exp <= nowMs || exp > nowMs + PROOF_TTL_MS || exp > MAX_SAFE) bad("expiresAt")
+        if (exp !is Long || nowMs < 0 || exp <= nowMs || exp > nowMs + PROOF_MAX_AHEAD_MS || exp > MAX_SAFE) bad("expiresAt")
         val der = core.signBuilt(owner) { ctx ->
             if (expectKeyId != null && ctx.keyId != expectKeyId) bad("key")
             if ("generation" in purpose.fields && fields["generation"] != ctx.generation) bad("generation")
@@ -187,13 +190,13 @@ object SeedSyncWire {
         signProof(core, owner, SyncPurpose.BATCH, mapOf("deviceId" to deviceId, "generation" to generation, "epoch" to epoch, "challenge" to challenge,
             "ephemeralDigest" to ephemeralDigest(ephemeralRaw), "entriesDigest" to entriesDigest(entries), "expiresAt" to expiresAt), nowMs, expectKeyId)
 
-    /** lowercase hex sha256 of UTF-8 JSON.stringify(["seed-sync-enroll-v1", ownerId, installId, keyText, generation]) where keyText is the JSON text
+    /** lowercase hex sha256 of UTF-8 JSON.stringify(["seed-sync-enroll-v2", ownerId, installId, keyId, keyText, generation]) where keyText is the JSON text
      * {"kty":"EC","crv":"P-256","x":..,"y":..} (that order, unpadded base64url coordinates) embedded as an escaped JSON string. Computed from the NEW key's own public point. */
-    fun enrollActionDigest(ownerId: String, installId: String, publicRaw: ByteArray, generation: Long): String {
-        if (!ID.matches(ownerId) || !INSTALL.matches(installId) || generation !in 0..MAX_SAFE) bad("action")
+    fun enrollActionDigest(ownerId: String, installId: String, keyId: String, publicRaw: ByteArray, generation: Long): String {
+        if (!ID.matches(ownerId) || !INSTALL.matches(installId) || !Regex("[0-9a-f]{32}").matches(keyId) || generation !in 0..MAX_SAFE) bad("action")
         checkPoint(publicRaw)
         val keyText = "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"${b64(publicRaw.copyOfRange(1, 33))}\",\"y\":\"${b64(publicRaw.copyOfRange(33, 65))}\"}"
-        val preimage = "[\"seed-sync-enroll-v1\",\"$ownerId\",\"$installId\",\"${keyText.replace("\"", "\\\"")}\",$generation]"
+        val preimage = "[\"seed-sync-enroll-v2\",\"$ownerId\",\"$installId\",\"$keyId\",\"${keyText.replace("\"", "\\\"")}\",$generation]"
         return sha256Hex(preimage.toByteArray(Charsets.UTF_8))
     }
 
@@ -201,10 +204,10 @@ object SeedSyncWire {
      * key's own public point and those recorded values, and must equal the server's challenge value: never blind-accepted. [enrollment] must be the enrollment of the
      * key that actually signs. */
     fun signEnrollProof(core: SeedSyncKeyCore, owner: String, enrollment: Enrollment, challenge: String, serverActionDigest: String, expiresAt: Long, nowMs: Long): String {
-        if (nowMs < 0 || expiresAt <= nowMs || expiresAt > nowMs + PROOF_TTL_MS || expiresAt > MAX_SAFE) bad("expiresAt")
-        val der = core.signBuilt(owner) { ctx ->
+        if (nowMs < 0 || expiresAt <= nowMs || expiresAt > nowMs + PROOF_MAX_AHEAD_MS || expiresAt > MAX_SAFE) bad("expiresAt")
+        val der = core.signEnrollment(owner, enrollment.keyId, serverActionDigest) { ctx ->
             if (ctx.keyId != enrollment.keyId) bad("key")
-            if (enrollActionDigest(owner, ctx.installId, enrollment.publicKey, ctx.generation) != serverActionDigest) bad("actionDigest")
+            if (enrollActionDigest(owner, ctx.installId, ctx.keyId, enrollment.publicKey, ctx.generation) != serverActionDigest) bad("actionDigest")
             proofMessage(SyncPurpose.ENROLL, mapOf("ownerId" to owner, "keyId" to ctx.keyId, "installId" to ctx.installId, "generation" to ctx.generation, "challenge" to challenge,
                 "actionDigest" to serverActionDigest, "expiresAt" to expiresAt))
         }

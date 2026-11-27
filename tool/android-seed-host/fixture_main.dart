@@ -1,5 +1,13 @@
 // Debug-only synthetic entrypoint, no network and no production session.
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:otpanda_client/native/native_workspace_admission.dart';
+import 'package:otpanda_client/native/native_offline_workspace_page.dart';
+import 'package:otpanda_client/offline_totp/android_wrapping_key_store.dart';
+import 'package:otpanda_client/offline_totp/native_offline_workspace_runtime.dart';
+import 'package:otpanda_client/offline_totp/native_workspace_snapshot.dart';
+import 'package:otpanda_client/session_contract.dart';
 
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -13,6 +21,140 @@ import 'package:otpanda_client/offline_totp/native_seed_custody.dart';
 const channel = MethodChannel('app.otpanda/seed-custody');
 const driver = MethodChannel('seedfx/driver');
 const owner = 'fixture-owner';
+final localRuntime = NativeOfflineWorkspaceRuntime(clock: () => 59000);
+final workspaceAdmission = NativeWorkspaceAdmission();
+
+Future<void> workspaceCheck(bool create) async {
+  final NativeWorkspaceScope scope;
+  if (create) {
+    final admitted = await workspaceAdmission.admit(owner, 0);
+    await check('workspace_one_create', admitted.create);
+    scope = admitted.scope;
+    await check(
+      'workspace_retry_no_create',
+      !(await workspaceAdmission.admit(owner, 0)).create,
+    );
+  } else {
+    scope = (await workspaceAdmission.discover())!;
+    await check(
+      'workspace_cold_scope',
+      scope.owner == owner && scope.epoch == 0,
+    );
+  }
+  await localRuntime.open(
+    keys: AndroidWrappingKeyStore(),
+    custody: AndroidSeedCustody(channel: channel),
+    namespace: scope.namespace,
+    path: scope.path,
+    owner: scope.owner,
+    install: scope.install,
+    epoch: scope.epoch,
+    admittedFreshWorkspace: create,
+    stillLocallyUnlocked: () => true,
+  );
+  await check(
+    'workspace_database_open',
+    localRuntime.phase == NativeOfflineWorkspacePhase.ready,
+  );
+  if (create) {
+    localRuntime.publishAuthenticated(
+      NativeWorkspaceSnapshot(
+        ownerId: owner,
+        installId: scope.install,
+        epoch: 0,
+        savedAtMs: 59000,
+        entries: [
+          const ManagedEntry(
+            'sealed-entry',
+            'Synthetic offline service',
+            'fixture',
+            true,
+            true,
+          ),
+        ],
+        codes: [],
+        sources: [],
+        unassigned: [],
+      ),
+    );
+    await workspaceAdmission.confirm(scope);
+    final bytes = await File(scope.path).readAsBytes();
+    await check(
+      'workspace_encrypted_disk',
+      !utf8
+              .decode(bytes, allowMalformed: true)
+              .contains('Synthetic offline service') &&
+          !utf8.decode(bytes, allowMalformed: true).startsWith('SQLite format'),
+    );
+  } else {
+    await check(
+      'workspace_cold_metadata',
+      localRuntime.snapshot?.entries.single.service ==
+          'Synthetic offline service',
+    );
+  }
+  final custody = AndroidSeedCustody(channel: channel);
+  const snapshot = CustodySnapshot(
+    epoch: 0,
+    revision: 1,
+    complete: true,
+    versions: {'sealed-entry': 1},
+  );
+  await custody.reconcile(owner, snapshot);
+  await check(
+    'workspace_snapshot_replay',
+    (await custody.reconcile(owner, snapshot)).needsProvision.isEmpty,
+  );
+  if (!create) {
+    try {
+      await custody.reconcile(
+        owner,
+        const CustodySnapshot(
+          epoch: 0,
+          revision: 1,
+          complete: false,
+          versions: {'sealed-entry': 1},
+        ),
+      );
+      await check('workspace_changed_replay_refused', false);
+    } on CustodyException catch (e) {
+      await check(
+        'workspace_changed_replay_refused',
+        e.error == CustodyError.staleSnapshot,
+      );
+    }
+    await custody.reconcile(
+      owner,
+      const CustodySnapshot(
+        epoch: 0,
+        revision: 2,
+        complete: true,
+        versions: {},
+        preserve: {'sealed-entry'},
+      ),
+    );
+    await check(
+      'workspace_unsupported_preserved',
+      (await custody.readCatalog(owner)).entries
+          .any((e) => e.entryId == 'sealed-entry'),
+    );
+  }
+  await localRuntime.refreshLocalCodes();
+  await check(
+    'workspace_local_code',
+    localRuntime.visibleCodes.single.value == '94287082',
+  );
+  runApp(
+    MaterialApp(
+      home: NativeOfflineWorkspacePage(
+        runtime: localRuntime,
+        clock: () => 59000,
+        onReconnect: () {},
+      ),
+    ),
+  );
+}
+
 Future<T?> call<T>(String method, [Map<String, Object?> args = const {}]) =>
     channel.invokeMethod<T>(method, args);
 Future<void> check(String label, bool ok) async {
@@ -200,6 +342,7 @@ Future<void> run() async {
       await check('typed_batch_finish', e.kind == SeedSyncFailureKind.wire);
     }
     await sealedCheck(sync);
+    await workspaceCheck(true);
   } else {
     final saved =
         jsonDecode((await driver.invokeMethod<String>('load'))!) as Map;
@@ -223,6 +366,12 @@ Future<void> run() async {
             unixSeconds: 59,
           ) ==
           '94287082',
+    );
+    await workspaceCheck(false);
+    localRuntime.lock();
+    await check(
+      'workspace_lock_hides',
+      localRuntime.snapshot == null && localRuntime.visibleCodes.isEmpty,
     );
     final state = (await call<Map>('readOwnerState', {'owner': owner}))!;
     final erased = await sync.erase(
@@ -259,6 +408,21 @@ Future<void> run() async {
     await check(
       'install_survives_erase',
       await SeedInstallId(SeedInstallIdChannelStore(channel)).get() == id,
+    );
+  }
+  if (phase != 'create') {
+    localRuntime.lock();
+    await check(
+      'workspace_disabled_discovery_refused',
+      await workspaceAdmission
+          .discover()
+          .then((_) => false)
+          .catchError((_) => true),
+    );
+    runApp(
+      const MaterialApp(
+        home: Scaffold(body: Center(child: Text('Synthetic seed host check'))),
+      ),
     );
   }
   await check('phase_complete', true);

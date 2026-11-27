@@ -63,25 +63,47 @@ class Bridge implements BrowserSessionBridge {
 }
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
   test(
-    'one refresh uses six read endpoints including optional review context and gates rapid retries',
+    'external local hold survives page resume without read-failure timers',
     () async {
-      var now = 100;
       final bridge = Bridge();
+      var now = 1000;
       final c = ReadWorkspaceController(bridge: bridge, clock: () => now);
+      c.setExternalHold(true);
+      c.resume();
       await c.refresh();
-      expect(bridge.paths.length, 6);
-      expect(c.store.entries.single.id, 'entry');
+      now += 130000;
+      c.resume();
       await c.refresh();
-      expect(bridge.paths.length, 6);
-      expect(c.refreshWaitMs, 15000);
-      now += 15000;
-      await c.refresh();
-      expect(bridge.paths.length, 12);
+      expect(c.suspended, isTrue);
+      expect(c.externallyHeld, isTrue);
+      expect(bridge.paths, isEmpty);
+      expect(c.connectionLost, isFalse);
+      expect(c.message, isEmpty);
+      c.setExternalHold(false);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(c.suspended, isFalse);
+      expect(bridge.paths, isNotEmpty);
+      expect(c.connectionLost, isFalse);
       c.dispose();
     },
   );
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test('one refresh uses six read endpoints including optional review context and gates rapid retries', () async {
+    var now = 100;
+    final bridge = Bridge();
+    final c = ReadWorkspaceController(bridge: bridge, clock: () => now);
+    await c.refresh();
+    expect(bridge.paths.length, 6);
+    expect(c.store.entries.single.id, 'entry');
+    await c.refresh();
+    expect(bridge.paths.length, 6);
+    expect(c.refreshWaitMs, 15000);
+    now += 15000;
+    await c.refresh();
+    expect(bridge.paths.length, 12);
+    c.dispose();
+  });
   test(
     'background clears populated data and suppresses late response',
     () async {
@@ -308,12 +330,44 @@ void main() {
     expect(writes, isEmpty);
     c.dispose();
   });
+  testWidgets('held429 retries once at original floor, not on release', (
+    t,
+  ) async {
+    final bridge = Bridge();
+    var now = 100;
+    bridge.handler = (_) async => const SessionResponse(429, '{}');
+    final c = ReadWorkspaceController(bridge: bridge, clock: () => now);
+    await c.refresh();
+    c.setExternalHold(true);
+    now += 10000;
+    await t.pump(const Duration(seconds: 10));
+    c.setExternalHold(false);
+    expect(bridge.paths.length, 1);
+    now += 49999;
+    await t.pump(const Duration(milliseconds: 49999));
+    expect(bridge.paths.length, 1);
+    now++;
+    await t.pump(const Duration(milliseconds: 1));
+    await t.pump();
+    expect(bridge.paths.length, 2);
+    c.dispose();
+  });
   test('429 extends manual refresh cooldown to sixty seconds', () async {
     var now = 100;
     final bridge = Bridge();
     bridge.handler = (_) async => const SessionResponse(429, '{}');
     final c = ReadWorkspaceController(bridge: bridge, clock: () => now);
     await c.refresh();
+    expect(c.refreshWaitMs, 60000);
+    c.setExternalHold(true);
+    c.resume();
+    c.setExternalHold(false);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(
+      bridge.paths.length,
+      1,
+      reason: 'unlock cannot bypass server rate limit',
+    );
     expect(c.refreshWaitMs, 60000);
     now += 59999;
     await c.refresh();

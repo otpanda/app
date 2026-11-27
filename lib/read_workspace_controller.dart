@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'unassigned_context.dart';
+import 'offline_totp/native_workspace_snapshot.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +29,30 @@ class ReadWorkspaceController extends ChangeNotifier {
   final int Function() clock;
   late CodeStore store = CodeStore(_BrowserReadTransport(bridge));
   bool loading = false, suspended = false, _disposed = false;
+  bool _externalHold = false;
+  bool get externallyHeld => _externalHold;
+  void setExternalHold(bool value) {
+    if (_externalHold == value) return;
+    _externalHold = value;
+    if (value) {
+      suspend(preserve: true);
+    } else {
+      resume();
+      if (clock() < _nextRefreshAt) {
+        _readRetryTimer?.cancel();
+        _readRetryTimer = Timer(
+          Duration(milliseconds: _nextRefreshAt - clock()),
+          () {
+            _readRetryTimer = null;
+            if (!_disposed && !suspended && signedIn) unawaited(refresh());
+          },
+        );
+      } else {
+        unawaited(refresh());
+      }
+    }
+  }
+
   String message = '';
   bool rateLimited = false, sessionEnded = false, hasLoaded = false;
   int publishedRevision = 0;
@@ -42,6 +67,40 @@ class ReadWorkspaceController extends ChangeNotifier {
   bool _hintPending = false;
   ReadWorkspaceController({required this.bridge, int Function()? clock})
     : clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
+
+  bool locallyHydrated = false;
+
+  /// Hydrates only after an explicit successful owner/install/epoch unlock.
+  /// Never changes bridge/session state or replays pending mutations.
+  void hydrateUnlocked(
+    NativeWorkspaceSnapshot snapshot, {
+    required String owner,
+    required String install,
+    required int epoch,
+  }) {
+    if (_disposed ||
+        !signedIn ||
+        snapshot.ownerId != owner ||
+        snapshot.installId != install ||
+        snapshot.epoch != epoch ||
+        (store.ownerId != null && store.ownerId != owner)) {
+      throw StateError('Workspace unlock scope mismatch');
+    }
+    ++_epoch;
+    loading = false;
+    contexts = const [];
+    store.hydrateLocalView(
+      owner: owner,
+      entries: snapshot.entries,
+      codes: snapshot.activeCodes(clock()),
+      sources: snapshot.sources,
+      unassigned: snapshot.activeUnassigned(clock()),
+    );
+    locallyHydrated = true;
+    hasLoaded = true;
+    publishedRevision++;
+    _notify();
+  }
 
   bool get signedIn =>
       !sessionEnded &&
@@ -236,6 +295,7 @@ class ReadWorkspaceController extends ChangeNotifier {
         }
         contexts = List.unmodifiable(reviews);
         store = staged;
+        locallyHydrated = false;
         publishedRevision++;
         hasLoaded = true;
         _cancelReadRetry();
@@ -298,6 +358,7 @@ class ReadWorkspaceController extends ChangeNotifier {
     ++_epoch;
     loading = false;
     hasLoaded = false;
+    locallyHydrated = false;
     _transportLost = false;
     _confirmed.clear();
     _cancelReadRetry();
@@ -322,13 +383,13 @@ class ReadWorkspaceController extends ChangeNotifier {
   void resetSession() {
     clear();
     sessionEnded = false;
-    suspended = false;
+    suspended = _externalHold;
     message = '';
     _nextRefreshAt = 0;
   }
 
   void resume() {
-    if (_disposed) return;
+    if (_disposed || _externalHold) return;
     suspended = false;
     if (bridge is SessionContinuityBridge) {
       store.updateSessionExpiry(

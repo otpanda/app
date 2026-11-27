@@ -1,0 +1,82 @@
+name: Native seed host loopback qualification (synthetic, real API runtime)
+# Manual only. Disposable emulator, in-memory host, synthetic owner and authenticator. No production resource, secret or account.
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/native-offline-workspace]
+permissions:
+  contents: read
+env:
+  # Exact API commit carrying tool/seed-sync-loopback and the generation-cap correction. Not main, not deployed.
+  API_SHA: 047b75f02e60d678d0ffbb180c598921ba98c0c4
+# One current branch qualification, while main/deploy work is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/feat/native-offline-workspace' || github.head_ref == 'feat/native-offline-workspace' }}
+
+jobs:
+  loopback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: otpanda/api
+          ref: ${{ env.API_SHA }}
+          path: api
+          persist-credentials: false
+      - name: Refuse any API checkout that is not the pinned commit
+        run: test "$(git -C api rev-parse HEAD)" = "$API_SHA"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+        working-directory: api
+      - name: Host-side proof (real runtime over TCP, no emulator)
+        run: node --test test/seed-sync-loopback.test.js test/seed-sync-runtime-flow.test.js
+        working-directory: api
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.50.1'
+          channel: stable
+          cache: true
+      - run: bash tool/bootstrap.sh
+      - run: flutter analyze lib test tool/android-seed-host/fixture_main.dart tool/android-seed-host/fixture_loopback_main.dart
+      - run: python3 tool/android-seed-host/verify_loopback_test.py
+      - run: python3 tool/android-seed-host/check_release_test.py
+      - run: bash tool/offline-totp/release-guard.sh
+      - name: Enable KVM on disposable emulator only
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        env:
+          OTPANDA_API_DIR: ${{ github.workspace }}/api
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: bash tool/android-seed-host/run_loopback.sh seed-host-loopback-out
+      - name: Release APK must exclude every loopback and seed fixture marker
+        run: |
+          flutter build apk --release --flavor google
+          apk=$(find build/app/outputs -name "*google*release*.apk" -type f | head -1)
+          test -n "$apk"
+          python3 tool/android-seed-host/check_release.py "$apk"
+          cp "$apk" seed-host-loopback-out/release-exclusion-checked.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-seed-host-loopback-evidence
+          path: seed-host-loopback-out
+          retention-days: 7

@@ -22,6 +22,7 @@ final class FakeSeedCustody implements NativeSeedCustody {
 
   final CustodyProtection reportedProtection;
   List<int>? _key;
+  Future<void> Function()? afterGenerate;
   bool unavailable = false, locked = false;
 
   /// Simulates unreadable or unwritable durable metadata.
@@ -34,7 +35,8 @@ final class FakeSeedCustody implements NativeSeedCustody {
   final _epoch = <String, int>{};
   final _floor = <String, int>{}; // highest version provisioned or deleted
   final _denyUpTo = <String, int>{}; // versions at or below are denied
-  final _snap = <String, (int, int)>{}; // owner -> (epoch, revision)
+  final _snap =
+      <String, (int, int, String)>{}; // owner -> (epoch, revision, identity)
   final _minAccept = <String, int>{}; // authoritative listed version
   final _disabled = <String>{};
   final _pending = <String>{}; // entry keys with a physical delete pending
@@ -255,13 +257,15 @@ final class FakeSeedCustody implements NativeSeedCustody {
     if (r.version != seedVersion) {
       throw const CustodyException(CustodyError.versionConflict);
     }
-    return computeTotp(
+    final result = computeTotp(
       seed: r.seed,
       algorithm: r.algorithm,
       digits: r.digits,
       period: r.period,
       unixSeconds: unixSeconds,
     );
+    await afterGenerate?.call();
+    return result;
   }
 
   @override
@@ -408,11 +412,18 @@ final class FakeSeedCustody implements NativeSeedCustody {
       throw const CustodyException(CustodyError.epochMismatch);
     }
     final last = _snap[ownerId];
+    final identity = _identity(s);
+    final replay =
+        last != null &&
+        s.epoch == last.$1 &&
+        s.revision == last.$2 &&
+        last.$3 == identity;
     if (last != null &&
+        !replay &&
         (s.epoch < last.$1 || (s.epoch == last.$1 && s.revision <= last.$2))) {
       throw const CustodyException(CustodyError.staleSnapshot);
     }
-    _snap[ownerId] = (s.epoch, s.revision);
+    _snap[ownerId] = (s.epoch, s.revision, identity);
     // Every listed version is the minimum the device will now accept.
     for (final v in s.versions.entries) {
       final k = _k(ownerId, v.key);
@@ -426,7 +437,10 @@ final class FakeSeedCustody implements NativeSeedCustody {
       final t = s.tombstones[e];
       final gone =
           (t != null && r.version <= t) ||
-          (s.complete && !s.versions.containsKey(e) && t == null);
+          (s.complete &&
+              !s.versions.containsKey(e) &&
+              !s.preserve.contains(e) &&
+              t == null);
       final listed = s.versions[e];
       if (gone) {
         _deny(ownerId, e, r.version);
@@ -464,6 +478,14 @@ final class FakeSeedCustody implements NativeSeedCustody {
     );
   }
 
+  static String _identity(CustodySnapshot s) {
+    String m(Map<String, int> x) =>
+        (x.entries.toList()..sort((a, b) => a.key.compareTo(b.key)))
+            .map((e) => '${e.key}=${e.value}')
+            .join(',');
+    return '${s.epoch}|${s.revision}|${s.complete}|${m(s.versions)}|${m(s.tombstones)}|${(s.preserve.toList()..sort()).join(',')}';
+  }
+
   void _validate(String owner, CustodySnapshot s) {
     CustodyException bad() =>
         const CustodyException(CustodyError.invalidSnapshot);
@@ -490,6 +512,12 @@ final class FakeSeedCustody implements NativeSeedCustody {
     for (final e in s.versions.entries) {
       final t = s.tombstones[e.key];
       if (t != null && e.value <= t) throw bad();
+    }
+    if (s.preserve.length > 5000 ||
+        s.preserve.any(
+          (e) => !validCustodyId(e) || s.versions.containsKey(e),
+        )) {
+      throw bad();
     }
   }
 

@@ -109,17 +109,19 @@ final class CustodySnapshot {
     required this.complete,
     required this.versions,
     this.tombstones = const {},
+    this.preserve = const {},
   });
 
   /// The owner epoch this snapshot was issued under (see [clearOwner]).
   final int epoch;
 
-  /// Monotonic per owner and epoch. A snapshot whose (epoch, revision) is not
-  /// greater than the last applied one is refused as stale.
+  /// Monotonic per owner and epoch. A lower revision is refused as stale. An
+  /// equal revision is replayed only when the durably recorded full statement
+  /// (complete, versions, tombstones, preserve) is identical, else it is stale.
   final int revision;
 
-  /// True only when [versions] lists every entry the device may hold for the
-  /// owner. A partial snapshot never causes deletion of unlisted entries.
+  /// True only when [versions] plus [preserve] list every present entry the device
+  /// may hold for the owner. A partial snapshot never causes deletion of unlisted entries.
   final bool complete;
 
   /// entryId to the current authorised seed version.
@@ -128,6 +130,11 @@ final class CustodySnapshot {
   /// entryId to the version at or below which the entry is deleted for good.
   /// A listed version must be greater than its tombstone.
   final Map<String, int> tombstones;
+
+  /// Entries the server lists as unsupported or metadata-pending. A complete
+  /// snapshot never removes them for being absent from [versions]. A tombstone
+  /// still does. They must not appear in [versions].
+  final Set<String> preserve;
 }
 
 final class ReconcileResult {

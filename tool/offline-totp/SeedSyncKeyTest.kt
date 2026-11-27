@@ -187,7 +187,14 @@ private fun wireChecks() {
         val expect = SeedSyncWire.proofMessage(SyncPurpose.SNAPSHOT, f + mapOf("ownerId" to "o", "keyId" to en.keyId))
         check(verifyServerSig(expect, sig, pub))
         check(!verifyServerSig(SeedSyncWire.proofMessage(SyncPurpose.SNAPSHOT, f + mapOf("ownerId" to "o", "keyId" to "other")), sig, pub))
-        for (bad in listOf(now, now - 1, now + 120_001, SeedSyncWire.MAX_SAFE + 1)) check(wireErr { SeedSyncWire.signProof(r.c, "o", SyncPurpose.SNAPSHOT, f + ("expiresAt" to bad), now) } != null) { "expiry $bad" }
+        for (bad in listOf(now, now - 1, now + SeedSyncWire.PROOF_MAX_AHEAD_MS + 1, SeedSyncWire.MAX_SAFE + 1)) check(wireErr { SeedSyncWire.signProof(r.c, "o", SyncPurpose.SNAPSHOT, f + ("expiresAt" to bad), now) } != null) { "expiry $bad" }
+        // Same server expiry with behind/ahead local clocks. Signed bytes retain the server expiry.
+        for (offset in listOf(-300_000L, -1L, 0L, 119_999L)) {
+            val signed = SeedSyncWire.signProof(r.c, "o", SyncPurpose.SNAPSHOT, f, now + offset)
+            check(verifyServerSig(expect, signed, pub))
+        }
+        for (offset in listOf(-300_001L, 120_000L, 120_001L))
+            check(wireErr { SeedSyncWire.signProof(r.c, "o", SyncPurpose.SNAPSHOT, f, now + offset) } == "expiresAt")
         check(wireErr { SeedSyncWire.signProof(r.c, "o", SyncPurpose.SNAPSHOT, f + ("ownerId" to "evil"), now) } != null) // a caller cannot supply ownerId
         check(wireErr { SeedSyncWire.signProof(r.c, "o", SyncPurpose.SNAPSHOT, f + ("keyId" to "evil"), now) } != null) // nor keyId
         // generation and epoch are checked against native state before any signature: a wrong value refuses, and nothing signs
@@ -303,24 +310,65 @@ private fun wireChecks() {
         for (len in listOf(10, 64, 128)) { val (n2, c2) = seal(ctx, ByteArray(len) { 1 }); check(SeedSyncWire.openSealed(eph, ctx, SeedSyncWire.b64(sraw), n2, c2).size == len) }
         check(wireAlgorithm("SHA-1") == TotpCalculator.Algorithm.SHA1 && wireAlgorithm("SHA-256") == TotpCalculator.Algorithm.SHA256 && wireAlgorithm("SHA-512") == TotpCalculator.Algorithm.SHA512)
     }
-    // W9. enrollment action digest: matches the API author's vector computed from the real server code; native recomputes it and never blind-accepts.
+    // W9. v2 enrollment action digest. This local known-answer test is not real server interoperability proof.
     run {
         val x = "g-KtUEgU_tleJK0MxTIg2AuqFC_mZA1R1v97B7_u6EA"; val y = "PNol0_FRDUWQACKtoc9ZI3ixU7PfwpC1l6E56wFXX0Q"
         val raw = byteArrayOf(4) + b64d(x) + b64d(y)
-        check(SeedSyncWire.enrollActionDigest("owner", "I".repeat(22), raw, 1) == "367aafe9f84cb11a0fcd62f021c8e30e5672c427b8e3a65d75ee77d8e1cdd513")
-        check(SeedSyncWire.enrollActionDigest("owner", "I".repeat(22), raw, 2) != "367aafe9f84cb11a0fcd62f021c8e30e5672c427b8e3a65d75ee77d8e1cdd513")
-        check(wireErr { SeedSyncWire.enrollActionDigest("owner", "short", raw, 1) } != null && wireErr { SeedSyncWire.enrollActionDigest("owner", "I".repeat(22), raw.copyOf().also { it[64] = (it[64].toInt() xor 1).toByte() }, 1) } == "point")
+        check(SeedSyncWire.enrollActionDigest("owner", "I".repeat(22), "a".repeat(32), raw, 1) == "868d7b0f227bd339664bee2951dfd9ca69860118975733a805a16d19d9adb182")
+        check(SeedSyncWire.enrollActionDigest("owner", "I".repeat(22), "a".repeat(32), raw, 2) != "868d7b0f227bd339664bee2951dfd9ca69860118975733a805a16d19d9adb182")
+        check(wireErr { SeedSyncWire.enrollActionDigest("owner", "short", "a".repeat(32), raw, 1) } != null && wireErr { SeedSyncWire.enrollActionDigest("owner", "I".repeat(22), "a".repeat(32), raw.copyOf().also { it[64] = (it[64].toInt() xor 1).toByte() }, 1) } == "point")
         val r = Rig(); val en = r.c.enroll("o", "J".repeat(22), 4); val now = 1_800_000_000_000L; val inst = "J".repeat(22); val ch = "B".repeat(43)
-        val good = SeedSyncWire.enrollActionDigest("o", inst, en.publicKey, 4)
+        val good = SeedSyncWire.enrollActionDigest("o", inst, en.keyId, en.publicKey, 4)
+        check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en, ch, SeedSyncWire.enrollActionDigest("o", inst, "f".repeat(32), en.publicKey, 4), now + 5000, now) } == "actionDigest")
+        val legacyKey = "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"${SeedSyncWire.b64(en.publicKey.copyOfRange(1, 33))}\",\"y\":\"${SeedSyncWire.b64(en.publicKey.copyOfRange(33, 65))}\"}"
+        val legacy = SeedSyncWire.sha256Hex("[\"seed-sync-enroll-v1\",\"o\",\"$inst\",\"${legacyKey.replace("\"", "\\\"")}\",4]".toByteArray())
+        check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en, ch, legacy, now + 5000, now) } == "actionDigest")
         val sig = SeedSyncWire.signEnrollProof(r.c, "o", en, ch, good, now + 5000, now)
         val pub = KeyFactory.getInstance("EC").generatePublic(ECPublicKeySpec(ECPoint(BigInteger(1, en.publicKey.copyOfRange(1, 33)), BigInteger(1, en.publicKey.copyOfRange(33, 65))), SeedSyncWire.jcaParams()))
         check(verifyServerSig(SeedSyncWire.proofMessage(SyncPurpose.ENROLL, mapOf("ownerId" to "o", "keyId" to en.keyId, "installId" to inst, "generation" to 4L, "challenge" to ch, "actionDigest" to good, "expiresAt" to now + 5000)), sig, pub))
         check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en, ch, "0".repeat(64), now + 5000, now) } == "actionDigest") // digest for some other key or fields
-        check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en, ch, SeedSyncWire.enrollActionDigest("o", inst, en.publicKey, 5), now + 5000, now) } == "actionDigest") // server digest for another generation
-        check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en, ch, SeedSyncWire.enrollActionDigest("o", "K".repeat(22), en.publicKey, 4), now + 5000, now) } == "actionDigest") // other install
+        check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en, ch, SeedSyncWire.enrollActionDigest("o", inst, en.keyId, en.publicKey, 5), now + 5000, now) } == "actionDigest") // server digest for another generation
+        check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en, ch, SeedSyncWire.enrollActionDigest("o", "K".repeat(22), en.keyId, en.publicKey, 4), now + 5000, now) } == "actionDigest") // other install
+        val serverExpiry = now + SeedSyncWire.PROOF_TTL_MS
+        for (offset in listOf(-300_000L, -1L, 0L, 119_999L))
+            check(SeedSyncWire.signEnrollProof(r.c, "o", en, ch, good, serverExpiry, now + offset).length == 86)
+        for (offset in listOf(-300_001L, 120_000L, 120_001L))
+            check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en, ch, good, serverExpiry, now + offset) } == "expiresAt")
         val en2 = r.c.enroll("o", "J".repeat(22), 4) // the first enrollment's key no longer signs
         check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en, ch, good, now + 5000, now) } == "key")
-        check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en2, ch, SeedSyncWire.enrollActionDigest("o", inst, en2.publicKey, 4), now + 200_000, now) } == "expiresAt")
+        check(wireErr { SeedSyncWire.signEnrollProof(r.c, "o", en2, ch, SeedSyncWire.enrollActionDigest("o", inst, en2.keyId, en2.publicKey, 4), now + SeedSyncWire.PROOF_MAX_AHEAD_MS + 1, now) } == "expiresAt")
+    }
+
+    // Durable exact-attempt journal: no signature escapes a failed journal write;
+    // status positive reconciliation after restart cannot confirm a replacement.
+    run {
+        val r = Rig(); val now = 1_800_000_000_000L
+        val en = r.c.prepareEnrollment("o", INST, 1)
+        val action = SeedSyncWire.enrollActionDigest("o", INST, en.keyId, en.publicKey, 1)
+        check(r.c.enrollmentJournal("o")!!.phase == "prepared")
+        check(!r.c.confirmEnrollment("o", en.keyId, action))
+        want(SyncKeyError.ERASE_INCOMPLETE) { r.c.prepareEnrollment("o", INST, 1) }
+        r.ss.writeDown = true
+        want(SyncKeyError.METADATA_UNAVAILABLE) { SeedSyncWire.signEnrollProof(r.c, "o", en, ch, action, now + 1000, now) }
+        r.ss.writeDown = false
+        check(r.c.enrollmentJournal("o")!!.phase == "prepared")
+        SeedSyncWire.signEnrollProof(r.c, "o", en, ch, action, now + 1000, now)
+        val core = r.restart()
+        val journal = core.enrollmentJournal("o")!!
+        check(journal.phase == "signed" && journal.keyId == en.keyId && journal.actionDigest == action && journal.publicKey.contentEquals(en.publicKey))
+        check(!core.confirmEnrollment("o", "f".repeat(32), action))
+        check(!core.confirmEnrollment("o", en.keyId, "0".repeat(64)))
+        r.ss.writeDown = true
+        want(SyncKeyError.METADATA_UNAVAILABLE) { core.confirmEnrollment("o", en.keyId, action) }
+        r.ss.writeDown = false
+        check(core.enrollmentJournal("o")!!.phase == "signed")
+        check(core.confirmEnrollment("o", en.keyId, action))
+        check(r.restart().enrollmentJournal("o")!!.phase == "confirmed")
+        r.c.erase("o", 0, EraseTrigger.SIGN_OUT)
+        check(!r.c.confirmEnrollment("o", en.keyId, action))
+        val next = r.c.prepareEnrollment("o", INST, 1)
+        check(next.keyId != en.keyId && !r.c.confirmEnrollment("o", en.keyId, action))
+        check(r.c.enrollmentJournal("o")!!.phase == "prepared")
     }
 
     // W10. revoke purpose (online own-key sign-out/disable): no epoch field, signed by the dedicated key, cross-purpose use fails (covered in W1 over five purposes).
@@ -347,7 +395,8 @@ private fun wireChecks() {
         check(String(msg) == "[\"otpanda-seed-sync-v1\",\"seed-sync-status\",\"${en.keyId}\",\"$chs\",${now + 60_000}]" && verifyServerSig(msg, sig, pub))
         for (extra in listOf("ownerId", "deviceId", "generation", "epoch", "keyId")) check(wireErr { SeedSyncWire.signProof(r.c, "o", SyncPurpose.STATUS, mapOf("challenge" to chs, "expiresAt" to now + 60_000, extra to (if (extra == "generation" || extra == "epoch") 1L else "x")), now, en.keyId) } == "fields") { extra }
         check(wireErr { SeedSyncWire.signStatusProof(r.c, "o", chs, now, now, en.keyId) } == "expiresAt")
-        check(wireErr { SeedSyncWire.signStatusProof(r.c, "o", chs, now + 120_001, now, en.keyId) } == "expiresAt")
+        check(wireErr { SeedSyncWire.signStatusProof(r.c, "o", chs, now + SeedSyncWire.PROOF_MAX_AHEAD_MS + 1, now, en.keyId) } == "expiresAt")
+        check(SeedSyncWire.signStatusProof(r.c, "o", chs, now + SeedSyncWire.PROOF_MAX_AHEAD_MS, now, en.keyId).length == 86)
         check(wireErr { SeedSyncWire.signStatusProof(r.c, "o", "short", now + 1000, now, en.keyId) } != null)
         check(!verifyServerSig(SeedSyncWire.proofMessage(SyncPurpose.SNAPSHOT, mapOf("ownerId" to "o", "keyId" to en.keyId, "deviceId" to "d", "generation" to 1L, "epoch" to 0L, "challenge" to chs, "expiresAt" to now + 60_000)), sig, pub))
         val en2 = r.c.enroll("o", INST, 1) // re-enrollment: the old begin's key id no longer signs
@@ -448,13 +497,24 @@ private fun handleChecks() {
             val h = SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs)
             refused("state") { h.signProof(now) }; check(h.state == SeedSyncBatchHandle.State.DISCARDED)
             refused("state") { h.bind(chl, now + 1000, now) }
-            for (bad in listOf(now, now - 1, now + 120_001, SeedSyncWire.MAX_SAFE + 1)) { val x = SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs); refused("expiresAt") { x.bind(chl, bad, now) }; check(x.state == SeedSyncBatchHandle.State.DISCARDED) }
+            for (bad in listOf(now, now - 1, now + SeedSyncWire.PROOF_MAX_AHEAD_MS + 1, SeedSyncWire.MAX_SAFE + 1)) { val x = SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs); refused("expiresAt") { x.bind(chl, bad, now) }; check(x.state == SeedSyncBatchHandle.State.DISCARDED) }
             refused("challenge") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs).bind("short", now + 1000, now) }
             refused("entries") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, emptyList()) }
             refused("entries") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs + SealedEntrySpec("e4", 1, "SHA-1", 6, 30)) }
             refused("entries") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, listOf(specs[0], specs[0])) }
             refused("algorithm") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, listOf(specs[0].copy(algorithm = "SHA-3"))) }
             refused("not-enrolled") { SeedSyncBatchHandle.begin(Rig().c, "o", "device", 1, 0, specs) }
+            // Maximum tolerated behind-clock expiry, but a local 120s receipt cap.
+            fun skewed() = SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs).also {
+                it.bind(chl, now + SeedSyncWire.PROOF_MAX_AHEAD_MS, now)
+            }
+            skewed().signProof(now + SeedSyncWire.PROOF_TTL_MS - 1)
+            refused("expired") { skewed().signProof(now + SeedSyncWire.PROOF_TTL_MS) }
+            refused("expired") { skewed().signProof(now - 1) }
+            val capped = skewed(); capped.signProof(now)
+            refused("expired") { capped.skip("e1", now + SeedSyncWire.PROOF_TTL_MS) }
+            val rollback = skewed(); rollback.signProof(now)
+            refused("expired") { rollback.skip("e1", now - 1) }
             val s1 = signed(r); refused("state") { s1.signProof(now) }; check(s1.state == SeedSyncBatchHandle.State.DISCARDED) // one signature per handle
             val wrongGen = SeedSyncBatchHandle.begin(r.c, "o", "device", 2, ep, specs); wrongGen.bind(chl, now + 1000, now)
             refused("generation") { wrongGen.signProof(now) }; check(wrongGen.state == SeedSyncBatchHandle.State.DISCARDED)
@@ -588,6 +648,44 @@ private fun handleChecks() {
             val r = Rig(); r.c.enroll("o", INST, 1); val ep = r.custody.readOwnerState("o").epoch
             refused("entries") { SeedSyncBatchHandle.begin(r.c, "o", "device", 1, ep, specs + SealedEntrySpec("e4", 1, "SHA-1", 6, 30), maxEntries = 10) }
         }
+        // W14a. journaled enrollment over the channel: prepare is create-only, the journal survives a restart, a signature journals "signed" first,
+        // and only the exact signed tuple confirms. Nothing here replaces a key.
+        run {
+            val r = Rig(); val clock = now
+            val ch = SeedSyncChannelHandler(r.c, r.custody, { clock })
+            fun call(m: String, a: Any?) = ch.handle(m, a)
+            fun ok(x: ChannelReply): Any? = (x as? ChannelReply.Ok ?: error("not ok: $x")).value
+            fun err(x: ChannelReply): String = (x as? ChannelReply.Err ?: error("not err: $x")).code
+            check(ok(call("syncEnrollmentJournal", mapOf("owner" to "o"))) == null)
+            val en = ok(call("syncPrepareEnrollment", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) as Map<*, *>
+            val keyId = en["keyId"] as String; val pubRaw = en["publicKey"] as ByteArray
+            val j0 = ok(call("syncEnrollmentJournal", mapOf("owner" to "o"))) as Map<*, *>
+            check(j0["phase"] == "prepared" && j0["actionDigest"] == null && j0["keyId"] == keyId && j0["generation"] == 1L && j0["installId"] == INST)
+            check(err(call("syncPrepareEnrollment", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) == "ERASE_INCOMPLETE")
+            check(err(call("syncEnrollmentJournal", mapOf("owner" to "o", "x" to 1L))) == "INVALID_INPUT")
+            val dig = SeedSyncWire.enrollActionDigest("o", INST, keyId, pubRaw, 1)
+            check(ok(call("syncConfirmEnrollment", mapOf("owner" to "o", "keyId" to keyId, "actionDigest" to dig))) == false) // prepared never confirms
+            check(err(call("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to "0".repeat(64), "expiresAt" to now + 60_000, "keyId" to keyId))) == "WIRE_ACTIONDIGEST")
+            check((ok(call("syncEnrollmentJournal", mapOf("owner" to "o"))) as Map<*, *>)["phase"] == "prepared") // refusal journals nothing
+            check((ok(call("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to keyId))) as String).length == 86)
+            val ch2 = SeedSyncChannelHandler(r.restart(), r.custody, { clock })
+            val j1 = ok(ch2.handle("syncEnrollmentJournal", mapOf("owner" to "o"))) as Map<*, *>
+            check(j1["phase"] == "signed" && j1["actionDigest"] == dig && j1["keyId"] == keyId)
+            // resume: after the restart the SAME key signs a fresh server challenge; the journal stays signed with the same digest and no new key exists
+            val chl2 = "Z".repeat(43)
+            check((ok(ch2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl2, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to keyId))) as String).length == 86)
+            check(err(ch2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl2, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to "f".repeat(32)))) == "WIRE_KEY")
+            check(err(ch2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl2, "actionDigest" to "0".repeat(64), "expiresAt" to now + 60_000, "keyId" to keyId))) == "WIRE_ACTIONDIGEST")
+            val j2 = ok(ch2.handle("syncEnrollmentJournal", mapOf("owner" to "o"))) as Map<*, *>
+            check(j2["phase"] == "signed" && j2["actionDigest"] == dig && j2["keyId"] == keyId)
+            check(ok(ch2.handle("syncConfirmEnrollment", mapOf("owner" to "o", "keyId" to "f".repeat(32), "actionDigest" to dig))) == false)
+            check(ok(ch2.handle("syncConfirmEnrollment", mapOf("owner" to "o", "keyId" to keyId, "actionDigest" to "0".repeat(64)))) == false)
+            check(ok(ch2.handle("syncConfirmEnrollment", mapOf("owner" to "o", "keyId" to keyId, "actionDigest" to dig))) == true)
+            check((ok(ch2.handle("syncEnrollmentJournal", mapOf("owner" to "o"))) as Map<*, *>)["phase"] == "confirmed")
+            check(err(ch2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to keyId))) != "")
+            check(ch2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to keyId)) is ChannelReply.Err)
+            check(err(ch2.handle("syncPrepareEnrollment", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) == "ERASE_INCOMPLETE") // confirmed key is not replaced either
+        }
         // W14. unregistered channel contract: native clock, strict argument sets, no secrets in replies, whole flow incl. provision into custody, status key targeting,
         // handle cap/TTL/sweep, error codes carry no data.
         run {
@@ -607,7 +705,7 @@ private fun handleChecks() {
             check(err(call("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L, "x" to 1L))) == "INVALID_INPUT")
             check(err(call("syncEnroll", null)) == "INVALID_INPUT")
             // enroll proof: native digest recheck, only the enrollment this process made
-            val dig = SeedSyncWire.enrollActionDigest("o", INST, pubRaw, 1)
+            val dig = SeedSyncWire.enrollActionDigest("o", INST, keyId, pubRaw, 1)
             val ep = ok(call("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to keyId))) as String
             check(verifyServerSig(SeedSyncWire.proofMessage(SyncPurpose.ENROLL, mapOf("ownerId" to "o", "keyId" to keyId, "installId" to INST, "generation" to 1L, "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000)), ep, pubKey))
             check(err(call("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to "0".repeat(64), "expiresAt" to now + 60_000, "keyId" to keyId))) == "WIRE_ACTIONDIGEST")
@@ -694,15 +792,16 @@ private fun handleChecks() {
                 val c2 = r.restart(); val h2 = SeedSyncChannelHandler(c2, r.custody, { now })
                 val st = ok(h2.handle("syncEnrollmentState", mapOf("owner" to "o"))) as Map<*, *>
                 check(st["keyId"] == e1["keyId"] && st["provable"] == false)
-                val dig = SeedSyncWire.enrollActionDigest("o", INST, e1["publicKey"] as ByteArray, 1)
-                check(err(h2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to e1["keyId"]))) == "WIRE_KEY")
+                val dig = SeedSyncWire.enrollActionDigest("o", INST, e1["keyId"] as String, e1["publicKey"] as ByteArray, 1)
+                // the durable journal now carries the public point, so the SAME key can sign a fresh server challenge after a restart ("provable" stays an in-process flag)
+                check((ok(h2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig, "expiresAt" to now + 60_000, "keyId" to e1["keyId"]))) as String).length == 86)
                 check(err(h2.handle("syncEnroll", mapOf("owner" to "o", "installId" to "X".repeat(22), "generation" to 1L))) == "INSTALL_ID_MISMATCH") // install id is pinned
                 check(r.sv.keys.size == 1)
                 val seedsBefore = r.cv.keys.size
                 val e2 = ok(h2.handle("syncEnroll", mapOf("owner" to "o", "installId" to INST, "generation" to 1L))) as Map<*, *>
                 check(e2["keyId"] != e1["keyId"] && r.sv.keys.size == 1 && c2.pendingKeyDeletes("o") == 0 && r.cv.keys.size == seedsBefore) { "replace left old key or touched seeds" }
                 check((ok(h2.handle("syncEnrollmentState", mapOf("owner" to "o"))) as Map<*, *>)["provable"] == true)
-                val dig2 = SeedSyncWire.enrollActionDigest("o", INST, e2["publicKey"] as ByteArray, 1)
+                val dig2 = SeedSyncWire.enrollActionDigest("o", INST, e2["keyId"] as String, e2["publicKey"] as ByteArray, 1)
                 check((ok(h2.handle("syncSignEnrollProof", mapOf("owner" to "o", "challenge" to chl, "actionDigest" to dig2, "expiresAt" to now + 60_000, "keyId" to e2["keyId"]))) as String).length == 86)
             }
             // owner discovery without any session: empty and complete, active, pending, unreadable (incomplete), unlistable (error, never empty)

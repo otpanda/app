@@ -37,8 +37,10 @@ dependencies:
   url_launcher: ^6.3.3
   http: ^1.6.0
   crypto: ^3.0.6
+  pointycastle: ^4.0.0
   flutter_svg: ^2.5.1
   path_provider: ^2.1.6
+  sqlite3: 3.9.2
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -132,3 +134,9 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Fail-closed SQLCipher runtime checks also enforce this native build choice.
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlcipher

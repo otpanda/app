@@ -1,0 +1,95 @@
+{
+ "_note": "Synthetic fixtures shaped from api src/seed-sync-http.js and seed-sync.js at 575f162a. Not captured from a deployed server.",
+ "context": {
+  "request": {},
+  "response": {
+   "generation": 3
+  }
+ },
+ "enroll-begin": {
+  "response": {
+   "challenge": {
+    "actionDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "challenge": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+    "expiresAt": 1000,
+    "generation": 3,
+    "installId": "IIIIIIIIIIIIIIIIIIIIII",
+    "keyId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "ownerId": "own_1"
+   },
+   "token": "otpda_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  }
+ },
+ "enroll-finish": {
+  "request": {
+   "signature": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+   "token": "otpda_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "response": {
+   "keyId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+ },
+ "errors": {
+  "conflict": {
+   "body": {
+    "error": "unavailable"
+   },
+   "status": 409
+  },
+  "rate_limited": {
+   "body": {
+    "error": "rate_limited"
+   },
+   "status": 429
+  }
+ },
+ "status-begin": {
+  "request": {
+   "keyId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "response": {
+   "challenge": {
+    "challenge": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+    "expiresAt": 1000,
+    "keyId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "token": "otpda_ttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+  }
+ },
+ "status-finish": {
+  "request": {
+   "signature": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+   "token": "otpda_ttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+  },
+  "response": {
+   "state": "active"
+  }
+ },
+ "stepup-begin": {
+  "request": {
+   "installId": "IIIIIIIIIIIIIIIIIIIIII",
+   "keyId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "publicJwk": {
+    "crv": "P-256",
+    "kty": "EC",
+    "x": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "y": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+   }
+  },
+  "response": {
+   "expiresAt": 1000,
+   "options": {
+    "allowCredentials": [
+     {
+      "id": "cred1",
+      "type": "public-key"
+     }
+    ],
+    "challenge": "ccccccccccccccccccccccccccccccccccccccccccc",
+    "rpId": "otpanda.github.io",
+    "userVerification": "required"
+   },
+   "token": "otpda_sssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+  }
+ }
+}

@@ -16,6 +16,12 @@ with tempfile.TemporaryDirectory() as temp:
     for platform in platforms:
         destination = root / platform
         shutil.copytree(host / platform, destination)
+# Windows wrapping-key overlay (direct DPAPI). Aborts if the template changed.
+subprocess.run([sys.executable, str(root / 'tool' / 'desktop' / 'windows_overlay.py'),
+                str(root)], check=True)
+# macOS wrapping-key overlay (Keychain Services). Code only; no entitlement change.
+subprocess.run([sys.executable, str(root / 'tool' / 'desktop' / 'macos_overlay.py'),
+                str(root)], check=True)
 for decoder in ('decode_fonts.py', 'decode_zxing.py'):
     subprocess.run([sys.executable, str(root / 'tool' / decoder)], cwd=root, check=True)
 subprocess.run([flutter, 'pub', 'get', '--enforce-lockfile'], cwd=root, check=True)

@@ -1,3 +1,5 @@
+import 'transfer/import_review.dart';
+
 import 'dart:async';
 
 import 'copy_hint.dart';
@@ -35,6 +37,7 @@ import 'session_contract.dart';
 /// states. No fixture data is ever shown here. Mutations are not offered
 /// until their endpoints exist.
 class ProductShell extends StatefulWidget {
+  final ImportSaver? importSaver;
   final String? navigation;
   final ValueChanged<String>? onNavigate;
   final ReadWorkspaceController controller;
@@ -76,6 +79,7 @@ class ProductShell extends StatefulWidget {
     super.key,
     required this.controller,
     this.navigation,
+    this.importSaver,
     this.onNavigate,
     this.organization,
     this.onOrganizationChanged,
@@ -1794,7 +1798,13 @@ class _ProductShellState extends State<ProductShell>
     final id = await addTotpDialog(
       context,
       widget.controller.bridge as TotpManagementBridge,
+      importSaver: widget.importSaver,
     );
+    if (id != null && id.isEmpty && mounted) {
+      widget.controller.resume();
+      await widget.controller.refresh();
+      return;
+    }
     if (id != null && mounted) {
       await showDialog<void>(
         context: context,

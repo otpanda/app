@@ -1,8 +1,14 @@
+import '../transfer/transfer_routes.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
 import '../browser_session_contract.dart';
+import '../offline_totp/seed_sync_http.dart'
+    show seedSyncPullBase, seedSyncPullRequestAllowed;
+import '../offline_totp/seed_enrollment_http.dart'
+    show seedSyncRequestAllowed, seedSyncBase;
 import '../entry_domains.dart';
 import '../google_link.dart';
 import '../recovery_contract.dart';
@@ -101,6 +107,19 @@ class NativeSessionBridge
     }
   }
 
+  bool _localReadAllowed = true;
+
+  /// Local lock is an immediate transport boundary, unlike background grace.
+  void setLocalReadAllowed(bool allowed) {
+    _localReadAllowed = allowed;
+    if (!allowed) {
+      _realtime?.sessionEnded();
+    } else if (controller.phase == NativeSessionPhase.signedIn &&
+        controller.session?.access != _rejectedAccess) {
+      _realtime?.sessionRestored();
+    }
+  }
+
   NativeSessionPhase? _lastPhase;
   String? _rejectedAccess;
 
@@ -116,7 +135,9 @@ class NativeSessionBridge
       // Only a session the server has not already rejected can restart an
       // ended run: a fresh sign-in, or a renewal that issued a new token.
       final a = controller.session?.access;
-      if (a != null && a != _rejectedAccess) _realtime?.sessionRestored();
+      if (_localReadAllowed && a != null && a != _rejectedAccess) {
+        _realtime?.sessionRestored();
+      }
     }
   }
 
@@ -136,6 +157,7 @@ class NativeSessionBridge
   /// bridge's own pause answer is never mistaken for a server 503: a signed
   /// out or rejected session ends realtime, a restoring or offline one waits.
   Future<SessionResponse> _mintTicket() async {
+    if (!_localReadAllowed) throw const TicketPause(ended: true);
     // The server already rejected this exact token twice: no request, wait for
     // a renewal or sign-in that yields a different one.
     if (_rejectedAccess != null &&
@@ -665,6 +687,85 @@ class NativeSessionBridge
       parsed = null;
     }
     return (status: r.status, body: parsed);
+  }
+
+  /// Enrollment only. The signed snapshot/batch adapter has its own exact wire
+  /// validator and cannot widen this allowlist through a route suffix.
+  Future<({int status, Map<String, dynamic>? body})> seedEnrollmentPost(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    if (!path.startsWith(seedSyncBase) ||
+        !seedSyncRequestAllowed(path.substring(seedSyncBase.length), body)) {
+      throw StateError('Seed enrollment request required');
+    }
+    final r = await _call('POST', path, body: jsonEncode(body));
+    Map<String, dynamic>? parsed;
+    try {
+      final v = utf8.encode(r.body).length <= 16384 ? jsonDecode(r.body) : null;
+      if (v is Map<String, dynamic>) parsed = v;
+    } on FormatException {
+      parsed = null;
+    }
+    return (status: r.status, body: parsed);
+  }
+
+  Future<({int status, Map<String, dynamic>? body})> seedPullPost(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    if (!path.startsWith(seedSyncPullBase) ||
+        !seedSyncPullRequestAllowed(
+          path.substring(seedSyncPullBase.length),
+          body,
+        )) {
+      throw StateError('Signed seed pull request required');
+    }
+    final r = await _call('POST', path, body: jsonEncode(body));
+    Map<String, dynamic>? parsed;
+    try {
+      final v = utf8.encode(r.body).length <= 262144
+          ? jsonDecode(r.body)
+          : null;
+      if (v is Map<String, dynamic>) parsed = v;
+    } on FormatException {
+      parsed = null;
+    }
+    return (status: r.status, body: parsed);
+  }
+
+  /// Transfer finish is never auto-replayed after a 401 or lost reply. The
+  /// saver owns the nonce/outcome recovery; export requires a new ceremony.
+  Future<({int status, Map<String, dynamic>? body})> transferPost(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    if (!transferRequestAllowed(path, body)) {
+      throw StateError('Transfer request required');
+    }
+    final token = await controller.accessToken();
+    if (token == null) return (status: 401, body: null);
+    final session = controller.session;
+    final response = await _request(
+      'POST',
+      path,
+      body: jsonEncode(body),
+      bearer: token,
+    );
+    if (controller.session != session ||
+        controller.phase != NativeSessionPhase.signedIn) {
+      return (status: 503, body: null);
+    }
+    Map<String, dynamic>? parsed;
+    try {
+      final v = utf8.encode(response.body).length <= 1048576
+          ? jsonDecode(response.body)
+          : null;
+      if (v is Map<String, dynamic>) parsed = v;
+    } on FormatException {
+      parsed = null;
+    }
+    return (status: response.status, body: parsed);
   }
 
   @override

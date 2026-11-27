@@ -1,4 +1,35 @@
+import '../transfer/batch_import_saver.dart';
+import '../session_contract.dart' show SessionResponse;
+import '../transfer/passkey_export_transport.dart';
+import '../transfer/sealed_export_source.dart';
+import '../transfer/transfer_flow.dart';
+
 import 'dart:convert';
+import 'dart:async';
+
+import '../offline_totp/android_seed_custody.dart';
+import '../offline_totp/seed_install_id.dart';
+import '../offline_totp/seed_install_id_channel.dart';
+
+import 'package:flutter/services.dart';
+
+import '../offline_totp/android_wrapping_key_store.dart';
+import '../offline_totp/native_offline_workspace_runtime.dart';
+import 'native_workspace_admission.dart';
+import 'native_verified_owner.dart';
+import 'native_workspace_coordinator.dart';
+import 'native_offline_enrollment.dart';
+import '../offline_totp/seed_sync_coordinator.dart';
+import '../offline_totp/seed_sync_http.dart';
+import 'native_offline_setting.dart';
+import '../offline_totp/seed_sync_channel.dart';
+import '../offline_totp/seed_enrollment_coordinator.dart';
+import '../offline_totp/seed_enrollment_http.dart';
+import '../offline_totp/seed_status_channel.dart';
+import '../offline_totp/seed_status_coordinator.dart';
+import '../offline_totp/seed_status_http.dart';
+import 'native_offline_workspace_page.dart';
+
 import 'dart:io' show Platform;
 
 import 'native_platform_browser.dart';
@@ -26,6 +57,12 @@ import 'native_session.dart';
 /// Native sign-in, entry editing and settings are supported product behavior.
 /// They do not depend on opt-in build flags. Device enrollment/step-up remains
 /// separately gated until its independent qualification is complete.
+// Staging switch until the matching server seed-sync routes are deployed and
+// authenticated enrollment is qualified. Local cold storage has its own host.
+const nativeTransferEnabled = bool.fromEnvironment('NATIVE_TRANSFER_ENABLED');
+
+const nativeSeedSyncEnabled = bool.fromEnvironment('NATIVE_SEED_SYNC_ENABLED');
+
 const String apiOrigin = String.fromEnvironment(
   'OTPANDA_API_ORIGIN',
   defaultValue: 'https://otpanda-api.abrahammurciano.workers.dev',
@@ -43,10 +80,13 @@ Widget buildNativeRoot() {
 Widget buildAndroidNativeRootForTest({
   required NativeSessionController session,
   required BearerRequest request,
+  void Function(NativeWorkspaceCoordinator, NativeOfflineWorkspaceRuntime)?
+  observeWorkspace,
 }) => _Boot(
   google: AndroidGoogleSource(),
   sessionOverride: session,
   requestOverride: request,
+  observeWorkspace: observeWorkspace,
 );
 
 class _Boot extends StatefulWidget {
@@ -54,10 +94,16 @@ class _Boot extends StatefulWidget {
     required this.google,
     this.sessionOverride,
     this.requestOverride,
+    this.observeWorkspace,
   });
   final AndroidGoogleSource google;
   final NativeSessionController? sessionOverride;
   final BearerRequest? requestOverride;
+  final void Function(
+    NativeWorkspaceCoordinator,
+    NativeOfflineWorkspaceRuntime,
+  )?
+  observeWorkspace;
   @override
   State<_Boot> createState() => _BootState();
 }
@@ -65,14 +111,188 @@ class _Boot extends StatefulWidget {
 class _BootState extends State<_Boot> with WidgetsBindingObserver {
   late final NativeSessionController controller;
   late final NativeSessionBridge bridge;
+  late final NativeWorkspaceCoordinator workspace;
+  late final NativeOfflineWorkspaceRuntime offlineRuntime;
+  bool _admitting = false, _admitAgain = false;
+  late final NativeOfflineEnrollment offlineEnrollment;
+  late final SeedStatusCoordinator offlineStatus;
+  late final SeedSyncCoordinator offlinePull;
+  bool _pulling = false;
+  Future<void> _pullOfflineCodes() async {
+    final scope = workspace.scope;
+    if (!nativeSeedSyncEnabled ||
+        _pulling ||
+        scope == null ||
+        !await _currentOfflineOwner(scope.owner)) {
+      return;
+    }
+    _pulling = true;
+    try {
+      await offlinePull.sync(
+        SeedSyncScope(
+          owner: scope.owner,
+          installId: scope.install,
+          epoch: scope.epoch,
+          deviceId: controller.session?.deviceId,
+        ),
+      );
+      await offlineRuntime.refreshLocalCodes();
+    } finally {
+      _pulling = false;
+    }
+  }
+
+  void _offlineEnrollmentChanged() {
+    if (offlineEnrollment.confirmed) unawaited(_pullOfflineCodes());
+  }
+
+  int _transferFence = 0;
+  BatchImportSaver? _transferSaver;
+  SealedSeedExportSource? _transferSource;
+  Object? _transferSession;
+  void _retireTransfer() {
+    _transferFence++;
+    _transferSource?.cancel();
+    _transferSource = null;
+    _transferSaver = null;
+    _transferSession = null;
+  }
+
+  void _prepareTransfer(String owner) {
+    if (!nativeTransferEnabled || _transferSession == controller.session) {
+      return;
+    }
+    _retireTransfer();
+    final session = controller.session, fence = _transferFence;
+    if (session == null) return;
+    _transferSession = session;
+    Future<bool> current() async =>
+        fence == _transferFence &&
+        controller.session == session &&
+        await _currentOfflineOwner(owner);
+    _transferSaver = BatchImportSaver(
+      post: bridge.transferPost,
+      passkeys: passkeys,
+      current: current,
+    );
+    _transferSource = SealedSeedExportSource(
+      PasskeyExportTransport(
+        post: bridge.transferPost,
+        passkeys: passkeys,
+        ownerId: owner,
+        deviceId: session.deviceId,
+        current: current,
+      ),
+    );
+  }
+
+  final _verifiedOwner = NativeVerifiedOwner();
+  final _localOwnerDisplay = NativeLocalOwnerDisplay();
+  Future<bool> _currentOfflineOwner(String owner) async =>
+      mounted &&
+      _verifiedOwner.ownerFor(controller.session) == owner &&
+      controller.phase == NativeSessionPhase.signedIn &&
+      localLock.ready &&
+      !localLock.locked &&
+      localLock.foreground;
+  void _workspaceChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _admitWorkspace() async {
+    if (_admitting) {
+      _admitAgain = true;
+      return;
+    }
+    if (!mounted ||
+        controller.phase != NativeSessionPhase.signedIn ||
+        !localLock.ready ||
+        localLock.locked) {
+      return;
+    }
+    _admitting = true;
+    final session = controller.session;
+    try {
+      final r = await bridge.read('/v1/manage/session');
+      if (r.status != 200 ||
+          !identical(controller.session, session) ||
+          controller.phase != NativeSessionPhase.signedIn) {
+        return;
+      }
+      final j = jsonDecode(r.body), owner = j is Map ? j['ownerId'] : null;
+      if (owner is String && owner.isNotEmpty) {
+        await SeedInstallId(
+          SeedInstallIdChannelStore(
+            const MethodChannel('app.otpanda/seed-custody'),
+          ),
+        ).get();
+        if (!identical(controller.session, session) ||
+            controller.phase != NativeSessionPhase.signedIn) {
+          return;
+        }
+        _verifiedOwner.bind(session!, owner);
+        _localOwnerDisplay.verified(owner);
+        _prepareTransfer(owner);
+        offlineEnrollment.bindOwner(owner);
+        await offlineEnrollment.refresh();
+        await workspace.admitAuthenticated(
+          owner,
+          stillCurrent: () =>
+              identical(controller.session, session) &&
+              _verifiedOwner.ownerFor(session) == owner &&
+              controller.phase == NativeSessionPhase.signedIn,
+        );
+        if (nativeSeedSyncEnabled) unawaited(_pullOfflineCodes());
+      }
+    } catch (_) {
+    } finally {
+      _admitting = false;
+      if (_admitAgain) {
+        _admitAgain = false;
+        unawaited(_admitWorkspace());
+      }
+    }
+  }
+
+  Future<void> _signOut() async {
+    try {
+      _retireTransfer();
+      _verifiedOwner.clear();
+      offlineEnrollment.bindOwner(null);
+      await workspace.invalidate();
+      await controller.signOut();
+    } catch (_) {
+      if (mounted) setState(() {});
+    }
+  }
+
   final passkeys = AndroidPasskeySource();
   bool ready = false;
   final localLock = LocalLockController(ChannelLocalLock());
   late final lockNavigation = LockNavigationObserver(localLock);
+  bool _localReadReady = false;
   void _lockChanged() {
     navigationHistory.blocked = !localLock.ready || localLock.locked;
+    if (_workspaceInitialized && localLock.locked) _retireTransfer();
+    if (_workspaceInitialized) {
+      final allowed = localLock.ready && !localLock.locked;
+      bridge.setLocalReadAllowed(allowed);
+      if (_localReadReady != allowed) {
+        _localReadReady = allowed;
+        workspace.setReadsSuspended(!allowed);
+        workspace.localLockChanged();
+      }
+      if (localLock.ready && !localLock.locked && localLock.foreground) {
+        if (!workspace.hasLocalView) unawaited(workspace.discover());
+        unawaited(_admitWorkspace());
+        if (controller.phase == NativeSessionPhase.signedIn) {
+          unawaited(startup.sessionChanged(controller.session));
+        }
+      }
+    }
   }
 
+  bool _workspaceInitialized = false;
   final navigationHistory = NativeNavigationHistory();
   late final NativeStartupRecovery startup;
   late final NativeDevicesService devices;
@@ -99,7 +319,13 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
             recognition: AndroidRecognitionStore(),
           ),
         );
-    _bearer = widget.requestOverride ?? androidBearerRequest(apiOrigin);
+    final rawBearer = widget.requestOverride ?? androidBearerRequest(apiOrigin);
+    _bearer = (method, path, {body, query, required bearer}) async {
+      if (method == 'GET' && (!localLock.ready || localLock.locked)) {
+        return const SessionResponse(503, '{}');
+      }
+      return rawBearer(method, path, body: body, query: query, bearer: bearer);
+    };
     final proof = ChannelDeviceProofSource();
     final rawEnroll = ChannelPendingStore();
     startup = NativeStartupRecovery(
@@ -122,7 +348,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     bridge = NativeSessionBridge(
       controller,
       _bearer,
-      onLogout: () => controller.signOut(),
+      onLogout: () => unawaited(_signOut()),
       passkeys: passkeys,
       googleAvailability: () => widget.google.available,
       creation: passkeys,
@@ -131,6 +357,66 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       settingsEnabled: true,
       realtimeConnector: androidRealtimeConnector(apiOrigin),
     );
+    bridge.setLocalReadAllowed(localLock.ready && !localLock.locked);
+    offlineRuntime = NativeOfflineWorkspaceRuntime(
+      clock: () => DateTime.now().millisecondsSinceEpoch,
+    );
+    workspace = NativeWorkspaceCoordinator(
+      admission: NativeWorkspaceAdmission(),
+      custody: AndroidSeedCustody(),
+      keys: AndroidWrappingKeyStore(),
+      runtime: offlineRuntime,
+      locallyUnlocked: () => localLock.ready && !localLock.locked,
+    );
+    const seedChannel = MethodChannel('app.otpanda/seed-custody');
+    final seedNative = SeedSyncChannel(seedChannel);
+    final statusNative = SeedStatusChannel(seedChannel);
+    final statusTransport = SeedStatusHttp(
+      origin: nativeSeedSyncEnabled
+          ? apiOrigin
+          : 'https://otpanda-api.abrahammurciano.workers.dev',
+    );
+    offlineStatus = SeedStatusCoordinator(statusTransport, statusNative);
+    final seedApi = SeedEnrollmentHttp(
+      post: bridge.seedEnrollmentPost,
+      statusTransport: statusTransport,
+      signStatus:
+          ({
+            required owner,
+            required keyId,
+            required challenge,
+            required expiresAt,
+          }) => statusNative.signStatus(
+            owner: owner,
+            askedKeyId: keyId,
+            challenge: challenge,
+            expiresAt: expiresAt,
+          ),
+    );
+    offlineEnrollment = NativeOfflineEnrollment(
+      enrollment: SeedEnrollmentCoordinator(
+        native: SeedEnrollmentNativeAdapter(seedNative),
+        api: seedApi,
+        passkey: SeedPasskeyStepUp(passkeys),
+        isCurrent: _currentOfflineOwner,
+      ),
+      custody: AndroidSeedCustody(),
+      sync: seedNative,
+      isCurrent: _currentOfflineOwner,
+      installId: () =>
+          SeedInstallId(SeedInstallIdChannelStore(seedChannel)).get(),
+    );
+    offlinePull = SeedSyncCoordinator(
+      api: SeedSyncHttp(post: bridge.seedPullPost),
+      native: SeedSyncNativeAdapter(seedNative),
+      custody: AndroidSeedCustody(),
+      current: _currentOfflineOwner,
+    );
+    offlineEnrollment.addListener(_offlineEnrollmentChanged);
+    workspace.addListener(_workspaceChanged);
+    offlineRuntime.addListener(_workspaceChanged);
+    _workspaceInitialized = true;
+    widget.observeWorkspace?.call(workspace, offlineRuntime);
     localLock.recovery = NativeLocalLockRecovery(
       platform: ChannelLocalRecovery(),
       bearer: controller.accessToken,
@@ -173,10 +459,30 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     }
     // Only a real sign-out or sign-in-required clears state and the retry
     // floor. unknown (starting) and offline are transient: nothing changes.
+    if (controller.phase != NativeSessionPhase.signedIn ||
+        _verifiedOwner.ownerFor(controller.session) == null) {
+      _retireTransfer();
+      _verifiedOwner.clear();
+      offlineEnrollment.bindOwner(null);
+      final phase = controller.phase;
+      if (phase == NativeSessionPhase.signedOut ||
+          phase == NativeSessionPhase.signInRequired) {
+        workspace.lock();
+      } else if (phase == NativeSessionPhase.signedIn) {
+        workspace.lock();
+        // Local display does not require a server session. Reopen only through
+        // durable cold admission while the replacement owner is verified.
+        workspace.setReadsSuspended(!localLock.ready || localLock.locked);
+        workspace.localLockChanged();
+      }
+    }
     switch (controller.phase) {
       case NativeSessionPhase.signedIn:
+        unawaited(_admitWorkspace());
         devices.sessionChanged(controller.session);
-        startup.sessionChanged(controller.session);
+        if (localLock.ready && !localLock.locked) {
+          startup.sessionChanged(controller.session);
+        }
       case NativeSessionPhase.signedOut:
       case NativeSessionPhase.signInRequired:
         navigationHistory.clear();
@@ -193,18 +499,30 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       bridge.realtimeSetForeground(true);
+      if (nativeSeedSyncEnabled) unawaited(offlineStatus.checkAll());
+      // LocalLockController owns foreground/lock transitions and emits them.
+      unawaited(_admitWorkspace());
     } else if (state != AppLifecycleState.inactive) {
+      _retireTransfer();
       bridge.realtimeSetForeground(false);
+      workspace.lock();
     }
   }
 
   @override
   void dispose() {
+    _retireTransfer();
     WidgetsBinding.instance.removeObserver(this);
     controller.removeListener(_maybeRecover);
     startup.dispose();
     devices.dispose();
     bridge.disposeRealtime();
+    workspace.removeListener(_workspaceChanged);
+    offlineRuntime.removeListener(_workspaceChanged);
+    offlineEnrollment.removeListener(_offlineEnrollmentChanged);
+    offlineEnrollment.dispose();
+    workspace.dispose();
+    offlineRuntime.dispose();
     navigationHistory.dispose();
     localLock.removeListener(_lockChanged);
     lockNavigation.dispose();
@@ -222,50 +540,118 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
           googleAvailable: widget.google.available,
           version: const String.fromEnvironment('APP_VERSION'),
           authBridge: bridge,
-          signedInBuilder: (context) => NativeNavigation(
-            history: navigationHistory,
-            builder: (context, route, navigate) {
-              final page = BrowserAccountPage(
-                bridge: bridge,
-                localSecuritySetting: LocalLockSetting(controller: localLock),
-                navigation: route,
-                onNavigate: navigate,
-                accountOnly: true,
-                signOutEnabled: true,
-                workspaceEnabled: true,
-                // Off with NATIVE_AUTH_ENABLED: needs the enrolled device key.
-                assignmentEnabled: nativeAuthEnabled,
-                // Own switch: needs the server's native entry routes.
-                entryEditEnabled: true,
-                entryDomainsEnabled: true,
-              );
-              // Only with NATIVE_AUTH_ENABLED: the way into phone sign-in.
-              if (!nativeAuthEnabled) return page;
-              return Stack(
-                children: [
-                  page,
-                  Positioned(
-                    right: 12,
-                    bottom: 12,
-                    child: SafeArea(
-                      child: FloatingActionButton.extended(
-                        heroTag: 'phone-sign-in',
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => NativeDevicesPage(service: devices),
+          localOfflineBuilder: (context) =>
+              workspace.hasLocalView &&
+                  _localOwnerDisplay.allows(workspace.scope!.owner)
+              ? NativeOfflineWorkspacePage(
+                  runtime: offlineRuntime,
+                  onReconnect: () => unawaited(controller.forceRenew()),
+                )
+              : null,
+          signedInBuilder: (context) => _UnlockedAccountContent(
+            key: ValueKey(controller.session?.deviceId),
+            lock: localLock,
+            builder: (context) => NativeNavigation(
+              history: navigationHistory,
+              builder: (context, route, navigate) {
+                final page = BrowserAccountPage(
+                  bridge: bridge,
+                  importSaver: _transferSaver,
+                  transferPage:
+                      _transferSaver != null && _transferSource != null
+                      ? TransferFlow(
+                          key: ValueKey('transfer-$_transferFence'),
+                          saver: _transferSaver!,
+                          exportSource: _transferSource!,
+                          onSaved: () async {
+                            await _admitWorkspace();
+                          },
+                        )
+                      : const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text(
+                            'Transfer codes is not available until this client and its server support are activated.',
                           ),
                         ),
-                        icon: const Icon(Icons.phonelink_lock),
-                        label: const Text('Phone sign-in'),
+                  onWorkspaceReady: workspace.bind,
+                  onWorkspaceClosed: workspace.unbind,
+                  localSecuritySetting: Column(
+                    children: [
+                      LocalLockSetting(controller: localLock),
+                      if (nativeSeedSyncEnabled)
+                        NativeOfflineSetting(enrollment: offlineEnrollment),
+                    ],
+                  ),
+                  navigation: route,
+                  onNavigate: navigate,
+                  accountOnly: true,
+                  signOutEnabled: true,
+                  workspaceEnabled: true,
+                  // Off with NATIVE_AUTH_ENABLED: needs the enrolled device key.
+                  assignmentEnabled: nativeAuthEnabled,
+                  // Own switch: needs the server's native entry routes.
+                  entryEditEnabled: true,
+                  entryDomainsEnabled: true,
+                );
+                // Only with NATIVE_AUTH_ENABLED: the way into phone sign-in.
+                if (!nativeAuthEnabled) return page;
+                return Stack(
+                  children: [
+                    page,
+                    Positioned(
+                      right: 12,
+                      bottom: 12,
+                      child: SafeArea(
+                        child: FloatingActionButton.extended(
+                          heroTag: 'phone-sign-in',
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  NativeDevicesPage(service: devices),
+                            ),
+                          ),
+                          icon: const Icon(Icons.phonelink_lock),
+                          label: const Text('Phone sign-in'),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              );
-            },
+                  ],
+                );
+              },
+            ),
           ),
         )
       : const SizedBox.shrink();
+}
+
+// Do not start account reads before first unlock. Once mounted, keep the
+// subtree under the existing lock overlay so system prompts/app switches do
+// not discard forms or trigger a full refetch on every unlock.
+class _UnlockedAccountContent extends StatefulWidget {
+  const _UnlockedAccountContent({
+    super.key,
+    required this.lock,
+    required this.builder,
+  });
+  final LocalLockController lock;
+  final WidgetBuilder builder;
+  @override
+  State<_UnlockedAccountContent> createState() =>
+      _UnlockedAccountContentState();
+}
+
+class _UnlockedAccountContentState extends State<_UnlockedAccountContent> {
+  bool admitted = false;
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.lock,
+    builder: (context, _) {
+      if (widget.lock.ready && !widget.lock.locked && widget.lock.foreground) {
+        admitted = true;
+      }
+      return admitted ? widget.builder(context) : const SizedBox.shrink();
+    },
+  );
 }
 
 // Device id is not a secret, but it only has meaning with the Keystore key.

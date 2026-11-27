@@ -31,7 +31,20 @@ data class CustodyOwnerState(val epoch: Long, val enabled: Boolean)
 data class Snapshot(
     val epoch: Long, val revision: Long, val complete: Boolean,
     val versions: Map<String, Long>, val tombstones: Map<String, Long> = emptyMap(),
-)
+    /** Entries the server lists as unsupported or metadata-pending. A complete snapshot does not remove them by absence from [versions]. A tombstone still does. */
+    val preserve: Set<String> = emptySet(),
+) {
+    /** SHA-256 over the canonical full statement (epoch, revision, complete, sorted versions, tombstones, preserve). Equal ids and values give an equal identity. */
+    fun identity(): String {
+        val t = buildString {
+            append("e ").append(epoch).append("\nr ").append(revision).append("\nc ").append(if (complete) 1 else 0).append('\n')
+            for ((e, v) in versions.toSortedMap()) append("v ").append(enc(e)).append(' ').append(v).append('\n')
+            for ((e, v) in tombstones.toSortedMap()) append("t ").append(enc(e)).append(' ').append(v).append('\n')
+            for (e in preserve.sorted()) append("p ").append(enc(e)).append('\n')
+        }
+        return java.security.MessageDigest.getInstance("SHA-256").digest(t.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+    }
+}
 
 data class ReconcileOutcome(
     val removed: List<String>, val superseded: List<String>, val needsProvision: List<String>, val pendingPurge: List<String>,
@@ -97,6 +110,7 @@ internal class OwnerState(val owner: String) {
     var disabled = false
     var snapEpoch = -1L // -1: none applied
     var snapRevision = 0L
+    var snapIdentity = "" // empty: written before identities existed, so an equal revision is never replayed
     val records = LinkedHashMap<String, Rec>()
     val marks = HashMap<String, Marks>()
     val pending = ArrayList<Pend>()
@@ -119,7 +133,7 @@ internal class OwnerState(val owner: String) {
     fun encode(): String = buildString {
         append(STATE_HEADER).append('\n').append("owner ").append(enc(owner)).append('\n')
         append("epoch ").append(epoch).append('\n').append("disabled ").append(if (disabled) 1 else 0).append('\n')
-        append(if (snapEpoch < 0) "snap none\n" else "snap $snapEpoch $snapRevision\n")
+        append(if (snapEpoch < 0) "snap none\n" else "snap $snapEpoch $snapRevision" + (if (snapIdentity.isEmpty()) "" else " $snapIdentity") + "\n")
         for ((e, m) in marks.toSortedMap()) if (m.floor > 0 || m.denyUp > 0 || m.minAccept > 0)
             append("mark ${enc(e)} ${m.floor} ${m.denyUp} ${m.minAccept}\n")
         for ((e, r) in records.toSortedMap()) append("rec ${enc(e)} ${r.version} ${r.epoch} ${r.algorithm.name} ${r.digits} ${r.period} ${r.level} ${r.alias}\n")
@@ -140,7 +154,8 @@ internal class OwnerState(val owner: String) {
             require(s.epoch in 0 until CUSTODY_MAX_SAFE_INT)
             require(lines[3] == "disabled 0" || lines[3] == "disabled 1"); s.disabled = lines[3] == "disabled 1"
             if (lines[4] != "snap none") {
-                val p = lines[4].split(' '); require(p.size == 3 && p[0] == "snap")
+                val p = lines[4].split(' '); require((p.size == 3 || p.size == 4) && p[0] == "snap")
+                if (p.size == 4) { require(p[3].matches(Regex("[0-9a-f]{64}"))); s.snapIdentity = p[3] }
                 s.snapEpoch = p[1].toLong(); s.snapRevision = p[2].toLong()
                 require(s.snapEpoch in 0 until CUSTODY_MAX_SAFE_INT && s.snapRevision in 1..CUSTODY_MAX_SAFE_INT)
             }
@@ -344,18 +359,22 @@ class NativeSeedCustodyCore(private val vault: KeyVault, private val store: Owne
         if (s.epoch < 0 || s.epoch >= CUSTODY_MAX_SAFE_INT || s.revision < 1 || s.revision > CUSTODY_MAX_SAFE_INT ||
             s.versions.size > MAX_SNAPSHOT_ENTRIES || s.tombstones.size > MAX_SNAPSHOT_ENTRIES) bad()
         for (m in listOf(s.versions, s.tombstones)) for ((e, v) in m) if (!validCustodyId(e) || v < 1 || v > CUSTODY_MAX_SAFE_INT) bad()
+        if (s.preserve.size > MAX_SNAPSHOT_ENTRIES || s.preserve.any { !validCustodyId(it) || s.versions.containsKey(it) }) bad()
         for ((e, v) in s.versions) { val t = s.tombstones[e]; if (t != null && v <= t) bad() }
         val state = load(owner)
         if (state.disabled) fail(CustodyError.DISABLED)
         if (s.epoch < state.epoch) fail(CustodyError.STALE_EPOCH)
         if (s.epoch > state.epoch) fail(CustodyError.EPOCH_MISMATCH)
-        if (state.snapEpoch >= 0 && (s.epoch < state.snapEpoch || (s.epoch == state.snapEpoch && s.revision <= state.snapRevision))) fail(CustodyError.STALE_SNAPSHOT)
-        state.snapEpoch = s.epoch; state.snapRevision = s.revision
+        val identity = s.identity()
+        // Equal (epoch, revision) is replayed only when the durably recorded full statement is identical. Lower, or equal with a different or unknown identity, is stale.
+        val replay = state.snapEpoch == s.epoch && s.revision == state.snapRevision && state.snapIdentity.isNotEmpty() && state.snapIdentity == identity
+        if (state.snapEpoch >= 0 && !replay && (s.epoch < state.snapEpoch || (s.epoch == state.snapEpoch && s.revision <= state.snapRevision))) fail(CustodyError.STALE_SNAPSHOT)
+        state.snapEpoch = s.epoch; state.snapRevision = s.revision; state.snapIdentity = identity
         for ((e, v) in s.versions) { val m = state.marksOf(e); if (v > m.minAccept) m.minAccept = v }
         val removed = ArrayList<String>(); val superseded = ArrayList<String>()
         for (r in state.records.values.toList()) {
             val t = s.tombstones[r.entry]
-            val gone = (t != null && r.version <= t) || (s.complete && !s.versions.containsKey(r.entry) && t == null)
+            val gone = (t != null && r.version <= t) || (s.complete && !s.versions.containsKey(r.entry) && r.entry !in s.preserve && t == null)
             val listed = s.versions[r.entry]
             if (gone) { state.deny(r.entry, r.version); removed.add(r.entry); state.retire(r) }
             else if (listed != null && listed > r.version) { state.deny(r.entry, r.version); superseded.add(r.entry); state.retire(r) }

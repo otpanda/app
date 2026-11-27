@@ -439,4 +439,142 @@ void main() {
       expect(calls, isEmpty);
     },
   );
+
+  group('journaled enrollment methods', () {
+    final digest = 'd' * 64;
+    Map<String, Object?> journal(String phase, Object? action) => {
+      'keyId': key,
+      'publicKey': pub,
+      'installId': install,
+      'generation': 1,
+      'phase': phase,
+      'actionDigest': action,
+    };
+    test('prepare sends the exact request and checks the echo', () async {
+      handler = (c) async => {
+        'keyId': key,
+        'publicKey': pub,
+        'generation': 1,
+        'installId': install,
+      };
+      final e = await adapter().prepareEnrollment(
+        owner: 'owner',
+        installId: install,
+        generation: 1,
+      );
+      expect(e.keyId, key);
+      expect(calls.single.method, 'syncPrepareEnrollment');
+      expect(calls.single.arguments, {
+        'owner': 'owner',
+        'installId': install,
+        'generation': 1,
+      });
+    });
+    test('prepare echo mismatch and timeout are unknown outcomes', () async {
+      handler = (c) async => {
+        'keyId': key,
+        'publicKey': pub,
+        'generation': 2,
+        'installId': install,
+      };
+      await expectLater(
+        adapter().prepareEnrollment(
+          owner: 'owner',
+          installId: install,
+          generation: 1,
+        ),
+        failure(SeedSyncFailureKind.unknownOutcome),
+      );
+      handler = (c) => Completer<Object?>().future;
+      await expectLater(
+        adapter(
+          timeout: const Duration(milliseconds: 20),
+        ).prepareEnrollment(owner: 'owner', installId: install, generation: 1),
+        failure(SeedSyncFailureKind.unknownOutcome),
+      );
+    });
+    test('prepare refusal from an existing key is not retried', () async {
+      handler = (c) async =>
+          throw PlatformException(code: 'ERASE_INCOMPLETE', message: 'x');
+      await expectLater(
+        adapter().prepareEnrollment(
+          owner: 'owner',
+          installId: install,
+          generation: 1,
+        ),
+        failure(SeedSyncFailureKind.eraseIncomplete),
+      );
+      expect(calls.length, 1);
+    });
+    test('journal parses all phases and null', () async {
+      handler = (c) async => null;
+      expect(await adapter().enrollmentJournal('owner'), isNull);
+      handler = (c) async => journal('prepared', null);
+      var j = (await adapter().enrollmentJournal('owner'))!;
+      expect(j.phase, SeedEnrollmentPhase.prepared);
+      expect(j.actionDigest, isNull);
+      j.publicKey[1] = 0;
+      expect(j.publicKey[1], 1);
+      handler = (c) async => journal('signed', digest);
+      j = (await adapter().enrollmentJournal('owner'))!;
+      expect(j.phase, SeedEnrollmentPhase.signed);
+      expect(j.actionDigest, digest);
+      handler = (c) async => journal('confirmed', digest);
+      j = (await adapter().enrollmentJournal('owner'))!;
+      expect(j.phase, SeedEnrollmentPhase.confirmed);
+      expect(calls.every((c) => c.method == 'syncEnrollmentJournal'), true);
+    });
+    test('journal rejects inconsistent or malformed records', () async {
+      for (final bad in <Object?>[
+        journal('prepared', digest),
+        journal('signed', null),
+        journal('signed', 'short'),
+        journal('unknown', null),
+        {...journal('prepared', null), 'extra': 1},
+        'x',
+      ]) {
+        handler = (c) async => bad;
+        await expectLater(
+          adapter().enrollmentJournal('owner'),
+          failure(SeedSyncFailureKind.malformedReply),
+        );
+      }
+    });
+    test('confirm sends the exact tuple and needs a bool', () async {
+      handler = (c) async => true;
+      expect(
+        await adapter().confirmEnrollment(
+          owner: 'owner',
+          keyId: key,
+          actionDigest: digest,
+        ),
+        true,
+      );
+      expect(calls.single.method, 'syncConfirmEnrollment');
+      expect(calls.single.arguments, {
+        'owner': 'owner',
+        'keyId': key,
+        'actionDigest': digest,
+      });
+      handler = (c) async => 'yes';
+      await expectLater(
+        adapter().confirmEnrollment(
+          owner: 'owner',
+          keyId: key,
+          actionDigest: digest,
+        ),
+        failure(SeedSyncFailureKind.unknownOutcome),
+      );
+      calls.clear();
+      await expectLater(
+        adapter().confirmEnrollment(
+          owner: 'owner',
+          keyId: 'bad',
+          actionDigest: digest,
+        ),
+        failure(SeedSyncFailureKind.invalidInput),
+      );
+      expect(calls, isEmpty);
+    });
+  });
 }

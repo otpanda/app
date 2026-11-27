@@ -131,6 +131,8 @@ class LocalLockController extends ChangeNotifier {
       locked = false;
       error = null;
       _emit();
+    } else {
+      _emit();
     }
   }
 
@@ -152,6 +154,8 @@ class LocalLockController extends ChangeNotifier {
     if (enabled && !locked) {
       locked = true;
       _rotate();
+      _emit();
+    } else {
       _emit();
     }
   }

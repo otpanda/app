@@ -83,6 +83,7 @@ void main() {
           var denyRenew = false;
           var now = DateTime.fromMillisecondsSinceEpoch(1000000);
           final calls = <Map<dynamic, dynamic>>[];
+          var accountReads = 0;
           final messenger =
               TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
           for (final name in [
@@ -163,8 +164,10 @@ void main() {
               key: pixels,
               child: buildAndroidNativeRootForTest(
                 session: controller,
-                request: (method, path, {body, query, required bearer}) async =>
-                    const SessionResponse(503, '{}'),
+                request: (method, path, {body, query, required bearer}) async {
+                  accountReads++;
+                  return const SessionResponse(503, '{}');
+                },
               ),
             ),
           );
@@ -174,6 +177,11 @@ void main() {
           expect(find.text('OTPanda is locked'), findsOneWidget);
           expect(renews, 1);
           expect(calls, isEmpty); // no auto-recovery or lock enable
+          expect(
+            accountReads,
+            0,
+            reason: 'locked root must not mount account reads',
+          );
           final screenshot = Platform.environment['OTPANDA_TEST_SCREENSHOT'];
           if (!disable && !cancelSession && screenshot != null) {
             await t.runAsync(() async {

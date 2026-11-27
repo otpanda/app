@@ -250,6 +250,39 @@ fun main() {
         check(t.gen(e = "a") == "94287082")
         want(CustodyError.STALE_SNAPSHOT) { t.c.reconcile("o", Snapshot(0, 1, true, mapOf("a" to 1L))) }
     }
+    // Equal-revision replay: only when the durable full statement is identical.
+    run {
+        val t = Env(); t.prov(e = "a"); t.prov(e = "b")
+        val snap = Snapshot(0, 5, true, mapOf("a" to 1L, "d" to 2L), mapOf("c" to 1L), setOf("b"))
+        val r1 = t.c.reconcile("o", snap)
+        check(r1.removed.isEmpty() && r1.needsProvision == listOf("d")) { "$r1" } // b is preserved though absent from versions
+        check(t.gen(e = "b") == "94287082")
+        val r2 = t.c.reconcile("o", snap.copy()) // replay, e.g. after a killed pull: same needs, nothing new removed
+        check(r2.needsProvision == listOf("d") && r2.removed.isEmpty() && r2.superseded.isEmpty()) { "$r2" }
+        want(CustodyError.STALE_SNAPSHOT) { t.c.reconcile("o", snap.copy(complete = false)) }
+        want(CustodyError.STALE_SNAPSHOT) { t.c.reconcile("o", snap.copy(versions = mapOf("a" to 1L, "d" to 3L))) }
+        want(CustodyError.STALE_SNAPSHOT) { t.c.reconcile("o", snap.copy(tombstones = emptyMap())) }
+        want(CustodyError.STALE_SNAPSHOT) { t.c.reconcile("o", snap.copy(preserve = emptySet())) }
+        want(CustodyError.STALE_SNAPSHOT) { t.c.reconcile("o", snap.copy(revision = 4)) }
+        check(t.c.reconcile("o", snap.copy(revision = 6, preserve = emptySet())).removed == listOf("b")) // a newer one without preserve removes b
+    }
+    run { // The replay identity survives a restart (state is re-read from the store), a legacy state without identity never replays.
+        val t = Env(); t.prov(e = "a")
+        val snap = Snapshot(0, 2, true, mapOf("a" to 1L, "d" to 2L))
+        t.c.reconcile("o", snap)
+        val c2 = NativeSeedCustodyCore(t.vault, t.store)
+        check(c2.reconcile("o", snap).needsProvision == listOf("d"))
+        want(CustodyError.STALE_SNAPSHOT) { c2.reconcile("o", snap.copy(versions = mapOf("a" to 1L))) }
+        t.prov(e = "d", v = 2)
+        check(NativeSeedCustodyCore(t.vault, t.store).reconcile("o", snap).needsProvision.isEmpty())
+    }
+    run { // a tombstone still removes a preserved entry; preserve naming a listed entry is invalid
+        val t = Env(); t.prov(e = "a")
+        check(t.c.reconcile("o", Snapshot(0, 1, true, mapOf(), mapOf("a" to 1L), setOf("a"))).removed == listOf("a"))
+        val u = Env(); u.prov(e = "a")
+        want(CustodyError.INVALID_SNAPSHOT) { u.c.reconcile("o", Snapshot(0, 1, true, mapOf("a" to 1L), emptyMap(), setOf("a"))) }
+        want(CustodyError.INVALID_SNAPSHOT) { u.c.reconcile("o", Snapshot(0, 1, true, mapOf(), emptyMap(), setOf(""))) }
+    }
     run {
         val t = Env(); t.prov(e = "a")
         want(CustodyError.INVALID_SNAPSHOT) { t.c.reconcile("o", Snapshot(0, 0, true, mapOf())) }
@@ -378,8 +411,10 @@ internal fun channelTests() {
     check(code(h.handle("provision", base + ("seed" to s1()) + ("unexpected" to true))) == "INVALID_INPUT")
     check(code(h.handle("capability", mapOf("unexpected" to true))) == "INVALID_INPUT")
     check(h.handle("nope", null) == ChannelReply.NotImplemented)
-    check(code(h.handle("reconcile", mapOf("owner" to "o", "snapshot" to mapOf("epoch" to 0, "revision" to 1, "complete" to "yes", "versions" to mapOf<String, Long>(), "tombstones" to mapOf<String, Long>())))) == "INVALID_INPUT")
-    val rc = ok(h.handle("reconcile", mapOf("owner" to "o", "snapshot" to mapOf("epoch" to 0, "revision" to 1, "complete" to true, "versions" to mapOf("e" to 1L), "tombstones" to mapOf<String, Long>()))))
+    check(code(h.handle("reconcile", mapOf("owner" to "o", "snapshot" to mapOf("epoch" to 0, "revision" to 1, "complete" to "yes", "versions" to mapOf<String, Long>(), "tombstones" to mapOf<String, Long>(), "preserve" to listOf<String>())))) == "INVALID_INPUT")
+    val rc = ok(h.handle("reconcile", mapOf("owner" to "o", "snapshot" to mapOf("epoch" to 0, "revision" to 1, "complete" to true, "versions" to mapOf("e" to 1L), "tombstones" to mapOf<String, Long>(), "preserve" to listOf<String>()))))
+    for (bad in listOf<Map<String, Any?>>(mapOf(), mapOf("preserve" to "x"), mapOf("preserve" to listOf("p", "p")), mapOf("preserve" to listOf(1))))
+        check(code(h.handle("reconcile", mapOf("owner" to "o", "snapshot" to mapOf("epoch" to 0, "revision" to 2, "complete" to true, "versions" to mapOf<String, Long>(), "tombstones" to mapOf<String, Long>()) + bad))) == "INVALID_INPUT")
     check((rc.value as Map<*, *>)["removed"] == emptyList<String>())
     t.store.down = true; check(code(h.handle("purgePending", null)) == "METADATA_UNAVAILABLE"); t.store.down = false
     check((ok(h.handle("clearOwner", mapOf("owner" to "o", "epoch" to 0))).value as Map<*, *>)["denied"] == true)
