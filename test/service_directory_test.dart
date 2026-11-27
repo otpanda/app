@@ -315,6 +315,44 @@ void main() {
       expect(calls, 1);
       d.dispose();
     });
+    test(
+      'refresh from ensureReady continuation honors explicit request',
+      () async {
+        final store = MemStore();
+        final now = DateTime.utc(2026, 1, 1);
+        await store.write(
+          'catalog.json',
+          Uint8List.fromList(
+            utf8.encode(
+              jsonEncode({
+                'at': now.millisecondsSinceEpoch,
+                'rows': [
+                  {
+                    'n': 'Github',
+                    'd': ['github.com'],
+                    'i': 'github.com.svg',
+                  },
+                ],
+              }),
+            ),
+          ),
+        );
+        var calls = 0;
+        final d = ServiceDirectory(
+          store: store,
+          now: () => now,
+          bundledText: noBundle,
+          client: () => MockClient((_) async {
+            calls++;
+            return http.Response(catalog, 200);
+          }),
+        );
+        await d.ensureReady();
+        await d.refresh();
+        expect(calls, 1);
+        d.dispose();
+      },
+    );
     test('network fills cache; fresh cache means no second request', () async {
       final store = MemStore();
       var calls = 0;
