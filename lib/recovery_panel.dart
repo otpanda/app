@@ -76,6 +76,18 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
   }
 
   @override
+  void didUpdateWidget(covariant RecoveryPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.bridge, widget.bridge)) {
+      epoch++;
+      status = null;
+      failed = false;
+      message = '';
+      load();
+    }
+  }
+
+  @override
   void dispose() {
     epoch++;
     super.dispose();
@@ -102,6 +114,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
   }
 
   Future<void> act(Future<void> Function() action, String done) async {
+    if (!mounted) return;
     final mine = ++epoch;
     setState(() {
       busy = true;
@@ -124,6 +137,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
   }
 
   Future<bool> confirm(String title, String body, String action) async {
+    final mine = epoch;
     final r = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -142,10 +156,12 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
         ],
       ),
     );
-    return r == true;
+    return r == true && mounted && mine == epoch;
   }
 
   Future<void> enable() async {
+    final mine = epoch;
+    final delayDays = status!.delayDays;
     var accepted = false;
     final go = await showDialog<bool>(
       context: context,
@@ -158,7 +174,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'If you lose every passkey and device, you could regain access using only your email, after a ${status!.delayDays}-day wait. '
+                'If you lose every passkey and device, you could regain access using only your email, after a $delayDays-day wait. '
                 'Anyone who controls your mailbox could also start this. You can cancel while it waits, but only from a signed-in passkey device.',
               ),
               const SizedBox(height: 8),
@@ -186,7 +202,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
         ),
       ),
     );
-    if (go != true) return;
+    if (go != true || !mounted || mine != epoch) return;
     await act(
       () => widget.bridge.recoveryChange(
         const RecoveryChange(RecoveryKind.emailEscapeOn, warningAccepted: true),
@@ -212,6 +228,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
   }
 
   Future<void> renamePasskey(RecoveryPasskey p) async {
+    final mine = epoch;
     final c = TextEditingController(text: p.label ?? '');
     final ok = await showDialog<bool>(
       context: context,
@@ -245,7 +262,7 @@ class _RecoveryPanelState extends State<RecoveryPanel> {
     );
     // Not disposed here: the closing dialog still draws with it.
     final name = c.text.trim();
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted || mine != epoch) return;
     final next = name.isEmpty ? null : name;
     if (next == p.label) return;
     await act(
