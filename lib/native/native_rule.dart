@@ -162,6 +162,9 @@ class NativeRuleDriver {
       now: _now(),
       ownerId: me.ownerId,
       deviceId: me.deviceId,
+      // Match the existing native action-proof 30-second clock allowance.
+      // The server still enforces its exact two-minute intent expiry.
+      maxAheadMs: maxProofLifetimeMs,
     );
     final action = b['action'] as String, a = jsonDecode(action) as List;
     if (b['proofRequired'] == false) {
@@ -178,7 +181,7 @@ class NativeRuleDriver {
           token: null,
           challenge: null,
           prompt: null,
-          expiresAt: b['expiresAt'],
+          expiresAt: (b['expiresAt'] as int).clamp(0, _now() + 120000),
         ),
         summary,
       );

@@ -17,6 +17,7 @@ Map<String, dynamic> validateRuleAction(
   String? ownerId,
   String? deviceId,
   int? generation,
+  int maxAheadMs = 120000,
 }) {
   Never bad() => throw const FormatException('Invalid signed rule action');
   final action = b['action'];
@@ -60,7 +61,7 @@ Map<String, dynamic> validateRuleAction(
   final exp = b['expiresAt'];
   if (exp is! int ||
       exp <= now ||
-      exp > now + 120000 ||
+      exp > now + maxAheadMs ||
       (op == 'review' ? a[11] is! int || a[11] < exp : a[11] != null)) {
     bad();
   }

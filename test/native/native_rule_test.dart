@@ -143,6 +143,40 @@ Map<String, dynamic> target([String op = 'resume']) => {
 };
 void main() {
   test(
+    'native rule allows bounded server clock lead without longer local TTL',
+    () async {
+      for (final ahead in [120139, 150000]) {
+        var clock = now;
+        final b = begin(shared: false)..['expiresAt'] = now + ahead;
+        final d = NativeRuleDriver(
+          source: Source(),
+          identity: () async =>
+              (ownerId: 'owner', deviceId: 'device', keyId: null),
+          now: () => clock,
+          post: (_, _) async => (status: 200, body: b),
+        );
+        await d.prepare(jsonEncode(target()));
+        clock += 120001;
+        expect(await d.confirm(), 'expired');
+      }
+      for (final exp in [now, now - 1, now + 150001]) {
+        final b = begin(shared: false)..['expiresAt'] = exp;
+        final d = NativeRuleDriver(
+          source: Source(),
+          identity: () async =>
+              (ownerId: 'owner', deviceId: 'device', keyId: null),
+          now: () => now,
+          post: (_, _) async => (status: 200, body: b),
+        );
+        await expectLater(
+          d.prepare(jsonEncode(target())),
+          throwsFormatException,
+        );
+      }
+    },
+  );
+
+  test(
     'realistic UUID connector and account fit signed shared prompt',
     () async {
       final b = begin(), a = jsonDecode(begin()['action']) as List;
