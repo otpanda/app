@@ -26,6 +26,9 @@ struct Probe {
         let b = UInt8(a.count > 3 ? a[3] : "1", radix: 16) ?? 1
         let r = try WrappingKeyCore.create(ops, a[2], Data(repeating: b, count: 32))
         print("ok key=\(hex(r.key)) created=\(r.created) marker=\(probeMarker)")
+      case "trust": // trust <ns> <binary path>: PROBE-only ACL append experiment (WrappingKeyProbeTrust.swift)
+        guard a.count >= 4 else { print("usage"); exit(2) }
+        print("\(ProbeTrust.trust(ns: a[2], path: a[3])) marker=\(probeMarker)")
       case "delete":
         try WrappingKeyCore.delete(ops, a[2])
         print("ok key=none created=- marker=\(probeMarker)")

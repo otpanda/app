@@ -28,7 +28,7 @@ run() { # bounded; prints the probe line plus elapsed seconds. A kill by the ala
 build() { # out marker [explicit-DR]
   echo "let probeMarker = \"$2\"" > "$D/marker.swift"
   swiftc -parse-as-library -o "$1" "$SRC/WrappingKeyCore.swift" \
-    "$SRC/WrappingKeyKeychain.swift" "$SRC/WrappingKeyProbe.swift" "$D/marker.swift" || exit 3
+    "$SRC/WrappingKeyKeychain.swift" "$SRC/WrappingKeyProbe.swift" "$SRC/WrappingKeyProbeTrust.swift" "$D/marker.swift" || exit 3
   if [ "${3:-}" = dr ]; then
     codesign --force -s - -i app.otpanda.probe \
       -r='designated => identifier "app.otpanda.probe"' "$1"
@@ -70,7 +70,7 @@ teardown_cert() { [ -n "$CERTKC" ] && { security list-keychains -d user -s $OLDL
 
 build_cert() { # out marker : stable identity = identifier + certificate leaf hash
   echo "let probeMarker = \"$2\"" > "$D/marker.swift"
-  swiftc -parse-as-library -o "$1" "$SRC/WrappingKeyCore.swift" "$SRC/WrappingKeyKeychain.swift" "$SRC/WrappingKeyProbe.swift" "$D/marker.swift" || exit 3
+  swiftc -parse-as-library -o "$1" "$SRC/WrappingKeyCore.swift" "$SRC/WrappingKeyKeychain.swift" "$SRC/WrappingKeyProbe.swift" "$SRC/WrappingKeyProbeTrust.swift" "$D/marker.swift" || exit 3
   codesign --force -s "otpanda probe codesign" -i app.otpanda.probe \
     -r="designated => identifier \"app.otpanda.probe\" and certificate leaf = H\"$CERTSHA\"" "$1" 2>&1 | head -3
   echo "  designated requirement of $(basename "$1"): $(codesign -d -r- "$1" 2>&1 | grep '^designated')"
@@ -119,10 +119,32 @@ matrix() { # name plain|dr|cert
   security delete-generic-password -s "$SVC" -a "$ns2" >/dev/null 2>&1
 }
 
+# Handoff experiment (plain ad-hoc only): the trusted v1 appends a STAGED next build to the item's decrypt ACL, the staged build is then moved over v1's
+# path (the in-place upgrade shape), and read/duplicate-create are measured. Only one named binary is appended; nothing is opened to all applications.
+handoff() {
+  local ns="probe-$$-$RANDOM-handoff" r v1="$D/ph/probe" st="$D/ph/staged"
+  echo "== scenario handoff (plain ad-hoc; v1 trusts the staged next build before the in-place replace)"
+  mkdir -p "$D/ph"; build "$v1" a plain
+  r=$(run "$v1" create "$ns" 11); echo "  v1 create             : $r"
+  build "$st" b plain
+  r=$(run "$st" read "$ns");      echo "  DATA staged read BEFORE trust (expect denied): $r"
+  r=$(run "$v1" trust "$ns" "$st"); echo "  DATA v1 trust staged  : $r"
+  dump_acl "$ns"
+  r=$(run "$st" read "$ns");      echo "  DATA staged read AFTER trust : $r"
+  mv -f "$st" "$v1"
+  r=$(run "$v1" read "$ns");      echo "  DATA in-place replaced read  : $r"
+  r=$(run "$v1" create "$ns" 33); echo "  DATA in-place replaced dup   : $r"
+  if security find-generic-password -s "$SVC" -a "$ns" >/dev/null 2>&1; then echo "  item still present: yes"; else bad "handoff: item vanished"; fi
+  security delete-generic-password -s "$SVC" -a "$ns" >/dev/null 2>&1
+}
+handoff
+
 matrix plain plain
 matrix dr dr
 if [ "${OTPANDA_PROBE_THROWAWAY_CERT:-0}" = 1 ]; then
   if setup_cert; then matrix cert cert; else echo "== scenario cert SKIPPED (could not create a throwaway signing identity here): data only"; fi
+else
+  echo "== scenario cert SKIPPED (OTPANDA_PROBE_THROWAWAY_CERT not enabled): data only"
 fi
 teardown_cert
 rm -rf "$D"
