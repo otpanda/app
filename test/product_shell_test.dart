@@ -488,26 +488,12 @@ void main() {
     },
   );
 
-  testWidgets(
-    'restored product tab is bounded and navigation emits only an enum',
-    (t) async {
-      int? selected;
-      await pump(
-        t,
-        FakeTransport(routes()),
-        initialTab: 3,
-        onTabChanged: (tab) => selected = tab,
-      );
-      expect(
-        t.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        3,
-      );
-      await t.tap(find.text('Sources').last);
-      await t.pumpAndSettle();
-      expect(selected, 1);
-      expect(t.takeException(), isNull);
-    },
-  );
+  testWidgets('unified Codes has no tab navigation', (t) async {
+    await pump(t, FakeTransport(routes()));
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.text('Sources'), findsNothing);
+    expect(t.takeException(), isNull);
+  });
 
   testWidgets('genuine empty account shows empty state, no demo data', (
     t,
@@ -591,7 +577,7 @@ void main() {
       ],
     });
     await pump(t, FakeTransport(r));
-    expect(find.text('Just arrived'), findsOneWidget);
+    expect(find.text('New arrivals'), findsOneWidget);
     expect(
       find.byKey(const Key('fresh-Unassigned code-333333')),
       findsOneWidget,
@@ -656,7 +642,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Just arrived'), findsNothing);
+    expect(find.text('New arrivals'), findsNothing);
     expect(find.text('555555'), findsOneWidget);
   });
 
@@ -718,7 +704,7 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('Updating your codes automatically'), findsOneWidget);
     expect(find.text('No codes yet'), findsNothing);
-    expect(bridge.calls, 5);
+    expect(bridge.calls, 6);
   });
 
   Map<String, SessionResponse> twoEntries({bool manage = true}) => routes(
@@ -793,7 +779,7 @@ void main() {
     expect(find.text('Alpha Two'), findsOneWidget);
     expect(find.text('Alpha'), findsNothing);
     expect(find.text('me'), findsNothing);
-    expect(tr.calls, 5);
+    expect(tr.calls, 6);
   });
 
   testWidgets(
@@ -809,7 +795,7 @@ void main() {
       await t.tap(find.byKey(const Key('entry-save')));
       await t.pumpAndSettle();
       expect(find.text('Gamma'), findsOneWidget);
-      await t.tap(find.text('Codes'));
+      // Unified page stays on Codes after the edit. No tab navigation.
       await t.pumpAndSettle();
       expect(find.text('Gamma'), findsOneWidget);
       expect(find.text('Alpha'), findsNothing);
@@ -1055,21 +1041,11 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('Zed'), findsOneWidget);
     expect(t.widget<TextField>(field).controller!.text, '');
-    // Typed query clears on tab change; search hidden on Sources.
+    // Unified page retains the search until the explicit clear action.
     await t.enterText(field, 'zed');
     await t.pumpAndSettle();
-    await t.tap(find.text('Sources'));
-    await t.pumpAndSettle();
-    expect(
-      find.descendant(of: bar, matching: find.byType(TextField)),
-      findsNothing,
-    );
-    await t.tap(find.text('Entries'));
-    await t.pumpAndSettle();
-    final f2 = find.descendant(of: bar, matching: find.byType(TextField));
-    expect(f2, findsOneWidget);
-    expect(t.widget<TextField>(f2).controller!.text, '');
-    expect(find.text('Acme'), findsOneWidget);
+    expect(find.text('Zed'), findsOneWidget);
+    expect(find.text('Acme'), findsNothing);
     semantics.dispose();
   });
 
@@ -1104,11 +1080,9 @@ void main() {
     const gridLeft = (1600 - 1100) / 2;
     const gridRight = gridLeft + 1100;
     // The search fills the content column from its left edge.
-    expect(t.getTopLeft(field).dx, gridLeft + 232);
+    expect(t.getTopLeft(field).dx, gridLeft + 180);
     // The brand aligns with the first nav tile below it.
-    final tile = find.widgetWithText(ListTile, 'Codes');
     final logo = find.descendant(of: bar, matching: find.byType(Image));
-    expect(t.getTopLeft(logo).dx, t.getTopLeft(tile).dx);
     expect(t.getTopLeft(logo).dx, gridLeft + 24);
     // The account button ends at the content column's right edge.
     final account = find.descendant(of: bar, matching: find.byType(IconButton));
@@ -1117,7 +1091,7 @@ void main() {
     // Narrower desktop: the grid stops centering and hugs the left edge.
     t.view.physicalSize = const Size(800, 900);
     await t.pumpAndSettle();
-    expect(t.getTopLeft(field).dx, 232);
+    expect(t.getTopLeft(field).dx, 180);
     expect(t.getTopLeft(logo).dx, 24);
   });
 

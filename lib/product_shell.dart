@@ -517,7 +517,8 @@ class _ProductShellState extends State<ProductShell>
                 Padding(
                   padding: const EdgeInsets.all(8),
                   child: SizedBox(
-                    height: 40,
+                    height:
+                        40 * MediaQuery.textScalerOf(context).scale(14) / 14,
                     child: Row(
                       children: [
                         ?leading,
@@ -571,7 +572,7 @@ class _ProductShellState extends State<ProductShell>
                                       fontFeatures: [
                                         FontFeature.tabularFigures(),
                                       ],
-                                      fontSize: 20,
+                                      fontSize: 22,
                                       fontWeight: FontWeight.w600,
                                       color: expired ? muted : ink,
                                     ),
@@ -631,7 +632,7 @@ class _ProductShellState extends State<ProductShell>
                                       : 'No active code',
                                   style: const TextStyle(
                                     fontFamily: 'CodeMono',
-                                    fontSize: 20,
+                                    fontSize: 22,
                                     fontWeight: FontWeight.w600,
                                     color: muted,
                                   ),
@@ -839,7 +840,7 @@ class _ProductShellState extends State<ProductShell>
             .toList()
           ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
     hadFresh = fresh.isNotEmpty || freshPrivate.isNotEmpty;
-    final desktop = MediaQuery.sizeOf(context).width > 700;
+    final desktop = _showCopyButton;
     Widget section(String title, List<Widget> cards) => cards.isEmpty
         ? const SizedBox.shrink()
         : Padding(
@@ -942,7 +943,7 @@ class _ProductShellState extends State<ProductShell>
         e.service,
         e.account,
         value,
-        copy,
+        generated != null && !generated.copyable ? null : copy,
         true,
         arrival,
         selectedAccounts.isNotEmpty && !desktop
@@ -953,6 +954,19 @@ class _ProductShellState extends State<ProductShell>
                       ? selectedAccounts.remove(e.id)
                       : selectedAccounts.add(e.id),
                 ),
+              )
+            : editable(e)
+            ? PopupMenuButton<String>(
+                tooltip: 'Account actions',
+                onSelected: (action) {
+                  if (action == 'edit') editEntry(e);
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Text('Edit account'),
+                  ),
+                ],
               )
             : null,
         e.catalogId,
@@ -1062,7 +1076,10 @@ class _ProductShellState extends State<ProductShell>
             ),
         ]),
         section('Accounts', [
-          for (final e in ordered.where((e) => !e.totp)) account(e),
+          for (final e in ordered.where(
+            (e) => !e.totp && !fresh.any((f) => f.id == e.id),
+          ))
+            account(e),
         ]),
         if (filters.isEmpty && query.trim().isEmpty)
           section('Needs assignment', [
@@ -1071,15 +1088,19 @@ class _ProductShellState extends State<ProductShell>
             ))
               reviewTile(review, private, now),
             for (final c in private.where(
-              (c) => !widget.controller.contexts.any(
-                (r) => r.eventId == c.eventId && r.retained(now),
-              ),
+              (c) =>
+                  !freshPrivate.contains(c) &&
+                  !widget.controller.contexts.any(
+                    (r) => r.eventId == c.eventId && r.retained(now),
+                  ),
             ))
               unassigned(c),
           ]),
         if (widget.organizationTools != null) widget.organizationTools!,
-        if (entries.isEmpty && private.isEmpty)
-          empty('No accounts yet', 'Add an authenticator or connect a source.'),
+        if (entries.isEmpty &&
+            private.isEmpty &&
+            widget.controller.contexts.isEmpty)
+          empty('No codes yet', 'Add an authenticator or connect a source.'),
       ],
     );
   }
@@ -1670,25 +1691,30 @@ class _ProductShellState extends State<ProductShell>
                                 width: 180,
                                 child: Padding(
                                   padding: const EdgeInsets.only(left: 24),
-                                  child: Row(
-                                    children: [
-                                      Image.memory(
-                                        ottyImage,
-                                        width: 42,
-                                        height: 42,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      const Text(
-                                        'OTPanda',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          fontFamily: 'BricolageGrotesque',
-                                          fontSize: 23,
-                                          letterSpacing: -1,
-                                          color: ink,
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    alignment: Alignment.centerLeft,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Image.memory(
+                                          ottyImage,
+                                          width: 42,
+                                          height: 42,
                                         ),
-                                      ),
-                                    ],
+                                        const SizedBox(width: 8),
+                                        const Text(
+                                          'OTPanda',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            fontFamily: 'BricolageGrotesque',
+                                            fontSize: 23,
+                                            letterSpacing: -1,
+                                            color: ink,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),

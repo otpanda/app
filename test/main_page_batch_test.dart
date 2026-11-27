@@ -1013,7 +1013,7 @@ void main() {
           200,
           jsonEncode({
             'entries': [
-              for (var i = 0; i < 8; i++)
+              for (var i = 0; i < 20; i++)
                 {
                   'entry_id': 'entry$i',
                   'label': 'Test $i',
