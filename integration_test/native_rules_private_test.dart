@@ -82,11 +82,12 @@ class _HarnessBrowser implements BrowserHandoff {
 }
 
 final _shotKey = GlobalKey();
+final _captureKey = GlobalKey();
 
 Future<void> _shot(WidgetTester t, String name) async {
   await t.pump(const Duration(milliseconds: 300));
   final b =
-      _shotKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      _captureKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
   final bytes = await t.runAsync(() async {
     final img = await b.toImage(pixelRatio: 1);
     final d = await img.toByteData(format: ui.ImageByteFormat.png);
@@ -192,18 +193,21 @@ void main() {
       await t.binding.setSurfaceSize(const Size(390, 844));
       addTearDown(() => t.binding.setSurfaceSize(null));
       await t.pumpWidget(
-        MaterialApp(
-          theme: otpandaTheme(),
-          home: RepaintBoundary(
-            key: _shotKey,
-            child: StatefulBuilder(
-              builder: (context, set) => BrowserAccountPage(
-                bridge: bridge,
-                navigation: route,
-                onNavigate: (r) => set(() => route = r),
-                accountOnly: true,
-                workspaceEnabled: true,
-                entryEditEnabled: true,
+        RepaintBoundary(
+          key: _captureKey,
+          child: MaterialApp(
+            theme: otpandaTheme(),
+            home: RepaintBoundary(
+              key: _shotKey,
+              child: StatefulBuilder(
+                builder: (context, set) => BrowserAccountPage(
+                  bridge: bridge,
+                  navigation: route,
+                  onNavigate: (r) => set(() => route = r),
+                  accountOnly: true,
+                  workspaceEnabled: true,
+                  entryEditEnabled: true,
+                ),
               ),
             ),
           ),
