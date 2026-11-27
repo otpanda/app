@@ -1,3 +1,4 @@
+import 'transfer/import_review.dart';
 import 'branding.dart';
 import 'display_settings.dart';
 import 'source_settings.dart';
@@ -64,6 +65,8 @@ class BrowserAccountPage extends StatefulWidget {
   final bool workspaceEnabled;
   final int Function()? clock;
   final Widget? localSecuritySetting;
+  final Widget? transferPage;
+  final ImportSaver? importSaver;
 
   /// Unified codes or an allowed settings/recovery route. Unknown routes go home.
   final String? navigation;
@@ -83,6 +86,8 @@ class BrowserAccountPage extends StatefulWidget {
     this.workspaceEnabled = false,
     this.clock,
     this.localSecuritySetting,
+    this.transferPage,
+    this.importSaver,
     this.navigation,
     this.onNavigate,
   });
@@ -1803,6 +1808,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       preference: tileDisplay,
                     ),
                     SettingsCategory.about: const AboutPage(),
+                    SettingsCategory.transfer:
+                        widget.transferPage ??
+                        const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text(
+                            'Transfer codes is not available on this client yet.',
+                          ),
+                        ),
                   },
                 ),
               ),
@@ -1844,6 +1857,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         ['restored', 'session-paused', 'restoring'].contains(status) &&
         !accountOpen) {
       return ProductShell(
+        importSaver: widget.importSaver,
         navigation: widget.navigation,
         onNavigate: widget.onNavigate,
         organization: organizationReady ? organization : null,

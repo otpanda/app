@@ -1,3 +1,8 @@
+import 'package:otpanda_client/transfer/import_review.dart';
+import 'package:otpanda_client/offline_totp/google_migration.dart';
+import 'package:otpanda_client/offline_totp/otp_account.dart';
+
+import 'dart:typed_data';
 import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
@@ -50,8 +55,61 @@ class Bridge implements BrowserSessionBridge, TotpManagementBridge {
   }
 }
 
+class BatchSaver implements ImportSaver {
+  int calls = 0;
+  @override
+  bool get atomic => true;
+  @override
+  Future<ImportSaveOutcome> save(List<OtpAccount> a) async {
+    calls++;
+    return ImportSaveOutcome.saved;
+  }
+}
+
 void main() {
   qrTests();
+  testWidgets(
+    'existing add scanner auto-dispatches Google export to whole batch review',
+    (t) async {
+      final bridge = Bridge(), saver = BatchSaver();
+      void Function(String)? scan;
+      await t.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (c) => TextButton(
+              onPressed: () => addTotpDialog(
+                c,
+                bridge,
+                importSaver: saver,
+                camera: (onText, onError) {
+                  scan = onText;
+                  return const SizedBox();
+                },
+              ),
+              child: const Text('Add'),
+            ),
+          ),
+        ),
+      );
+      await t.tap(find.text('Add'));
+      await t.pumpAndSettle();
+      final a = OtpAccount(
+          issuer: null,
+        accountName: 'synthetic',
+        secret: Uint8List.fromList(List.filled(20, 42)),
+      );
+      scan!(encodeMigrationUris([a], batchId: 77).single);
+      await t.pumpAndSettle();
+      expect(find.text('Review import'), findsOneWidget);
+      expect(saver.calls, 0);
+      expect(bridge.adds, 0);
+      await t.tap(find.text('Cancel'));
+      await t.pumpAndSettle();
+      expect(saver.calls, 0);
+      expect(bridge.adds, 0);
+    },
+  );
+
   testWidgets(
     'missing passkey routes to account settings before secret entry',
     (t) async {

@@ -3,7 +3,11 @@ import 'package:material_ui/material_ui.dart';
 import '../app_theme.dart';
 import '../offline_totp/import_outcome.dart';
 import '../offline_totp/otp_account.dart';
+import 'export_encoders.dart';
+import 'export_entry.dart';
 import 'export_plan.dart';
+import 'google_raw_export.dart';
+import 'sealed_export_source.dart';
 import 'import_review.dart';
 import 'qr_view.dart';
 
@@ -240,12 +244,17 @@ typedef ExportFileSaver = Future<bool> Function(String fileName, String text);
 class ExportCodesPage extends StatefulWidget {
   const ExportCodesPage({
     super.key,
-    required this.source,
+    this.source,
+    this.entries,
     this.batchId = 1,
     this.saveFile,
     this.newUuid,
-  });
-  final SeedExportSource source;
+  }) : assert((source == null) != (entries == null));
+
+  /// Exactly one of [source] (accounts, older shape) and [entries] (raw entries
+  /// from the sealed export, which keep their exact label text) is given.
+  final SeedExportSource? source;
+  final ExportEntrySource? entries;
   final int batchId;
 
   /// When null the file formats are not offered (no save adapter on this
@@ -259,7 +268,11 @@ class ExportCodesPage extends StatefulWidget {
 }
 
 class _ExportState extends State<ExportCodesPage> with WidgetsBindingObserver {
-  List<OtpAccount>? held;
+  List<ExportedEntry>? held;
+  List<ExportedEntry> blocked = const [];
+  List<ExportedEntry> caution = const [];
+  bool catalogNote = false;
+  bool displayNameNote = false;
   List<String>? uris;
   List<GoogleExportNote> notes = const [];
   int shown = 0;
@@ -280,11 +293,31 @@ class _ExportState extends State<ExportCodesPage> with WidgetsBindingObserver {
     if (!foreground) _drop();
   }
 
+  void _endSourceAttempt() {
+    final Object? s = widget.entries ?? widget.source;
+    if (s is ExportCancelable) s.cancel();
+  }
+
+  void _release() {
+    final h = held;
+    held = null;
+    if (h != null) {
+      for (final e in h) {
+        e.dispose();
+      }
+    }
+  }
+
   void _drop() {
     ++exportGeneration;
+    _endSourceAttempt();
+    _release();
     if (mounted) {
       setState(() {
-        held = null;
+        blocked = const [];
+        caution = const [];
+        catalogNote = false;
+        displayNameNote = false;
         uris = null;
         notes = const [];
         shown = 0;
@@ -297,7 +330,8 @@ class _ExportState extends State<ExportCodesPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     ++exportGeneration;
-    held = null;
+    _endSourceAttempt();
+    _release();
     uris = null;
     super.dispose();
   }
@@ -310,18 +344,48 @@ class _ExportState extends State<ExportCodesPage> with WidgetsBindingObserver {
       busy = true;
       message = '';
     });
+    List<ExportedEntry>? all;
     try {
-      final all = await widget.source.exportAll();
-      if (!active()) return;
-      final plan = planGoogleExport(all);
-      final u = googleExportUris(plan.accounts, batchId: widget.batchId);
-      if (!mounted) return;
+      final raw = widget.entries;
+      if (raw != null) {
+        all = await raw.exportEntries();
+      } else {
+        final accounts = await widget.source!.exportAll();
+        all = [
+          for (var i = 0; i < accounts.length; i++)
+            ExportedEntry.fromAccount(accounts[i], 'a$i'),
+        ];
+      }
+      if (!active()) {
+        // A late result is never shown and its secrets are overwritten.
+        for (final e in all) {
+          e.dispose();
+        }
+        return;
+      }
+      final g = planGoogleRawExport(all, batchId: widget.batchId);
+      final u = g.uris;
+      final plan = g.notes;
+      if (!mounted) {
+        for (final e in all) {
+          e.dispose();
+        }
+        return;
+      }
+      final keep = all;
+      all = null;
       setState(() {
-        held = all;
+        held = keep;
+        blocked = g.blocked;
+        caution = googleDisplayCaution(keep);
+        catalogNote = keep.any((e) => e.catalogId != null);
+        displayNameNote = keep.any((e) => e.labelDiffers);
         uris = u;
-        notes = plan.notes;
+        notes = plan;
         shown = 0;
-        message = u == null ? 'There are no accounts to export.' : '';
+        message = g.blocked.isEmpty && u == null
+            ? 'There are no accounts to export.'
+            : '';
       });
     } on ExportAuthException catch (e) {
       if (mounted) {
@@ -336,6 +400,11 @@ class _ExportState extends State<ExportCodesPage> with WidgetsBindingObserver {
         setState(() => message = 'Export failed. Nothing was shown.');
       }
     } finally {
+      if (all != null) {
+        for (final e in all) {
+          e.dispose();
+        }
+      }
       if (mounted) setState(() => busy = false);
     }
   }
@@ -345,8 +414,30 @@ class _ExportState extends State<ExportCodesPage> with WidgetsBindingObserver {
     if (all == null || saver == null || uuid == null || busy) return;
     setState(() => busy = true);
     try {
-      final ok = await saver(name, exportFileText(f, all, newUuid: uuid));
-      if (mounted) setState(() => message = ok ? 'File saved.' : 'Not saved.');
+      final enc = encodeExportEntries(f, all, newUuid: uuid);
+      final text = enc.text;
+      if (text == null) {
+        if (mounted) {
+          setState(
+            () => message =
+                'Not saved. This format cannot hold the text of ${enc.unencodable.length} account${enc.unencodable.length == 1 ? '' : 's'} exactly: ${enc.unencodable.map((e) => showSafely(e.label ?? e.accountName)).join(', ')}. Nothing was changed. Try Bitwarden JSON or Aegis.',
+          );
+        }
+      } else {
+        final ok = await saver(name, text);
+        final extra = [
+          if (enc.notCarried.contains(ExportNotCarried.displayName)) 'Display names that differ from the account name are not in this format.',
+          if (enc.notCarried.contains(ExportNotCarried.catalogId))
+            'Catalog links are not included.',
+        ].join(' ');
+        if (mounted) {
+          setState(
+            () => message = ok
+                ? (extra.isEmpty ? 'File saved.' : 'File saved. $extra')
+                : 'Not saved.',
+          );
+        }
+      }
     } catch (_) {
       if (mounted) setState(() => message = 'Could not save the file.');
     } finally {
@@ -390,6 +481,23 @@ class _ExportState extends State<ExportCodesPage> with WidgetsBindingObserver {
                   '${n.issuer == null ? n.accountName : '${n.issuer} (${n.accountName})'} ${_what(n)}.',
                 ),
             ],
+            if (blocked.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'No QR code was made. ${blocked.length} account${blocked.length == 1 ? '' : 's'} cannot be written into one: ${blocked.map((e) => showSafely(e.label ?? e.accountName)).join(', ')}. The text is not valid Unicode or is too large for a QR. Nothing was changed.${widget.saveFile != null && widget.newUuid != null ? ' You can save a file instead.' : ''}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+            if (u != null && caution.isNotEmpty)
+              Text(
+                'Google Authenticator may show these names differently (colons, spaces at the ends, or hidden characters): ${caution.map((e) => showSafely(e.label ?? e.accountName)).join(', ')}. The text is exported unchanged.',
+              ),
+            if (u != null && displayNameNote)
+              const Text(
+                'Display names that differ from the account name are not carried by Google Authenticator.',
+              ),
+            if (u != null && catalogNote)
+              const Text('Catalog links are not included.'),
             const SizedBox(height: 12),
             if (u != null) ...[
               Text(

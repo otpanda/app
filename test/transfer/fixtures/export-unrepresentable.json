@@ -1,0 +1,83 @@
+{
+ "owner": "synthetic-owner",
+ "device": "synthetic-device",
+ "generation": 2,
+ "clientPublic": "BJPGLpJJnRhozMd8-tBwNNPqqJ3HYj3njTiZoL60NhSnNWbkGFVygv6KHPDN_6TPwrtedaHj0FNiRdlIQR8dr5w",
+ "clientScalar": "XexV9tmrtjaxoqwWeCoBUFKiSE0PsGIMTxI0XnAhu0E",
+ "actionDigest": "5f2eedc769d6a33e58b97bc8d7df686642d10f09d83690c8e7ba4e768ab04021",
+ "begin": [
+  {
+   "entryId": "e1",
+   "version": "1111111111111111111111111111111111111111111111111111111111111111",
+   "label": "Alpha \"q\" é",
+   "account": "a:b",
+   "issuer": "Iss",
+   "catalogId": null
+  },
+  {
+   "entryId": "e2",
+   "version": "2222222222222222222222222222222222222222222222222222222222222222",
+   "label": "Beta",
+   "account": null,
+   "issuer": null,
+   "catalogId": "beta.example"
+  },
+  {
+   "entryId": "e3",
+   "version": "3333333333333333333333333333333333333333333333333333333333333333",
+   "label": "Gamma 日本 😀",
+   "account": "g",
+   "issuer": "G ",
+   "catalogId": null
+  }
+ ],
+ "response": {
+  "serverPublicKey": "BEvrg353E96AlInYD01JRDpVSxsPhPEb4Hg0RrgE-wODv8ZKVwRbYTQd7IsbGMi7OPwcbv7sndS9TNbTvfwJslM",
+  "entries": [
+   {
+    "entryId": "e1",
+    "version": "1111111111111111111111111111111111111111111111111111111111111111",
+    "label": "Alpha \"q\" é",
+    "account": "a:b",
+    "issuer": "Iss",
+    "catalogId": null,
+    "algorithm": "SHA-1",
+    "digits": 6,
+    "period": 30,
+    "nonce": "t_ql2g8ulJJwuUPh",
+    "ciphertext": "Jdan4pyZm2ji86b_5sTs15VMgTuzhLbwdLN8JwGpHXpyt6qY"
+   },
+   {
+    "entryId": "e2",
+    "version": "2222222222222222222222222222222222222222222222222222222222222222",
+    "label": "Beta",
+    "account": null,
+    "issuer": null,
+    "catalogId": "beta.example",
+    "algorithm": "SHA-256",
+    "digits": 7,
+    "period": 45,
+    "nonce": "KKNrM7G7k9GQC2fU",
+    "ciphertext": "5DjCxqYO4q3ygiJpKFNAhdInyRQIaDWzQbB6rbCEtuVNxC-S"
+   },
+   {
+    "entryId": "e3",
+    "version": "3333333333333333333333333333333333333333333333333333333333333333",
+    "label": "Gamma 日本 😀",
+    "account": "g",
+    "issuer": "G ",
+    "catalogId": null,
+    "algorithm": "SHA-512",
+    "digits": 8,
+    "period": 30,
+    "nonce": "zuH_xQI97n5-muYe",
+    "ciphertext": "eTV_Wye0BUt3VSJS4eR8L8G5KxaKCX3SUs8Jj2MAyP261zuq"
+   }
+  ]
+ },
+ "fills": [
+  11,
+  22,
+  33
+ ]
+}
