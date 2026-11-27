@@ -219,7 +219,13 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
         _prepareTransfer(owner);
         offlineEnrollment.bindOwner(owner);
         await offlineEnrollment.refresh();
-        await workspace.admitAuthenticated(owner);
+        await workspace.admitAuthenticated(
+          owner,
+          stillCurrent: () =>
+              identical(controller.session, session) &&
+              _verifiedOwner.ownerFor(session) == owner &&
+              controller.phase == NativeSessionPhase.signedIn,
+        );
         if (nativeSeedSyncEnabled) unawaited(_pullOfflineCodes());
       }
     } catch (_) {
@@ -414,6 +420,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       _retireTransfer();
       _verifiedOwner.clear();
       offlineEnrollment.bindOwner(null);
+      workspace.lock();
     }
     switch (controller.phase) {
       case NativeSessionPhase.signedIn:

@@ -201,6 +201,59 @@ void main() {
     },
   );
   test(
+    'session replacement while admission waits cannot open or confirm',
+    () async {
+      final runtime = NativeOfflineWorkspaceRuntime(clock: () => 59000);
+      final entered = Completer<void>();
+      final reply = Completer<Map<String, Object>>();
+      var current = true, confirms = 0;
+      const channel = MethodChannel('test/admission-session');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'admit') {
+              entered.complete();
+              return reply.future;
+            }
+            if (call.method == 'confirm') confirms++;
+            throw StateError('unexpected');
+          });
+      final c = NativeWorkspaceCoordinator(
+        admission: NativeWorkspaceAdmission(channel: channel),
+        custody: FakeSeedCustody(),
+        keys: FakeSecretStore(),
+        runtime: runtime,
+        locallyUnlocked: () => true,
+      );
+      try {
+        final pending = c.admitAuthenticated(
+          'owner',
+          stillCurrent: () => current,
+        );
+        await entered.future;
+        current = false;
+        reply.complete({
+          'scope': {
+            'owner': 'owner',
+            'install': 'A' * 43,
+            'epoch': 0,
+            'namespace': 'workspace',
+            'path': '/never-open-session',
+          },
+          'createAllowed': true,
+        });
+        await pending;
+        expect(confirms, 0);
+        expect(c.scope, isNull);
+        expect(runtime.phase, NativeOfflineWorkspacePhase.locked);
+      } finally {
+        c.dispose();
+        runtime.dispose();
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      }
+    },
+  );
+  test(
     'discovery rejects forged create authority and malformed scope',
     () async {
       const channel = MethodChannel('test/admission-reject');

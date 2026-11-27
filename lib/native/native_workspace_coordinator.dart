@@ -67,9 +67,11 @@ class NativeWorkspaceCoordinator extends ChangeNotifier {
   Future<void> _open(
     NativeWorkspaceScope found,
     bool create,
-    int generation,
-  ) async {
-    if (!active(generation)) return;
+    int generation, {
+    bool Function()? stillCurrent,
+  }) async {
+    bool current() => active(generation) && (stillCurrent?.call() ?? true);
+    if (!current()) return;
     await runtime.open(
       keys: keys,
       custody: custody,
@@ -79,9 +81,9 @@ class NativeWorkspaceCoordinator extends ChangeNotifier {
       install: found.install,
       epoch: found.epoch,
       admittedFreshWorkspace: create,
-      stillLocallyUnlocked: () => active(generation),
+      stillLocallyUnlocked: current,
     );
-    if (!active(generation)) return;
+    if (!current()) return;
     if (runtime.phase != NativeOfflineWorkspacePhase.ready) {
       throw StateError('Workspace unavailable');
     }
@@ -93,34 +95,46 @@ class NativeWorkspaceCoordinator extends ChangeNotifier {
 
   /// Caller has verified this owner from a fresh authenticated session response.
   /// This never enables custody or enrolls a device implicitly.
-  Future<void> admitAuthenticated(String owner) {
+  Future<void> admitAuthenticated(
+    String owner, {
+    bool Function()? stillCurrent,
+  }) {
     final generation = _generation;
-    return _serial(() => _admitAuthenticated(owner, generation));
+    return _serial(() => _admitAuthenticated(owner, generation, stillCurrent));
   }
 
-  Future<void> _admitAuthenticated(String owner, int generation) async {
-    if (!active(generation)) return;
+  Future<void> _admitAuthenticated(
+    String owner,
+    int generation,
+    bool Function()? stillCurrent,
+  ) async {
+    bool current() => active(generation) && (stillCurrent?.call() ?? true);
+    if (!current()) return;
     try {
       final state = await custody.readOwnerState(owner);
-      if (!active(generation) || !state.enabled) return;
+      if (!current() || !state.enabled) return;
       _admittedOwner = owner;
       final admitted = await admission.admit(owner, state.epoch);
-      if (!active(generation)) return;
+      if (!current()) return;
       if (scope == null ||
           !scope!.same(admitted.scope) ||
           runtime.phase != NativeOfflineWorkspacePhase.ready) {
-        await _open(admitted.scope, admitted.create, generation);
+        await _open(
+          admitted.scope,
+          admitted.create,
+          generation,
+          stillCurrent: current,
+        );
       }
-      if (!active(generation) ||
-          runtime.phase != NativeOfflineWorkspacePhase.ready) {
+      if (!current() || runtime.phase != NativeOfflineWorkspacePhase.ready) {
         return;
       }
       await admission.confirm(admitted.scope);
-      if (!active(generation)) return;
+      if (!current()) return;
       scope = admitted.scope;
       _published();
     } catch (_) {
-      if (active(generation)) {
+      if (current()) {
         unavailable = true;
         notifyListeners();
       }
