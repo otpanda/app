@@ -18,6 +18,14 @@ const maxMigrationUriLength = 16384, maxAccountsPerBatch = 50;
 /// only when the period is not 30, and only when the caller opts in.
 const otpandaPeriodField = 15;
 
+/// OTPanda extension on OtpParameters: protobuf field 16, varint, the original
+/// digit count (6..8). Field 5 stays Google's enum (six or eight; a 7-digit key
+/// is written as six so Google still parses it). Written only for 7 digits and
+/// only when the caller opts in. Field 16 is the next free number after 15 and
+/// is not one of Google's known fields. Whether Google accepts or ignores it, and
+/// what it shows for a 7-digit key, is NOT verified.
+const otpandaDigitsField = 16;
+
 class MigrationBatch {
   MigrationBatch(
     this.accounts,
@@ -135,6 +143,7 @@ List<String> encodeMigrationUris(
   required int batchId,
   int perBatch = 10,
   bool periodExtension = false,
+  bool digitsExtension = false,
 }) {
   if (accounts.isEmpty ||
       perBatch < 1 ||
@@ -144,9 +153,13 @@ List<String> encodeMigrationUris(
     throw const OtpFormatException(OtpFormatError.tooLarge);
   }
   for (final a in accounts) {
+    final digitsOk = digitsExtension
+        ? a.digits >= 6 && a.digits <= 8
+        : a.digits == 6 || a.digits == 8;
     final ok = periodExtension
-        ? (a.digits == 6 || a.digits == 8) && a.period >= 1 && a.period <= 86400
-        : isMigrationRepresentable(a);
+        ? digitsOk && a.period >= 1 && a.period <= 86400
+        : isMigrationRepresentable(a) ||
+              (digitsExtension && a.period == 30 && digitsOk);
     if (!ok) {
       throw const OtpFormatException(OtpFormatError.notRepresentable);
     }
@@ -163,7 +176,7 @@ List<String> encodeMigrationUris(
   for (;;) {
     final uris = [
       for (var i = 0; i < chunks.length; i++)
-        'otpauth-migration://offline?data=${Uri.encodeQueryComponent(base64.encode(_encodePayload(chunks[i], chunks.length, i, batchId, periodExtension)))}',
+        'otpauth-migration://offline?data=${Uri.encodeQueryComponent(base64.encode(_encodePayload(chunks[i], chunks.length, i, batchId, periodExtension, digitsExtension)))}',
     ];
     final big = [
       for (var i = 0; i < uris.length; i++)
@@ -347,11 +360,13 @@ OtpAccount _decodeParams(
   Uint8List? secret;
   String? name, issuer;
   var algo = 0, digits = 0, type = 0;
-  int? extPeriod;
+  int? extPeriod, extDigits;
   final seen = <int>{};
   while (!r.done) {
     final tag = r.u32(), field = tag ~/ 8, wire = tag % 8;
-    if ((field >= 1 && field <= 6 || field == otpandaPeriodField) &&
+    if ((field >= 1 && field <= 6 ||
+            field == otpandaPeriodField ||
+            field == otpandaDigitsField) &&
         !seen.add(field)) {
       throw const OtpFormatException(OtpFormatError.malformed);
     }
@@ -376,6 +391,13 @@ OtpAccount _decodeParams(
         throw const OtpFormatException(OtpFormatError.malformed);
       }
       extPeriod = v;
+    } else if (field == otpandaDigitsField) {
+      if (wire != 0) throw const OtpFormatException(OtpFormatError.malformed);
+      final v = r.u32();
+      if (v < 6 || v > 8) {
+        throw const OtpFormatException(OtpFormatError.malformed);
+      }
+      extDigits = v;
     } else {
       r.skip(wire); // includes HOTP counter (7); type is checked below
     }
@@ -388,11 +410,17 @@ OtpAccount _decodeParams(
     3 => OtpAlgorithm.sha512,
     _ => throw const OtpFormatException(OtpFormatError.unsupportedAlgorithm),
   };
-  final d = switch (digits) {
+  final base = switch (digits) {
     0 || 1 => 6,
     2 => 8,
     _ => throw const OtpFormatException(OtpFormatError.unsupportedDigits),
   };
+  // The extension may only refine Google's value: 6 or 7 sit on the six enum,
+  // 8 on the eight enum. Anything else is a conflicting, forged payload.
+  if (extDigits != null && (extDigits == 8) != (base == 8)) {
+    throw const OtpFormatException(OtpFormatError.malformed);
+  }
+  final d = extDigits ?? base;
   if (secret == null || name == null) {
     throw const OtpFormatException(OtpFormatError.malformed);
   }
@@ -422,7 +450,7 @@ OtpAccount _decodeParams(
     assumed: {
       if (extPeriod == null) OtpAssumption.period,
       if (algo == 0) OtpAssumption.algorithm,
-      if (digits == 0) OtpAssumption.digits,
+      if (digits == 0 && extDigits == null) OtpAssumption.digits,
     },
   );
 }
@@ -460,6 +488,7 @@ Uint8List _encodePayload(
   int index,
   int id,
   bool periodExtension,
+  bool digitsExtension,
 ) {
   final o = BytesBuilder();
   for (final a in accounts) {
@@ -480,6 +509,9 @@ Uint8List _encodePayload(
     });
     _intField(p, 5, a.digits == 8 ? 2 : 1);
     _intField(p, 6, 2);
+    if (digitsExtension && a.digits == 7) {
+      _intField(p, otpandaDigitsField, 7);
+    }
     if (periodExtension && a.period != 30) {
       _intField(p, otpandaPeriodField, a.period);
     }

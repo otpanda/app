@@ -52,9 +52,9 @@ final class GoogleExportNote {
         ),
       );
     }
-    // The true period travels in the OTPanda extension field (Google ignores
-    // it and shows 30 s). Only the digit count is changed for Google.
-    out.add(a.digits == 6 || a.digits == 8 ? a : a.withParameters(digits: 6));
+    // The true period and a 7-digit count travel in OTPanda extension fields
+    // (fields 15 and 16). Google's own digit enum carries six for a 7-digit key.
+    out.add(a);
   }
   return (accounts: out, notes: notes);
 }
@@ -76,6 +76,7 @@ List<String>? googleExportUris(
       batchId: batchId,
       perBatch: per,
       periodExtension: true,
+      digitsExtension: true,
     );
     if (uris.every((u) => u.length <= maxExportQrChars)) return uris;
   }

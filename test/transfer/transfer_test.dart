@@ -110,7 +110,7 @@ void main() {
     expect(plan.accounts.length, 4);
     expect(plan.accounts.map((a) => a.period).toSet(), {30, 60});
     expect(plan.accounts[2].digits, 8);
-    expect(plan.accounts[3].digits, 6);
+    expect(plan.accounts[3].digits, 7);
     expect(plan.notes.map((n) => (n.accountName, n.change, n.from)), [
       ('b', GoogleExportChange.periodDropped, 60),
       ('d', GoogleExportChange.digitsAdjusted, 7),
