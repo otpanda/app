@@ -64,8 +64,9 @@ bool _same(List<OtpAccount> a, List<OtpAccount> b) {
         x.accountName != y.accountName ||
         x.algorithm != y.algorithm ||
         x.digits != y.digits ||
-        x.period != y.period)
+        x.period != y.period) {
       return false;
+    }
     final Uint8List xs = x.secretBytes(), ys = y.secretBytes();
     try {
       if (xs.length != ys.length) return false;
