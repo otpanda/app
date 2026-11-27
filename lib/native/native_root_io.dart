@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 import '../offline_totp/android_wrapping_key_store.dart';
 import '../offline_totp/native_offline_workspace_runtime.dart';
 import 'native_workspace_admission.dart';
+import 'native_verified_owner.dart';
 import 'native_workspace_coordinator.dart';
 import 'native_offline_enrollment.dart';
 import '../offline_totp/seed_sync_coordinator.dart';
@@ -175,10 +176,10 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     );
   }
 
-  String? _onlineOwner;
+  final _verifiedOwner = NativeVerifiedOwner();
   Future<bool> _currentOfflineOwner(String owner) async =>
       mounted &&
-      _onlineOwner == owner &&
+      _verifiedOwner.ownerFor(controller.session) == owner &&
       controller.phase == NativeSessionPhase.signedIn &&
       localLock.ready &&
       !localLock.locked &&
@@ -214,7 +215,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
             controller.phase != NativeSessionPhase.signedIn) {
           return;
         }
-        _onlineOwner = owner;
+        _verifiedOwner.bind(session!, owner);
         _prepareTransfer(owner);
         offlineEnrollment.bindOwner(owner);
         await offlineEnrollment.refresh();
@@ -230,7 +231,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   Future<void> _signOut() async {
     try {
       _retireTransfer();
-      _onlineOwner = null;
+      _verifiedOwner.clear();
       offlineEnrollment.bindOwner(null);
       await workspace.invalidate();
       await controller.signOut();
@@ -408,9 +409,10 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     }
     // Only a real sign-out or sign-in-required clears state and the retry
     // floor. unknown (starting) and offline are transient: nothing changes.
-    if (controller.phase != NativeSessionPhase.signedIn) {
+    if (controller.phase != NativeSessionPhase.signedIn ||
+        _verifiedOwner.ownerFor(controller.session) == null) {
       _retireTransfer();
-      _onlineOwner = null;
+      _verifiedOwner.clear();
       offlineEnrollment.bindOwner(null);
     }
     switch (controller.phase) {
