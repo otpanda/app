@@ -47,7 +47,7 @@ Future<Map<String, dynamic>> _json(
         : c.postUrl(loopback.replace(path: path)));
     if (bearer != null) r.headers.set('authorization', 'Bearer $bearer');
     if (body != null) {
-      r.headers.contentType = ContentType.json;
+      r.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
       r.add(utf8.encode(body));
     }
     final res = await r.close();

@@ -19,7 +19,7 @@ signer=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner -
 fp=$("$signer" verify --print-certs build/app/outputs/flutter-apk/app-google-debug.apk | sed -n 's/.*SHA-256 digest: *//p' | head -1 | tr -d '\r' | tr 'a-f' 'A-F' | sed 's/../&:/g;s/:$//')
 printf '%s' "$fp" | grep -Eq '^([0-9A-F]{2}:){31}[0-9A-F]{2}$' || { echo 'HARNESS actual APK signer unavailable'; exit 2; }
 echo 'signer_checked=yes-actual-apk' > "$out/signer.txt"
-node "$api/tool/seed-sync-loopback/server.mjs" "$port" 127.0.0.1 "$fp" > "$out/host.log" 2>&1 &
+LOOPBACK_LOG=1 node "$api/tool/seed-sync-loopback/server.mjs" "$port" 127.0.0.1 "$fp" > "$out/host.log" 2>&1 &
 host=$!
 cleanup() { kill "$host" 2>/dev/null || true; adb reverse --remove tcp:$port > "$out/reverse-remove.txt" 2>&1 || true; adb uninstall app.otpanda > "$out/uninstall-after.txt" 2>&1 || true; }
 trap cleanup EXIT

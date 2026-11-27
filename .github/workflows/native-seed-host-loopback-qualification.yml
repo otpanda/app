@@ -8,7 +8,7 @@ permissions:
   contents: read
 env:
   # Exact API commit carrying tool/seed-sync-loopback and the generation-cap correction. Not main, not deployed.
-  API_SHA: a503d78d1cd7da5917502a967e5a5fc14509ec1d
+  API_SHA: 047b75f02e60d678d0ffbb180c598921ba98c0c4
 jobs:
   loopback:
     runs-on: ubuntu-latest
