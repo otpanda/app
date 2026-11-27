@@ -7,6 +7,8 @@ import 'package:otpanda_client/offline_totp/seed_install_id.dart';
 import 'package:otpanda_client/offline_totp/seed_install_id_channel.dart';
 import 'package:otpanda_client/offline_totp/seed_status_channel.dart';
 import 'package:otpanda_client/offline_totp/seed_sync_channel.dart';
+import 'package:otpanda_client/offline_totp/android_seed_custody.dart';
+import 'package:otpanda_client/offline_totp/native_seed_custody.dart';
 
 const channel = MethodChannel('app.otpanda/seed-custody');
 const driver = MethodChannel('seedfx/driver');
@@ -63,6 +65,78 @@ Future<void> proof(String key, Uint8List pub) async {
     },
     {'WIRE_KEY'},
   );
+}
+
+Future<void> sealedCheck(SeedSyncChannel sync) async {
+  final custody = AndroidSeedCustody(channel: channel);
+  for (final tamper in [true, false]) {
+    final batch = await sync.begin(
+      owner: owner,
+      deviceId: 'device',
+      generation: 1,
+      epoch: 0,
+      entries: const [SeedBatchEntry('sealed-entry', 1, 'SHA-1', 8, 30)],
+    );
+    try {
+      await sync.bind(
+        batch.handleId,
+        challenge: 'A' * 43,
+        expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
+      );
+      await sync.signBatch(batch.handleId);
+      final sealed = (await driver.invokeMethod<Map>('seal', {
+        'ephemeral': batch.ephemeralPublic,
+      }))!;
+      var ciphertext = sealed['ciphertext'] as String;
+      if (tamper) {
+        final bytes = base64Url.decode(base64Url.normalize(ciphertext));
+        bytes[0] ^= 1;
+        ciphertext = base64UrlEncode(bytes).replaceAll('=', '');
+      }
+      try {
+        final pending = await sync.open(
+          batch.handleId,
+          entryId: 'sealed-entry',
+          serverPublicKey: sealed['serverPublicKey'] as String,
+          nonce: sealed['nonce'] as String,
+          ciphertext: ciphertext,
+        );
+        await check('sealed_open_complete', !tamper && pending.isEmpty);
+      } on SeedSyncFailure catch (e) {
+        if (!tamper) rethrow;
+        await check(
+          'sealed_tamper_refused',
+          e.kind == SeedSyncFailureKind.wire,
+        );
+      }
+      if (tamper) {
+        try {
+          await custody.generate(
+            ownerId: owner,
+            entryId: 'sealed-entry',
+            seedVersion: 1,
+            unixSeconds: 59,
+          );
+          await check('tamper_no_custody', false);
+        } on CustodyException catch (e) {
+          await check('tamper_no_custody', e.error == CustodyError.notFound);
+        }
+      } else {
+        await check(
+          'sealed_rfc_code',
+          await custody.generate(
+                ownerId: owner,
+                entryId: 'sealed-entry',
+                seedVersion: 1,
+                unixSeconds: 59,
+              ) ==
+              '94287082',
+        );
+      }
+    } finally {
+      await sync.finish(batch.handleId);
+    }
+  }
 }
 
 Future<void> run() async {
@@ -125,6 +199,7 @@ Future<void> run() async {
     } on SeedSyncFailure catch (e) {
       await check('typed_batch_finish', e.kind == SeedSyncFailureKind.wire);
     }
+    await sealedCheck(sync);
   } else {
     final saved =
         jsonDecode((await driver.invokeMethod<String>('load'))!) as Map;
@@ -139,6 +214,16 @@ Future<void> run() async {
     final owners = await SeedStatusChannel(channel).owners();
     await check('durable_discovery', owners.owners.contains(owner));
     await proof(key, pub);
+    await check(
+      'sealed_restart_code',
+      await AndroidSeedCustody(channel: channel).generate(
+            ownerId: owner,
+            entryId: 'sealed-entry',
+            seedVersion: 1,
+            unixSeconds: 59,
+          ) ==
+          '94287082',
+    );
     final state = (await call<Map>('readOwnerState', {'owner': owner}))!;
     final erased = await sync.erase(
       owner: owner,
@@ -146,6 +231,21 @@ Future<void> run() async {
       reason: SeedEraseReason.disable,
     );
     await check('erase_complete', erased.complete);
+    try {
+      await AndroidSeedCustody(channel: channel).generate(
+        ownerId: owner,
+        entryId: 'sealed-entry',
+        seedVersion: 1,
+        unixSeconds: 59,
+      );
+      await check('sealed_erased_unusable', false);
+    } on CustodyException catch (e) {
+      await check(
+        'sealed_erased_unusable',
+        {CustodyError.notFound, CustodyError.denied}.contains(e.error),
+      );
+    }
+
     await check(
       'erase_no_active_key',
       await SeedStatusChannel(channel).activeKeyId(owner) == null,

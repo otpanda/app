@@ -5,7 +5,7 @@ import shutil,re
 here=Path(__file__).resolve().parent
 out=Path('android/app/src/debug/kotlin/app/otpanda/seedfixture')
 out.mkdir(parents=True,exist_ok=True)
-shutil.copyfile(here/'debug/SeedHostActivity.kt',out/'SeedHostActivity.kt')
+for f in (here/'debug').glob('*.kt'): shutil.copyfile(f,out/f.name)
 p=Path('android/app/src/debug/AndroidManifest.xml'); s=p.read_text()
 body='<activity android:name="app.otpanda.seedfixture.SeedHostActivity" android:exported="true" android:launchMode="singleTop" android:theme="@style/NormalTheme" android:hardwareAccelerated="true"/>'
 if 'seedfixture.SeedHostActivity' not in s:
