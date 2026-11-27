@@ -44,7 +44,7 @@ void main() {
         Future.value(
           ByteData.sublistView(
             File(
-              '/downloads/otpanda/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+              '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
             ).readAsBytesSync(),
           ),
         ),
