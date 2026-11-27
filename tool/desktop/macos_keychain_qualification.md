@@ -1,5 +1,21 @@
 # macOS wrapping-key store: backend choice, constraints, qualification plan
 
+## Real-host result (primary, CI run 46001583630 job 140514293630) and response
+
+Same-binary read, duplicate create and six-process race passed. Rebuilt binaries (plain ad-hoc and explicit DR) HUNG on existing-key read and duplicate create
+until the 20 s alarm. Two consequences:
+1. kSecUseAuthenticationUI=Fail does NOT suppress the legacy file-based ACL prompt (a hang, not an errSecInteractionNotAllowed). The adapter now wraps each
+   SecItem call in SecKeychainSetUserInteractionAllowed(false) (scoped, locked, restored). Unproven until the probe shows a refusal status quickly instead of a TIMEOUT.
+2. The probe changed the binary at the same path, but the first run rebuilt to different bytes only; primary notes path vs identity was not separated. The probe
+   now runs, per signing mode (plain ad-hoc, explicit DR, local self-signed identity with DR `identifier + certificate leaf hash`): a COPY of the same signed binary at
+   another path, a REBUILT binary at another path, and a REBUILT binary at the SAME path. Each row is a bounded read and duplicate create with elapsed time, with the
+   item's ACL entries dumped (no secret data). No scenario widens the ACL to all applications. A refused attempt must leave the item present.
+
+Hypotheses the data will confirm or kill (none is established): the ACL trusted-app entry for an ad-hoc binary keys on cdhash or path, and since macOS 10.12 a separate
+partition list (cdhash: for ad-hoc and self-signed binaries, teamid: only with an Apple team) may refuse a rebuilt binary even when the ACL entry matches. If so, a stable
+free identity cannot be had on the file-based keychain, and the data-protection keychain needs a profile (not free in CI). The remaining safe design is then: updates keep
+the key only when the new build is allowed; otherwise a typed `denied`/`locked` state and a user recovery path, never reset, overwrite or ACL widening.
+
 Status: source only. Nothing here has been compiled or run. No Swift toolchain,
 Xcode, Mac or Apple Developer account was available when it was written. No
 paid membership is needed for the default backend.

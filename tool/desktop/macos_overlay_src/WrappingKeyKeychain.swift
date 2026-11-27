@@ -32,9 +32,36 @@ struct SystemKeychainOps: KeychainOps {
   }
 
   /// Never let the system show an ACL or unlock dialog from a call: a dialog
-  /// can hang a headless or backgrounded app. The call fails instead.
+  /// can hang a headless or backgrounded app. kSecUseAuthenticationUI=Fail is
+  /// kept, but a real-host probe showed it does NOT stop the legacy file-based
+  /// ACL prompt (existing-key reads hung until killed). The effective control is
+  /// the process-wide legacy switch SecKeychainSetUserInteractionAllowed(false):
+  /// with it, a call that would prompt returns errSecInteractionNotAllowed
+  /// (-25308) instead. It is scoped to one call under a lock and restored after.
+  /// It never widens an ACL; refusal stays refusal. Deprecated API, UNVERIFIED
+  /// until the probe's interaction scenarios run on a real host.
   private func noUI(_ q: inout [String: Any]) {
     q[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+  }
+
+  private static let interactionLock = NSLock()
+  private func quiet(_ body: () -> Int32) -> Int32 {
+    if SystemKeychainOps.backend == .dataProtection { return body() }
+    SystemKeychainOps.interactionLock.lock()
+    defer { SystemKeychainOps.interactionLock.unlock() }
+    var previous: DarwinBoolean = true
+    guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess else {
+      return errSecNotAvailable
+    }
+    guard SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+      return errSecNotAvailable
+    }
+    let result = body()
+    guard SecKeychainSetUserInteractionAllowed(previous.boolValue) == errSecSuccess else {
+      // The item operation may have applied. Core treats this as unknown.
+      return errSecNotAvailable
+    }
+    return result
   }
 
   func add(namespace: String, data: Data) -> Int32 {
@@ -44,7 +71,7 @@ struct SystemKeychainOps: KeychainOps {
       q[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     }
     noUI(&q)
-    return SecItemAdd(q as CFDictionary, nil)
+    return quiet { SecItemAdd(q as CFDictionary, nil) }
   }
 
   func copy(namespace: String) -> (status: Int32, data: Data?) {
@@ -53,7 +80,7 @@ struct SystemKeychainOps: KeychainOps {
     q[kSecMatchLimit as String] = kSecMatchLimitOne
     noUI(&q)
     var out: CFTypeRef?
-    let st = SecItemCopyMatching(q as CFDictionary, &out)
+    let st = quiet { SecItemCopyMatching(q as CFDictionary, &out) }
     if st == errSecSuccess { return (st, out as? Data) }
     return (st, nil)
   }
@@ -61,7 +88,7 @@ struct SystemKeychainOps: KeychainOps {
   func delete(namespace: String) -> Int32 {
     var q = base(namespace)
     noUI(&q)
-    return SecItemDelete(q as CFDictionary)
+    return quiet { SecItemDelete(q as CFDictionary) }
   }
 
   func keychainUnlocked() -> Bool? {
