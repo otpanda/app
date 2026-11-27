@@ -91,6 +91,7 @@ class Rules implements RuleBridge {
 
 void main() {
   setUpAll(() async {
+    Directory('build/rules-visual').createSync(recursive: true);
     for (final family in ['Roboto', 'Figtree']) {
       final loader = FontLoader(family)
         ..addFont(
@@ -193,7 +194,7 @@ void main() {
       final bytes = await t.runAsync(
         () => image!.toByteData(format: ui.ImageByteFormat.png),
       );
-      File('/downloads/rules-sources-${width.toInt()}.png')
+      File('build/rules-visual/rules-sources-${width.toInt()}.png')
           .writeAsBytesSync(bytes!.buffer.asUint8List());
       await t.tap(find.text('Resume'));
       await t.pumpAndSettle();
@@ -201,7 +202,7 @@ void main() {
       final bytes2 = await t.runAsync(
         () => image2!.toByteData(format: ui.ImageByteFormat.png),
       );
-      File('/downloads/rules-confirm-${width.toInt()}.png')
+      File('build/rules-visual/rules-confirm-${width.toInt()}.png')
           .writeAsBytesSync(bytes2!.buffer.asUint8List());
       await t.tap(find.text('Close'));
       await t.pumpAndSettle();
