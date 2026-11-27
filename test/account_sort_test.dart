@@ -50,23 +50,17 @@ void main() {
       addTearDown(t.view.reset);
       await t.runAsync(() async {
         for (final pair in [
-          ('Figtree', 'Figtree-400.ttf'),
+          ('Figtree', 'assets/fonts/Figtree-400.ttf'),
           (
             'MaterialIcons',
             '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
           ),
-          ('BricolageGrotesque', 'BricolageGrotesque-700.ttf'),
+          ('BricolageGrotesque', 'assets/fonts/BricolageGrotesque-700.ttf'),
         ]) {
           final font = FontLoader(pair.$1)
             ..addFont(
               Future.value(
-                ByteData.sublistView(
-                  File(
-                    pair.$2.startsWith('/')
-                        ? pair.$2
-                        : 'assets/fonts/${pair.$2}',
-                  ).readAsBytesSync(),
-                ),
+                ByteData.sublistView(File(pair.$2).readAsBytesSync()),
               ),
             );
           await font.load();
