@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'app_theme.dart';
+
 import 'browser_session_contract.dart';
 import 'session_contract.dart';
 
@@ -171,7 +173,7 @@ class _EntryManageDialogState extends State<EntryManageDialog> {
                       child: Text(
                         error,
                         key: const Key('entry-error'),
-                        style: const TextStyle(color: Color(0xffb3261e)),
+                        style: TextStyle(color: context.pal.danger),
                       ),
                     ),
             ),
@@ -182,7 +184,7 @@ class _EntryManageDialogState extends State<EntryManageDialog> {
                 icon: const Icon(Icons.delete_outline),
                 label: const Text('Delete entry'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xffb3261e),
+                  foregroundColor: context.pal.danger,
                 ),
               ),
           ],

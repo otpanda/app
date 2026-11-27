@@ -24,7 +24,7 @@ void main() {
           ('BricolageGrotesque', 'assets/fonts/BricolageGrotesque-700.ttf'),
           (
             'MaterialIcons',
-            '/downloads/otpanda/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+            '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
           ),
           ('CodeMono', 'assets/fonts/CodeMono-Regular.ttf'),
         ]) {
@@ -100,8 +100,9 @@ void main() {
         );
         final image = await boundary.toImage();
         final data = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/downloads/unified-integrated-${width.toInt()}.png')
-            .writeAsBytes(data!.buffer.asUint8List());
+        await File(
+          '${Platform.environment['SCREENSHOT_DIR'] ?? Directory.systemTemp.path}/unified-integrated-${width.toInt()}.png',
+        ).writeAsBytes(data!.buffer.asUint8List());
         image.dispose();
       });
       if (width > 700) {

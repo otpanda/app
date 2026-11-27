@@ -8,7 +8,7 @@ import 'auth_entry.dart';
 import 'product_shell.dart';
 import 'totp_batch_contract.dart';
 import 'read_workspace_controller.dart';
-import 'main.dart' show ClientHome, ink, muted;
+import 'main.dart' show ClientHome;
 
 import 'dart:async';
 import 'dart:convert';
@@ -20,6 +20,8 @@ import 'organization_panel.dart';
 
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+
+import 'app_theme.dart';
 
 import 'browser_session.dart';
 import 'browser_session_contract.dart';
@@ -1375,12 +1377,12 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Google',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 16,
-                      color: ink,
+                      color: context.pal.ink,
                     ),
                   ),
                   loading
@@ -1391,7 +1393,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                               : _hasPasskey
                               ? 'Connected'
                               : 'Connected. Add a passkey to disconnect.',
-                          style: const TextStyle(color: muted),
+                          style: TextStyle(color: context.pal.muted),
                         ),
                 ],
               ),

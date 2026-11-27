@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
-import '../main.dart' show green, ink, line, muted;
+import '../app_theme.dart';
+
 import 'native_action_proof.dart';
 import 'native_approval_routes.dart';
 
@@ -126,8 +127,8 @@ class ApprovalCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: line),
+        color: context.pal.card,
+        border: Border.all(color: context.pal.line),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -135,44 +136,44 @@ class ApprovalCard extends StatelessWidget {
         children: [
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
-              color: ink,
+              color: context.pal.ink,
             ),
           ),
           const SizedBox(height: 8),
           if (text == null)
-            const Text(
+            Text(
               'This request could not be shown safely, so it cannot be approved here.',
-              style: TextStyle(color: muted),
+              style: TextStyle(color: context.pal.muted),
             )
           else
-            Text(text, style: const TextStyle(color: ink, height: 1.4)),
+            Text(text, style: TextStyle(color: context.pal.ink, height: 1.4)),
           if (fp != null) ...[
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
               decoration: BoxDecoration(
-                color: const Color(0xFFF3F6F4),
+                color: context.pal.field,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 fp,
                 key: const ValueKey('fingerprint'),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.2,
-                  color: ink,
+                  color: context.pal.ink,
                 ),
               ),
             ),
           ],
           const SizedBox(height: 10),
-          const Text(
+          Text(
             'Dismiss only hides this here. The request stays open until it expires.',
-            style: TextStyle(color: muted, fontSize: 12),
+            style: TextStyle(color: context.pal.muted, fontSize: 12),
           ),
           const SizedBox(height: 10),
           Row(
@@ -180,7 +181,9 @@ class ApprovalCard extends StatelessWidget {
               Expanded(
                 child: FilledButton(
                   onPressed: text == null || busy ? null : onApprove,
-                  style: FilledButton.styleFrom(backgroundColor: green),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: context.pal.brand,
+                  ),
                   child: Text(busy ? 'Waiting for unlock' : 'Approve'),
                 ),
               ),

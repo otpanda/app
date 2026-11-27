@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'app_theme.dart';
+
 import 'organization_contract.dart';
 
 /// Display labels for an already-authorized entry, never a code or source.
@@ -395,8 +397,8 @@ class _OrganizationPanelState extends State<OrganizationPanel> {
                                   const SizedBox(height: 4),
                                   Text(
                                     entry.account,
-                                    style: const TextStyle(
-                                      color: Color(0xff657e70),
+                                    style: TextStyle(
+                                      color: context.pal.mutedSoft,
                                     ),
                                   ),
                                 ],

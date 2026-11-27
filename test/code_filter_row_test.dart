@@ -70,8 +70,9 @@ void main() {
     await t.runAsync(() async {
       final image = await boundary.toImage();
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('/downloads/code-filter-row-390.png')
-          .writeAsBytes(data!.buffer.asUint8List());
+      await File(
+        '${Platform.environment['SCREENSHOT_DIR'] ?? Directory.systemTemp.path}/code-filter-row-390.png',
+      ).writeAsBytes(data!.buffer.asUint8List());
       image.dispose();
     });
     await t.tap(find.byKey(const Key('code-filter-more')));

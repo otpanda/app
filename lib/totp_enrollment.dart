@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'app_theme.dart';
+
 import 'browser_session_contract.dart';
 import 'otpauth.dart';
 import 'public_service_catalog.dart';
@@ -457,8 +459,8 @@ class _AddTotpState extends State<_AddTotp> {
           leading: ServiceAvatar(
             service: chosen!.name,
             serviceId: chosen!.id,
-            color: const Color(0xffdff3e8),
-            ink: const Color(0xff17372a),
+            color: context.pal.avatars.first,
+            ink: context.pal.avatarInk,
             directory: widget.directory,
           ),
           title: Text(chosen!.name),

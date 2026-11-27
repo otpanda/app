@@ -1,7 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../branding.dart';
-import '../main.dart' show green, ink, line, muted, otpandaTheme;
+import '../app_theme.dart';
+import '../theme_controller.dart';
 import '../auth_entry.dart';
 import '../browser_session_contract.dart';
 import '../lost_access_page.dart';
@@ -21,7 +22,9 @@ class NativeApp extends StatelessWidget {
     this.authBridge,
     this.appWrapper,
     this.navigatorObservers = const [],
+    this.themeController,
   });
+  final ThemeController? themeController;
   final List<NavigatorObserver> navigatorObservers;
   final Widget Function(BuildContext, Widget)? appWrapper;
   final NativeSessionController controller;
@@ -36,18 +39,23 @@ class NativeApp extends StatelessWidget {
   final WidgetBuilder? signedInBuilder;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'OTPanda',
-    navigatorObservers: navigatorObservers,
-    debugShowCheckedModeBanner: false,
-    theme: otpandaTheme(),
-    builder: (context, child) => appWrapper?.call(context, child!) ?? child!,
-    home: NativeSessionPage(
-      controller: controller,
-      googleAvailable: googleAvailable,
-      version: version,
-      signedInBuilder: signedInBuilder,
-      authBridge: authBridge,
+  Widget build(BuildContext context) => ThemeScope(
+    controller: themeController ?? appThemeController,
+    builder: (context, light, dark, mode) => MaterialApp(
+      title: 'OTPanda',
+      navigatorObservers: navigatorObservers,
+      debugShowCheckedModeBanner: false,
+      theme: light,
+      darkTheme: dark,
+      themeMode: mode,
+      builder: (context, child) => appWrapper?.call(context, child!) ?? child!,
+      home: NativeSessionPage(
+        controller: controller,
+        googleAvailable: googleAvailable,
+        version: version,
+        signedInBuilder: signedInBuilder,
+        authBridge: authBridge,
+      ),
     ),
   );
 }
@@ -198,8 +206,8 @@ class _State extends State<NativeSessionPage> {
                     const SizedBox(height: 20),
                     Text(
                       title,
-                      style: const TextStyle(
-                        color: ink,
+                      style: TextStyle(
+                        color: context.pal.ink,
                         fontFamily: 'BricolageGrotesque',
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
@@ -208,8 +216,8 @@ class _State extends State<NativeSessionPage> {
                     const SizedBox(height: 10),
                     Text(
                       body,
-                      style: const TextStyle(
-                        color: muted,
+                      style: TextStyle(
+                        color: context.pal.muted,
                         fontSize: 15,
                         height: 1.4,
                       ),
@@ -223,7 +231,7 @@ class _State extends State<NativeSessionPage> {
                           child: FilledButton(
                             key: const Key('native-google'),
                             style: FilledButton.styleFrom(
-                              backgroundColor: green,
+                              backgroundColor: context.pal.brand,
                             ),
                             onPressed: busy
                                 ? null
@@ -251,7 +259,9 @@ class _State extends State<NativeSessionPage> {
                         width: double.infinity,
                         child: FilledButton(
                           key: const Key('native-retry'),
-                          style: FilledButton.styleFrom(backgroundColor: green),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: context.pal.brand,
+                          ),
                           onPressed: busy ? null : () => _run(c.start),
                           child: const Text('Try again'),
                         ),
@@ -270,13 +280,16 @@ class _State extends State<NativeSessionPage> {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          border: Border.all(color: line),
+                          border: Border.all(color: context.pal.line),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           err,
                           key: const Key('native-error'),
-                          style: const TextStyle(color: ink, fontSize: 13),
+                          style: TextStyle(
+                            color: context.pal.ink,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                     ],
@@ -284,7 +297,10 @@ class _State extends State<NativeSessionPage> {
                       const SizedBox(height: 24),
                       Text(
                         'Version ${widget.version}',
-                        style: const TextStyle(color: muted, fontSize: 12),
+                        style: TextStyle(
+                          color: context.pal.muted,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ],

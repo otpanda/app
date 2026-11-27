@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart'
     show LicenseRegistry, LicenseEntryWithLineBreaks;
 import 'package:flutter/services.dart';
 
+import 'app_theme.dart';
+import 'theme_controller.dart';
 import 'models.dart';
 import 'app_navigation_stub.dart'
     if (dart.library.js_interop) 'app_navigation_web.dart';
@@ -61,82 +63,36 @@ void _registerFontLicenses() {
   });
 }
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   _registerFontLicenses();
+  // Waits at most two seconds for the saved choice, then starts on System.
+  await appThemeController.loadBounded();
   runApp(kIsWeb ? const OTPandaApp() : buildNativeRoot());
 }
 
-ThemeData otpandaTheme() => ThemeData(
-  fontFamily: 'Figtree',
-  appBarTheme: const AppBarTheme(
-    centerTitle: false,
-    backgroundColor: Colors.white,
-    surfaceTintColor: Colors.transparent,
-    titleTextStyle: TextStyle(
-      fontFamily: 'BricolageGrotesque',
-      fontSize: 20,
-      fontWeight: FontWeight.w800,
-      color: ink,
-    ),
-  ),
-  navigationBarTheme: NavigationBarThemeData(
-    backgroundColor: Colors.white,
-    indicatorColor: pale,
-    surfaceTintColor: Colors.transparent,
-    labelTextStyle: WidgetStateProperty.all(
-      const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-    ),
-  ),
-  dialogTheme: DialogThemeData(
-    constraints: const BoxConstraints(maxWidth: 560),
-    titleTextStyle: const TextStyle(
-      fontFamily: 'BricolageGrotesque',
-      fontSize: 22,
-      fontWeight: FontWeight.w700,
-      color: ink,
-    ),
-    backgroundColor: Colors.white,
-    surfaceTintColor: Colors.transparent,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-  ),
-  filledButtonTheme: FilledButtonThemeData(
-    style: FilledButton.styleFrom(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ),
-  ),
-  outlinedButtonTheme: OutlinedButtonThemeData(
-    style: OutlinedButton.styleFrom(
-      side: const BorderSide(color: line),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ),
-  ),
-  useMaterial3: true,
-  scaffoldBackgroundColor: surface,
-  colorScheme: ColorScheme.fromSeed(seedColor: green),
-  textTheme: const TextTheme(bodyMedium: TextStyle(color: ink, fontSize: 13)),
-  cardTheme: const CardThemeData(
-    elevation: 0,
-    color: Colors.white,
-    margin: EdgeInsets.zero,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.all(Radius.circular(14)),
-      side: BorderSide(color: line),
-    ),
-  ),
-);
+/// Light theme, kept for hosts and tests that name it directly.
+ThemeData otpandaTheme() => buildOtpandaTheme(Brightness.light);
+ThemeData otpandaDarkTheme() => buildOtpandaTheme(Brightness.dark);
 
 class OTPandaApp extends StatelessWidget {
-  const OTPandaApp({super.key});
+  const OTPandaApp({super.key, this.themeController});
+  final ThemeController? themeController;
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'OTPanda',
-    debugShowCheckedModeBanner: false,
-    theme: otpandaTheme(),
-    // The host owns browser history. Flutter must not overwrite #/ URLs.
-    builder: (context, child) => Navigator(
-      reportsRouteUpdateToEngine: false,
-      onGenerateRoute: (_) =>
-          MaterialPageRoute<void>(builder: (_) => const AccountEntryRouter()),
+  Widget build(BuildContext context) => ThemeScope(
+    controller: themeController ?? appThemeController,
+    builder: (context, light, dark, mode) => MaterialApp(
+      title: 'OTPanda',
+      debugShowCheckedModeBanner: false,
+      theme: light,
+      darkTheme: dark,
+      themeMode: mode,
+      // The host owns browser history. Flutter must not overwrite #/ URLs.
+      builder: (context, child) => Navigator(
+        reportsRouteUpdateToEngine: false,
+        onGenerateRoute: (_) =>
+            MaterialPageRoute<void>(builder: (_) => const AccountEntryRouter()),
+      ),
     ),
   );
 }
@@ -497,9 +453,9 @@ class _ClientHomeState extends State<ClientHome> {
                       ],
                     )
                   else
-                    const Text(
+                    Text(
                       'Shared, read-only. Only the owner can change this entry.',
-                      style: TextStyle(fontSize: 12, color: muted),
+                      style: TextStyle(fontSize: 12, color: context.pal.muted),
                     ),
                 ],
               ),
@@ -543,8 +499,8 @@ class _ClientHomeState extends State<ClientHome> {
             service: e.service,
             serviceId: e.serviceId,
             websiteHost: e.websiteHost,
-            color: avatarTint(e.service),
-            ink: ink,
+            color: context.pal.avatarFor(e.service),
+            ink: context.pal.avatarInk,
             fontSize: 15,
           ),
           const SizedBox(width: 11),
@@ -563,7 +519,7 @@ class _ClientHomeState extends State<ClientHome> {
               ),
               Text(
                 e.account,
-                style: const TextStyle(fontSize: 12, color: muted),
+                style: TextStyle(fontSize: 12, color: context.pal.muted),
                 overflow: TextOverflow.ellipsis,
               ),
             ],
@@ -584,7 +540,7 @@ class _ClientHomeState extends State<ClientHome> {
             fontFeatures: const [FontFeature.tabularFigures()],
             fontSize: compact ? 22 : 26,
             fontWeight: FontWeight.w600,
-            color: ink,
+            color: context.pal.ink,
             letterSpacing: compact ? 0.5 : 1.5,
           ),
         ),
@@ -598,7 +554,7 @@ class _ClientHomeState extends State<ClientHome> {
       ],
     );
     return Card(
-      color: Colors.white,
+      color: context.pal.card,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Column(
@@ -617,11 +573,11 @@ class _ClientHomeState extends State<ClientHome> {
               if (code != null)
                 Align(alignment: Alignment.centerLeft, child: digits)
               else
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(top: 12, bottom: 8),
                   child: Text(
                     'No active code',
-                    style: TextStyle(color: muted, fontSize: 13),
+                    style: TextStyle(color: context.pal.muted, fontSize: 13),
                   ),
                 ),
             ],
@@ -629,7 +585,7 @@ class _ClientHomeState extends State<ClientHome> {
               e.manage
                   ? (code == null ? 'Source not connected' : 'Latest code')
                   : 'Shared · Read-only · Source hidden',
-              style: const TextStyle(fontSize: 11, color: muted),
+              style: TextStyle(fontSize: 11, color: context.pal.muted),
             ),
             if (widget.fictionalCatalog)
               TextButton(
@@ -637,7 +593,7 @@ class _ClientHomeState extends State<ClientHome> {
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
                   minimumSize: const Size(0, 32),
-                  foregroundColor: muted,
+                  foregroundColor: context.pal.muted,
                   textStyle: const TextStyle(fontSize: 12),
                 ),
                 onPressed: () => previewGeneratedCode(e),
@@ -680,16 +636,16 @@ class _ClientHomeState extends State<ClientHome> {
     margin: EdgeInsets.only(top: spaced ? 12 : 0),
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: const Color(0xfff2fcf6),
-      border: Border.all(color: const Color(0xffc5e7d4)),
+      color: context.pal.tip,
+      border: Border.all(color: context.pal.tipBorder),
       borderRadius: BorderRadius.circular(10),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Needs an account match · Only you',
-          style: TextStyle(fontSize: 11, color: Color(0xff547462)),
+          style: TextStyle(fontSize: 11, color: context.pal.tipInk),
         ),
         const SizedBox(height: 9),
         const Row(
@@ -733,29 +689,29 @@ class _ClientHomeState extends State<ClientHome> {
         ),
         children: [
           if (!desktop)
-            const Align(
+            Align(
               alignment: Alignment.centerLeft,
               child: Chip(
                 key: ValueKey('sample-chip'),
                 label: Text('Temporary demo data'),
                 visualDensity: VisualDensity.compact,
-                backgroundColor: Color(0xfffff3d6),
+                backgroundColor: context.pal.notice,
                 side: BorderSide.none,
                 labelStyle: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xff7a5a12),
+                  color: context.pal.noticeInk,
                 ),
               ),
             ),
           Text(
             tab == 0 ? 'Your codes' : names[tab],
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.w700,
               fontFamily: 'BricolageGrotesque',
               fontSize: 28,
               letterSpacing: -0.8,
-              color: ink,
+              color: context.pal.ink,
             ),
           ),
           const SizedBox(height: 3),
@@ -767,22 +723,22 @@ class _ClientHomeState extends State<ClientHome> {
               'Private incoming codes awaiting assignment.',
               'All your configured entries.',
             ][tab],
-            style: const TextStyle(color: muted, fontSize: 13),
+            style: TextStyle(color: context.pal.muted, fontSize: 13),
           ),
           const SizedBox(height: 18),
           if (tab == 0 || tab == 4) ...[
             TextField(
               key: ValueKey(tab),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'Search services or accounts',
                 prefixIcon: Icon(Icons.search, size: 20),
                 contentPadding: EdgeInsets.symmetric(vertical: 14),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: context.pal.card,
                 isDense: true,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.all(Radius.circular(12)),
-                  borderSide: BorderSide(color: line),
+                  borderSide: BorderSide(color: context.pal.line),
                 ),
               ),
               onChanged: (v) => setState(() => query = v),
@@ -835,16 +791,20 @@ class _ClientHomeState extends State<ClientHome> {
               Container(
                 padding: const EdgeInsets.all(11),
                 decoration: BoxDecoration(
-                  color: pale,
-                  border: Border.all(color: const Color(0xffb7e6cd)),
+                  color: context.pal.pale,
+                  border: Border.all(color: context.pal.softBorder),
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       children: [
-                        Icon(Icons.inbox_outlined, size: 17, color: green),
+                        Icon(
+                          Icons.inbox_outlined,
+                          size: 17,
+                          color: context.pal.accent,
+                        ),
                         SizedBox(width: 7),
                         Text(
                           'Received codes',
@@ -890,9 +850,9 @@ class _ClientHomeState extends State<ClientHome> {
               onRevoke: () => setState(() => tokenRevoked = true),
             ),
           const SizedBox(height: 24),
-          const Text(
+          Text(
             'Temporary demo data. Changes here are not saved and reset when you restart.',
-            style: TextStyle(fontSize: 12, color: muted),
+            style: TextStyle(fontSize: 12, color: context.pal.muted),
           ),
         ],
       );
@@ -908,9 +868,9 @@ class _ClientHomeState extends State<ClientHome> {
             children: [
               Container(
                 height: desktop ? 76 : 64,
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  border: Border(bottom: BorderSide(color: line)),
+                decoration: BoxDecoration(
+                  color: context.pal.card,
+                  border: Border(bottom: BorderSide(color: context.pal.line)),
                 ),
                 padding: EdgeInsets.symmetric(horizontal: desktop ? 32 : 16),
                 child: Row(
@@ -921,14 +881,14 @@ class _ClientHomeState extends State<ClientHome> {
                       height: desktop ? 48 : 42,
                     ),
                     const SizedBox(width: 8),
-                    const Text(
+                    Text(
                       'OTPanda',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontFamily: 'BricolageGrotesque',
                         fontSize: 23,
                         letterSpacing: -1,
-                        color: ink,
+                        color: context.pal.ink,
                       ),
                     ),
                     const Spacer(),
@@ -940,7 +900,7 @@ class _ClientHomeState extends State<ClientHome> {
                           vertical: 5,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xfffff3d6),
+                          color: context.pal.notice,
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
@@ -948,7 +908,7 @@ class _ClientHomeState extends State<ClientHome> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xff7a5a12),
+                            color: context.pal.noticeInk,
                           ),
                         ),
                       ),
@@ -1008,8 +968,8 @@ class _ClientHomeState extends State<ClientHome> {
                                                   BorderRadius.circular(9),
                                             ),
                                             selected: tab == i,
-                                            selectedTileColor: pale,
-                                            selectedColor: green,
+                                            selectedTileColor: context.pal.pale,
+                                            selectedColor: context.pal.accent,
                                             leading: Icon(icons[i], size: 18),
                                             title: Text(
                                               names[i],

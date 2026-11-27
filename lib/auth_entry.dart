@@ -3,6 +3,8 @@ import 'google_button.dart';
 
 import 'package:material_ui/material_ui.dart';
 
+import 'app_theme.dart';
+
 import 'browser_session_contract.dart';
 import 'lost_access_page.dart';
 import 'recovery_contract.dart';
@@ -197,10 +199,10 @@ class _AuthEntryState extends State<AuthEntry> {
                   : form
                   ? 'Verify your email once, then create a passkey for future sign-in. Email codes are not a login method.'
                   : 'Your codes, wherever you need them. Sign in or get started below.',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 height: 1.5,
-                color: Color(0xff52665e),
+                color: context.pal.mutedDeep,
               ),
             ),
             const SizedBox(height: 28),

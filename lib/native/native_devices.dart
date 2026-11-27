@@ -2,7 +2,8 @@ import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
 
-import '../main.dart' show green, ink, line, muted;
+import '../app_theme.dart';
+
 import 'native_add_device.dart';
 import 'native_adopt_device.dart';
 import 'native_approval_prompt.dart';
@@ -466,24 +467,31 @@ class _NativeDevicesPageState extends State<NativeDevicesPage> {
                 child: Text(
                   v.message!,
                   key: const ValueKey('message'),
-                  style: const TextStyle(color: ink),
+                  style: TextStyle(color: context.pal.ink),
                 ),
               ),
             _Section(
               title: 'This phone',
               children: [
-                Text(_status(v, rec), style: const TextStyle(color: muted)),
+                Text(
+                  _status(v, rec),
+                  style: TextStyle(color: context.pal.muted),
+                ),
                 const SizedBox(height: 10),
                 if (v.notEnrolled && v.hasGrant)
                   FilledButton(
                     onPressed: v.busy ? null : v.enroll,
-                    style: FilledButton.styleFrom(backgroundColor: green),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: context.pal.brand,
+                    ),
                     child: const Text('Set up this phone'),
                   ),
                 if (v.canLink)
                   FilledButton(
                     onPressed: v.busy ? null : v.adopt,
-                    style: FilledButton.styleFrom(backgroundColor: green),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: context.pal.brand,
+                    ),
                     child: const Text('Link this phone'),
                   ),
                 if (v.notEnrolled && !v.hasGrant) ...[
@@ -519,10 +527,10 @@ class _NativeDevicesPageState extends State<NativeDevicesPage> {
                     child: Text(
                       v.addFingerprint!,
                       key: const ValueKey('add-fingerprint'),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
-                        color: ink,
+                        color: context.pal.ink,
                       ),
                     ),
                   ),
@@ -585,8 +593,8 @@ class _Section extends StatelessWidget {
     margin: const EdgeInsets.only(bottom: 14),
     padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
-      color: Colors.white,
-      border: Border.all(color: line),
+      color: context.pal.card,
+      border: Border.all(color: context.pal.line),
       borderRadius: BorderRadius.circular(16),
     ),
     child: Column(
@@ -594,10 +602,10 @@ class _Section extends StatelessWidget {
       children: [
         Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w700,
-            color: ink,
+            color: context.pal.ink,
           ),
         ),
         const SizedBox(height: 8),

@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'app_theme.dart';
+
 import 'recovery_contract.dart';
 import 'recovery_panel.dart' show recoveryDate;
 
@@ -322,7 +324,7 @@ class _LostAccessPageState extends State<LostAccessPage> {
                 child: Text(
                   error!,
                   key: const Key('lost-error'),
-                  style: const TextStyle(color: Color(0xffb3261e)),
+                  style: TextStyle(color: context.pal.danger),
                 ),
               ),
             if (stage != LostAccessStage.choose &&

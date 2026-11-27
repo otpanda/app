@@ -53,7 +53,7 @@ void main() {
           ('Figtree', 'Figtree-400.ttf'),
           (
             'MaterialIcons',
-            '/downloads/otpanda/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+            '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
           ),
           ('BricolageGrotesque', 'BricolageGrotesque-700.ttf'),
         ]) {
@@ -102,8 +102,9 @@ void main() {
         );
         final image = await boundary.toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/downloads/account-sort-${size.width.toInt()}.png')
-            .writeAsBytes(bytes!.buffer.asUint8List());
+        await File(
+          '${Platform.environment['SCREENSHOT_DIR'] ?? Directory.systemTemp.path}/account-sort-${size.width.toInt()}.png',
+        ).writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });
       await t.tap(find.text('Last used'));

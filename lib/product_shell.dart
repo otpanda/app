@@ -24,7 +24,7 @@ import 'profile_header.dart';
 import 'page_reload_stub.dart'
     if (dart.library.js_interop) 'page_reload_web.dart'
     as platform;
-import 'main.dart' show green;
+import 'app_theme.dart';
 import 'pull_to_refresh.dart';
 import 'refresh_bar.dart';
 import 'service_logo.dart';
@@ -111,8 +111,6 @@ class _ProductShellState extends State<ProductShell>
       widget.controller.bridge is TotpManagementBridge &&
       (widget.controller.bridge is! TotpCreationCapability ||
           (widget.controller.bridge as TotpCreationCapability).canAddTotp);
-  static const ink = Color(0xff12281f), muted = Color(0xff5d746a);
-  static const line = Color(0xffe0e8e3);
   _Phase get phase => !widget.controller.signedIn
       ? _Phase.signedOut
       : widget.controller.hasLoaded
@@ -197,9 +195,9 @@ class _ProductShellState extends State<ProductShell>
     margin: const EdgeInsets.only(bottom: 16),
     padding: const EdgeInsets.fromLTRB(16, 14, 6, 16),
     decoration: BoxDecoration(
-      color: const Color(0xffe1f4ea),
+      color: context.pal.arrival,
       borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: const Color(0xff79b99b), width: 1.5),
+      border: Border.all(color: context.pal.arrivalBorder, width: 1.5),
     ),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -208,17 +206,17 @@ class _ProductShellState extends State<ProductShell>
           width: 42,
           height: 42,
           decoration: BoxDecoration(
-            color: green,
+            color: context.pal.brand,
             borderRadius: BorderRadius.circular(13),
           ),
-          child: const Icon(
+          child: Icon(
             Icons.touch_app_outlined,
-            color: Colors.white,
+            color: context.pal.onBrand,
             size: 26,
           ),
         ),
         const SizedBox(width: 12),
-        const Expanded(
+        Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -228,7 +226,7 @@ class _ProductShellState extends State<ProductShell>
                   fontSize: 19,
                   height: 1.15,
                   fontWeight: FontWeight.w800,
-                  color: Color(0xff123c2e),
+                  color: context.pal.arrivalInk,
                 ),
               ),
               SizedBox(height: 7),
@@ -237,7 +235,7 @@ class _ProductShellState extends State<ProductShell>
                 style: TextStyle(
                   fontSize: 14,
                   height: 1.4,
-                  color: Color(0xff285443),
+                  color: context.pal.arrivalInk,
                 ),
               ),
             ],
@@ -247,7 +245,7 @@ class _ProductShellState extends State<ProductShell>
           key: const Key('dismiss-copy-tutorial'),
           tooltip: 'Dismiss copy tutorial',
           onPressed: dismissCopyTutorial,
-          icon: const Icon(Icons.close, size: 20, color: Color(0xff285443)),
+          icon: Icon(Icons.close, size: 20, color: context.pal.arrivalInk),
         ),
       ],
     ),
@@ -461,8 +459,8 @@ class _ProductShellState extends State<ProductShell>
         service: name,
         serviceId: serviceId,
         issuer: issuer,
-        color: const Color(0xffdff3e8),
-        ink: ink,
+        color: context.pal.avatarFor(name),
+        ink: context.pal.avatarInk,
       );
 
   Widget codeSlot(Widget child) => ConstrainedBox(
@@ -494,11 +492,11 @@ class _ProductShellState extends State<ProductShell>
   ]) => Card(
     clipBehavior: Clip.antiAlias,
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
-    color: fresh ? const Color(0xffe6f5ec) : null,
+    color: fresh ? context.pal.fresh : null,
     shape: fresh
         ? RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: green, width: 1.2),
+            side: BorderSide(color: context.pal.accent, width: 1.2),
           )
         : null,
     child: Tooltip(
@@ -540,18 +538,22 @@ class _ProductShellState extends State<ProductShell>
                                 Text(
                                   sub,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12,
-                                    color: muted,
+                                    color: context.pal.muted,
                                   ),
                                 ),
                             ],
                           ),
                         ),
                         if (pin)
-                          const Padding(
+                          Padding(
                             padding: EdgeInsets.only(left: 4),
-                            child: Icon(Icons.push_pin, size: 14, color: green),
+                            child: Icon(
+                              Icons.push_pin,
+                              size: 14,
+                              color: context.pal.accent,
+                            ),
                           ),
                         if (code != null) ...[
                           const SizedBox(width: 6),
@@ -574,12 +576,14 @@ class _ProductShellState extends State<ProductShell>
                                       ],
                                       fontSize: 22,
                                       fontWeight: FontWeight.w600,
-                                      color: expired ? muted : ink,
+                                      color: expired
+                                          ? context.pal.muted
+                                          : context.pal.ink,
                                     ),
                                   ),
                                 ),
                                 if (expired)
-                                  const Positioned(
+                                  Positioned(
                                     left: 0,
                                     right: 0,
                                     bottom: -10,
@@ -589,7 +593,7 @@ class _ProductShellState extends State<ProductShell>
                                         'Updating',
                                         style: TextStyle(
                                           fontSize: 9,
-                                          color: muted,
+                                          color: context.pal.muted,
                                         ),
                                       ),
                                     ),
@@ -603,14 +607,14 @@ class _ProductShellState extends State<ProductShell>
                                         Icon(
                                           Icons.check,
                                           size: 16,
-                                          color: green,
+                                          color: context.pal.accent,
                                         ),
                                         SizedBox(width: 4),
                                         Text(
                                           'Copied',
                                           style: TextStyle(
                                             fontSize: 12,
-                                            color: green,
+                                            color: context.pal.accent,
                                           ),
                                         ),
                                       ],
@@ -630,11 +634,11 @@ class _ProductShellState extends State<ProductShell>
                                   semanticsLabel: renewing
                                       ? 'Updating code'
                                       : 'No active code',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontFamily: 'CodeMono',
                                     fontSize: 22,
                                     fontWeight: FontWeight.w600,
-                                    color: muted,
+                                    color: context.pal.muted,
                                   ),
                                 ),
                               ),
@@ -853,9 +857,9 @@ class _ProductShellState extends State<ProductShell>
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w700,
-                      color: muted,
+                      color: context.pal.muted,
                     ),
                   ),
                 ),
@@ -906,8 +910,8 @@ class _ProductShellState extends State<ProductShell>
           ? Container(
               height: 34,
               width: double.infinity,
-              decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: line)),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: context.pal.line)),
               ),
               child: TextButton(
                 style: TextButton.styleFrom(
@@ -1558,7 +1562,7 @@ class _ProductShellState extends State<ProductShell>
                 onPressed: () => setState(clearSearch),
               ),
         filled: true,
-        fillColor: const Color(0xfff2f5f3),
+        fillColor: context.pal.field,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(vertical: 11),
         border: const OutlineInputBorder(
@@ -1567,7 +1571,7 @@ class _ProductShellState extends State<ProductShell>
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: const BorderRadius.all(Radius.circular(24)),
-          borderSide: BorderSide(color: green, width: 1.5),
+          borderSide: BorderSide(color: context.pal.accent, width: 1.5),
         ),
       ),
       onChanged: (v) => setState(() => query = v),
@@ -1662,13 +1666,13 @@ class _ProductShellState extends State<ProductShell>
         tooltip: 'Account & security',
         onPressed: widget.onOpenAccount,
         icon: widget.profileEmail == null
-            ? const SizedBox(
+            ? SizedBox(
                 key: ValueKey('home-profile-loading'),
                 width: 32,
                 height: 32,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: line,
+                    color: context.pal.line,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -1684,8 +1688,8 @@ class _ProductShellState extends State<ProductShell>
         floatingActionButton: _canAddTotp
             ? FloatingActionButton.extended(
                 tooltip: 'Add authenticator',
-                backgroundColor: green,
-                foregroundColor: Colors.white,
+                backgroundColor: context.pal.brand,
+                foregroundColor: context.pal.onBrand,
                 icon: const Icon(Icons.add),
                 label: const Text('Add authenticator'),
                 onPressed: addAuthenticator,
@@ -1700,9 +1704,9 @@ class _ProductShellState extends State<ProductShell>
                 padding: desktop
                     ? EdgeInsets.zero
                     : const EdgeInsets.symmetric(horizontal: 16),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  border: Border(bottom: BorderSide(color: line)),
+                decoration: BoxDecoration(
+                  color: context.pal.card,
+                  border: Border(bottom: BorderSide(color: context.pal.line)),
                 ),
                 // Desktop mirrors the content grid below: the brand sits over
                 // the 232-wide nav column, the search fills the content
@@ -1730,14 +1734,14 @@ class _ProductShellState extends State<ProductShell>
                                           height: 42,
                                         ),
                                         const SizedBox(width: 8),
-                                        const Text(
+                                        Text(
                                           'OTPanda',
                                           style: TextStyle(
                                             fontWeight: FontWeight.w800,
                                             fontFamily: 'BricolageGrotesque',
                                             fontSize: 23,
                                             letterSpacing: -1,
-                                            color: ink,
+                                            color: context.pal.ink,
                                           ),
                                         ),
                                       ],

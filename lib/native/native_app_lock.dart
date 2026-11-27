@@ -1,4 +1,7 @@
 import 'package:material_ui/material_ui.dart';
+
+import '../app_theme.dart';
+
 import 'package:flutter/services.dart';
 
 import 'dart:convert';
@@ -253,7 +256,7 @@ class _NativeAppLockState extends State<NativeAppLock>
             if (hide)
               Positioned.fill(
                 child: Material(
-                  color: const Color(0xfff3f7f5),
+                  color: context.pal.field,
                   child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,

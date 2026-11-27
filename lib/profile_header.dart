@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
 
-import 'main.dart' show avatarTint, ink, line;
+import 'app_theme.dart';
 
 /// SHA-256 of [input] as lowercase hex. Small and dependency free: it only
 /// builds the Gravatar address.
@@ -213,7 +213,7 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
             fit: StackFit.expand,
             children: [
               ColoredBox(
-                color: avatarTint(widget.email),
+                color: context.pal.avatarFor(widget.email),
                 child: Center(
                   child: Text(
                     initialsFor(widget.email),
@@ -221,7 +221,7 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
                       fontFamily: 'BricolageGrotesque',
                       fontSize: widget.size * .375,
                       fontWeight: FontWeight.w800,
-                      color: ink,
+                      color: context.pal.ink,
                     ),
                   ),
                 ),
@@ -272,13 +272,13 @@ class ProfileHeader extends StatelessWidget {
       child: Column(
         children: [
           if (loaded == null)
-            const ExcludeSemantics(
+            ExcludeSemantics(
               child: SizedBox(
                 width: profileAvatarSize,
                 height: profileAvatarSize,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: line,
+                    color: context.pal.line,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -295,10 +295,10 @@ class ProfileHeader extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
-                color: ink,
+                color: context.pal.ink,
               ),
             ),
         ],
@@ -315,11 +315,11 @@ class RedactedBar extends StatelessWidget {
   Widget build(BuildContext context) => ExcludeSemantics(
     child: Text(
       sample,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 16,
         fontWeight: FontWeight.w600,
         color: Colors.transparent,
-        backgroundColor: line,
+        backgroundColor: context.pal.line,
       ),
     ),
   );

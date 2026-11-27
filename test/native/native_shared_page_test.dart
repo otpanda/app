@@ -1,5 +1,8 @@
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, File;
+
+import 'package:flutter/services.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -142,6 +145,25 @@ void main() {
       t.view.physicalSize = const Size(390, 844);
       t.view.devicePixelRatio = 1;
       addTearDown(t.view.reset);
+      await t.runAsync(() async {
+        for (final pair in [
+          ('Figtree', 'assets/fonts/Figtree-400.ttf'),
+          ('BricolageGrotesque', 'assets/fonts/BricolageGrotesque-700.ttf'),
+          ('CodeMono', 'assets/fonts/CodeMono-Regular.ttf'),
+          (
+            'MaterialIcons',
+            '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+          ),
+        ]) {
+          final loader = FontLoader(pair.$1)
+            ..addFont(
+              Future.value(
+                ByteData.sublistView(File(pair.$2).readAsBytesSync()),
+              ),
+            );
+          await loader.load();
+        }
+      });
       await t.pumpWidget(
         NativeApp(
           controller: c,
