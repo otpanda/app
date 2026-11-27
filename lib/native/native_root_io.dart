@@ -79,10 +79,13 @@ Widget buildNativeRoot() {
 Widget buildAndroidNativeRootForTest({
   required NativeSessionController session,
   required BearerRequest request,
+  void Function(NativeWorkspaceCoordinator, NativeOfflineWorkspaceRuntime)?
+  observeWorkspace,
 }) => _Boot(
   google: AndroidGoogleSource(),
   sessionOverride: session,
   requestOverride: request,
+  observeWorkspace: observeWorkspace,
 );
 
 class _Boot extends StatefulWidget {
@@ -90,10 +93,16 @@ class _Boot extends StatefulWidget {
     required this.google,
     this.sessionOverride,
     this.requestOverride,
+    this.observeWorkspace,
   });
   final AndroidGoogleSource google;
   final NativeSessionController? sessionOverride;
   final BearerRequest? requestOverride;
+  final void Function(
+    NativeWorkspaceCoordinator,
+    NativeOfflineWorkspaceRuntime,
+  )?
+  observeWorkspace;
   @override
   State<_Boot> createState() => _BootState();
 }
@@ -381,6 +390,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     workspace.addListener(_workspaceChanged);
     offlineRuntime.addListener(_workspaceChanged);
     _workspaceInitialized = true;
+    widget.observeWorkspace?.call(workspace, offlineRuntime);
     localLock.recovery = NativeLocalLockRecovery(
       platform: ChannelLocalRecovery(),
       bearer: controller.accessToken,
