@@ -1,7 +1,7 @@
 name: Isolated native authenticated lifecycle qualification
 on:
   push:
-    branches: [native-lifecycle-current, ui-spec-qualification]
+    branches: [native-lifecycle-current, ui-spec-qualification, test/native-header-qualification]
 permissions:
   contents: read
 jobs:
