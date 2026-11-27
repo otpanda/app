@@ -214,9 +214,9 @@ class ImportSession(private val launch: () -> Boolean, private val worker: Execu
 
 /** Durable record of how many request codes this install has ever issued. Numbers only, never file data. */
 interface CodeStore {
-    /** The saved codes: empty when nothing was ever saved, null when the record exists but cannot be read or is corrupt. */
+    /** The saved numbers: EMPTY only when no record was ever saved; null when a record exists but is unreadable, empty or corrupt. */
     fun load(): IntArray?
-    /** Durably replaces the record before returning true (flush and atomic replace). False means nothing may rely on it. */
+    /** Durably replaces the record before returning true (flush and atomic replace). Never called with an empty array. False means nothing may rely on it. */
     fun save(codes: IntArray): Boolean
 }
 
@@ -245,11 +245,13 @@ class FileCodeStore(
         return try {
             val lines = file.readText(Charsets.US_ASCII).split('\n')
             if (lines.firstOrNull() != TAG || lines.last() != "") return null
+            // An existing record always holds at least one number. A tag-only or empty file is a truncated write, never "absent".
+            if (lines.size < 3) return null
             lines.subList(1, lines.size - 1).map { if (!it.matches(NUMBER)) return null; it.toInt() }.toIntArray()
         } catch (_: Exception) { null }
     }
 
-    override fun save(codes: IntArray): Boolean = try {
+    override fun save(codes: IntArray): Boolean = codes.isNotEmpty() && try {
         dir.mkdirs()
         java.io.FileOutputStream(tmp).use { out ->
             out.write((TAG + "\n" + codes.joinToString("") { "$it\n" }).toByteArray(Charsets.US_ASCII))

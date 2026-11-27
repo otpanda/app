@@ -345,12 +345,12 @@ fun main() {
         val s = FileCodeStore(d)
         check(s.load()!!.isEmpty(), "missing record is empty")
         check(s.save(intArrayOf(5, 17, 1023)) && s.load()!!.toList() == listOf(5, 17, 1023), "record round trips")
-        check(s.save(IntArray(0)) && s.load()!!.isEmpty(), "empty record round trips")
+        check(!s.save(IntArray(0)) && s.load()!!.toList() == listOf(5, 17, 1023), "an empty save is refused and leaves the record intact")
         s.save(intArrayOf(9))
         java.io.File(d, FileCodeStore.NAME + ".tmp").writeText("garbage from an interrupted write")
         check(FileCodeStore(d).load()!!.toList() == listOf(9), "an interrupted temp file never replaces the record")
         val rec = java.io.File(d, FileCodeStore.NAME)
-        for ((name, body) in listOf("no tag" to "5\n", "wrong tag" to "x\n5\n", "no trailing newline" to "otpanda-import-picker-codes-1\n5",
+        for ((name, body) in listOf("no tag" to "5\n", "wrong tag" to "x\n5\n", "tag only" to "otpanda-import-picker-codes-1\n", "empty file" to "", "tag without newline" to "otpanda-import-picker-codes-1", "truncated tag" to "otpanda-import-pic", "no trailing newline" to "otpanda-import-picker-codes-1\n5",
                 "non-number" to "otpanda-import-picker-codes-1\nabc\n", "negative" to "otpanda-import-picker-codes-1\n-1\n", "empty line" to "otpanda-import-picker-codes-1\n\n")) {
             rec.writeText(body)
             check(FileCodeStore(d).load() == null, "corrupt record ($name) is unreadable, not empty")
@@ -366,6 +366,25 @@ fun main() {
         check(!bad.save(intArrayOf(4, 6)), "a failed directory flush reports the save as failed")
         check(syncDirectoryNio(d2) && !syncDirectoryNio(java.io.File(d2, "missing")), "default directory flush works on a real directory and fails on a missing one")
         d2.deleteRecursively()
+        // through the allocator: absent starts at zero, an existing empty or tag-only record never resets the counter
+        run {
+            val d3 = java.nio.file.Files.createTempDirectory("codes3").toFile()
+            val first = PickerRequests(FileCodeStore(d3)); val x = first.issue(Any())
+            check(x == PickerRequests.BASE && first.issue(Any()) == PickerRequests.BASE + 1, "absent record starts at the first code and advances")
+            val recFile = java.io.File(d3, FileCodeStore.NAME)
+            for ((name, body) in listOf("tag only" to "otpanda-import-picker-codes-1\n", "empty file" to "", "truncated" to "otpanda-import-picker-codes-1\n1")) {
+                recFile.writeText(body)
+                val again = PickerRequests(FileCodeStore(d3))
+                check(again.issue(Any()) == PickerRequests.NONE && recFile.readText() == body, "existing $name record fails closed without a reset or rewrite")
+            }
+            recFile.writeText("otpanda-import-picker-codes-1\n2\n")
+            check(PickerRequests(FileCodeStore(d3)).issue(Any()) == PickerRequests.BASE + 2, "valid record continues from its count")
+            recFile.writeText("otpanda-import-picker-codes-1\n1025\n")
+            check(PickerRequests(FileCodeStore(d3)).issue(Any()) == PickerRequests.NONE, "a count beyond the block fails closed")
+            recFile.writeText("otpanda-import-picker-codes-1\n1\n2\n")
+            check(PickerRequests(FileCodeStore(d3)).issue(Any()) == PickerRequests.NONE, "a multi-value record fails closed")
+            d3.deleteRecursively()
+        }
         d.deleteRecursively()
     }
     // a slow read finishing after cancel and after a new begin is dropped
