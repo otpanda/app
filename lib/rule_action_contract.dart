@@ -183,9 +183,10 @@ Map<String, dynamic> validateRuleAction(
   };
 }
 
+String _plural(int n, String one, String many) => '$n ${n == 1 ? one : many}';
 String ruleDisclosure(Map<String, dynamic> s) =>
     '${s['operation'] == 'rule-resume'
         ? 'Resume'
         : s['operation'] == 'rule-edit'
         ? 'Change'
-        : 'Save'} the rule for ${s['sender']} on this connector. Match: ${s['basis'] == 'template' ? 'saved message template' : 'phrase "${s['phrase']}"'}. Future codes go to ${s['label']}, shared with ${s['futureRecipients']} recipients and ${s['futureAutomations']} automation grants. ${s['otherAccountRules']} other accounts have potentially overlapping rules. A tie stays unassigned.${s['operation'] == 'rule-edit' ? ' Changing the phrase may match other message templates.' : ''}${s['previewRemoved'] == true ? ' This removes the review preview, not code history.' : ''}';
+        : 'Save'} the rule for ${s['sender']} on this connector. Match: ${s['basis'] == 'template' ? 'saved message template' : 'phrase "${s['phrase']}"'}. Future codes go to ${s['label']}, shared with ${_plural(s['futureRecipients'], 'recipient', 'recipients')} and ${_plural(s['futureAutomations'], 'automation grant', 'automation grants')}. ${_plural(s['otherAccountRules'], 'other account has', 'other accounts have')} potentially overlapping rules. A tie stays unassigned.${s['operation'] == 'rule-edit' ? ' Changing the phrase may match other message templates.' : ''}${s['previewRemoved'] == true ? ' This removes the review preview, not code history.' : ''}';

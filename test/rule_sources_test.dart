@@ -123,7 +123,7 @@ void main() {
       await t.tap(find.text('Resume'));
       await t.pumpAndSettle();
       expect(
-        find.textContaining('2 recipients and 1 automation'),
+        find.textContaining('2 recipients and 1 automation grant'),
         findsOneWidget,
       );
       expect(b.sends, 0);

@@ -13,6 +13,7 @@ class Bridge implements GmailSourceBridge {
     disconnected: true,
   );
   int disconnects = 0;
+  String? rulesChoice;
   @override
   Future<SessionResponse> gmailSourceStatus() async {
     checks++;
@@ -48,6 +49,7 @@ class Bridge implements GmailSourceBridge {
     String id, {
     String rules = 'keep',
   }) async {
+    rulesChoice = rules;
     disconnects++;
     return result;
   }
@@ -263,6 +265,39 @@ void main() {
     );
     await t.pumpWidget(const MaterialApp(home: SizedBox()));
   });
+
+  testWidgets(
+    'delete choice is explicit and cancel leaves connector untouched',
+    (t) async {
+      final b = Bridge();
+      await t.pumpWidget(
+        host(
+          GmailSourceDisconnect(
+            bridge: b,
+            sourceId: 'source',
+            label: 'Synthetic',
+            onChanged: () {},
+          ),
+        ),
+      );
+      await t.tap(find.text('Disconnect Gmail'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Verify and disconnect'));
+      await t.pumpAndSettle();
+      expect(b.disconnects, 0);
+      await t.tap(find.text('Cancel'));
+      await t.pumpAndSettle();
+      expect(b.disconnects, 0);
+      await t.tap(find.text('Disconnect Gmail'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Verify and disconnect'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Delete rules'));
+      await t.pumpAndSettle();
+      expect(b.disconnects, 1);
+      expect(b.rulesChoice, 'delete');
+    },
+  );
 
   Future<void> runDisconnect(
     WidgetTester t,
