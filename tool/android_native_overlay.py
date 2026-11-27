@@ -24,7 +24,7 @@ custody.mkdir(parents=True, exist_ok=True)
 for name in ('TotpCalculator.kt', 'SeedCustody.kt', 'AndroidSeedVault.kt',
              'NativeCustody.kt', 'NativeCustodyChannel.kt', 'OwnerStateFileStore.kt',
              'SeedSyncKey.kt', 'SeedSyncWire.kt', 'SeedSyncHandle.kt', 'SeedSyncChannel.kt',
-             'InstallId.kt', 'AndroidInstallIdStore.kt', 'AndroidSyncKeyVault.kt', 'SeedSyncStateFileStore.kt'):
+             'InstallId.kt', 'AndroidInstallIdStore.kt', 'WorkspaceAdmission.kt', 'WorkspaceAdmissionChannel.kt', 'AndroidWorkspaceAdmissionStore.kt', 'AndroidSyncKeyVault.kt', 'SeedSyncStateFileStore.kt'):
     shutil.copyfile(Path(__file__).parent / 'offline-totp' / name, custody / name)
 g = Path('android/app/build.gradle.kts'); s = g.read_text()
 if 'androidx.credentials:credentials:' not in s:

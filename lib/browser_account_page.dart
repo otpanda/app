@@ -64,6 +64,8 @@ class BrowserAccountPage extends StatefulWidget {
   final bool workspaceEnabled;
   final int Function()? clock;
   final Widget? localSecuritySetting;
+  final ValueChanged<ReadWorkspaceController>? onWorkspaceReady;
+  final ValueChanged<ReadWorkspaceController>? onWorkspaceClosed;
 
   /// Unified codes or an allowed settings/recovery route. Unknown routes go home.
   final String? navigation;
@@ -83,6 +85,8 @@ class BrowserAccountPage extends StatefulWidget {
     this.workspaceEnabled = false,
     this.clock,
     this.localSecuritySetting,
+    this.onWorkspaceReady,
+    this.onWorkspaceClosed,
     this.navigation,
     this.onNavigate,
   });
@@ -262,6 +266,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     store = CodeStore(_ReadTransport(bridge));
     workspace = ReadWorkspaceController(bridge: bridge, clock: now);
     workspace.addListener(workspaceChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onWorkspaceReady?.call(workspace);
+    });
     final Object cacheBridge = bridge;
     if (cacheBridge is ProfileCacheBridge) {
       cacheBridge.onProfileRevoked(() {
@@ -1058,6 +1065,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   @override
   void dispose() {
     revision++;
+    widget.onWorkspaceClosed?.call(workspace);
     workspace.removeListener(workspaceChanged);
     workspace.dispose();
     expiryTick?.cancel();

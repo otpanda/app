@@ -1,4 +1,18 @@
 import 'dart:convert';
+import 'dart:async';
+
+import '../offline_totp/android_seed_custody.dart';
+import '../offline_totp/seed_install_id.dart';
+import '../offline_totp/seed_install_id_channel.dart';
+
+import 'package:flutter/services.dart';
+
+import '../offline_totp/android_wrapping_key_store.dart';
+import '../offline_totp/native_offline_workspace_runtime.dart';
+import 'native_workspace_admission.dart';
+import 'native_workspace_coordinator.dart';
+import 'native_offline_workspace_page.dart';
+
 import 'dart:io' show Platform;
 
 import 'native_platform_browser.dart';
@@ -65,14 +79,70 @@ class _Boot extends StatefulWidget {
 class _BootState extends State<_Boot> with WidgetsBindingObserver {
   late final NativeSessionController controller;
   late final NativeSessionBridge bridge;
+  late final NativeWorkspaceCoordinator workspace;
+  late final NativeOfflineWorkspaceRuntime offlineRuntime;
+  bool _admitting = false;
+  void _workspaceChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _admitWorkspace() async {
+    if (_admitting ||
+        controller.phase != NativeSessionPhase.signedIn ||
+        !localLock.ready ||
+        localLock.locked) {
+      return;
+    }
+    _admitting = true;
+    final session = controller.session;
+    try {
+      final r = await bridge.read('/v1/manage/session');
+      if (r.status != 200 ||
+          controller.session != session ||
+          controller.phase != NativeSessionPhase.signedIn) {
+        return;
+      }
+      final j = jsonDecode(r.body), owner = j is Map ? j['ownerId'] : null;
+      if (owner is String && owner.isNotEmpty) {
+        await SeedInstallId(
+          SeedInstallIdChannelStore(
+            const MethodChannel('app.otpanda/seed-custody'),
+          ),
+        ).get();
+        if (controller.session != session ||
+            controller.phase != NativeSessionPhase.signedIn) {
+          return;
+        }
+        await workspace.admitAuthenticated(owner);
+      }
+    } catch (_) {
+    } finally {
+      _admitting = false;
+    }
+  }
+
+  Future<void> _signOut() async {
+    try {
+      await workspace.invalidate();
+      await controller.signOut();
+    } catch (_) {
+      if (mounted) setState(() {});
+    }
+  }
+
   final passkeys = AndroidPasskeySource();
   bool ready = false;
   final localLock = LocalLockController(ChannelLocalLock());
   late final lockNavigation = LockNavigationObserver(localLock);
   void _lockChanged() {
     navigationHistory.blocked = !localLock.ready || localLock.locked;
+    if (_workspaceInitialized) {
+      workspace.localLockChanged();
+      if (localLock.ready && !localLock.locked) unawaited(_admitWorkspace());
+    }
   }
 
+  bool _workspaceInitialized = false;
   final navigationHistory = NativeNavigationHistory();
   late final NativeStartupRecovery startup;
   late final NativeDevicesService devices;
@@ -122,7 +192,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     bridge = NativeSessionBridge(
       controller,
       _bearer,
-      onLogout: () => controller.signOut(),
+      onLogout: () => unawaited(_signOut()),
       passkeys: passkeys,
       googleAvailability: () => widget.google.available,
       creation: passkeys,
@@ -131,6 +201,20 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       settingsEnabled: true,
       realtimeConnector: androidRealtimeConnector(apiOrigin),
     );
+    offlineRuntime = NativeOfflineWorkspaceRuntime(
+      clock: () => DateTime.now().millisecondsSinceEpoch,
+    );
+    workspace = NativeWorkspaceCoordinator(
+      admission: NativeWorkspaceAdmission(),
+      custody: AndroidSeedCustody(),
+      keys: AndroidWrappingKeyStore(),
+      runtime: offlineRuntime,
+      locallyUnlocked: () =>
+          localLock.ready && !localLock.locked && localLock.foreground,
+    );
+    workspace.addListener(_workspaceChanged);
+    offlineRuntime.addListener(_workspaceChanged);
+    _workspaceInitialized = true;
     localLock.recovery = NativeLocalLockRecovery(
       platform: ChannelLocalRecovery(),
       bearer: controller.accessToken,
@@ -175,6 +259,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     // floor. unknown (starting) and offline are transient: nothing changes.
     switch (controller.phase) {
       case NativeSessionPhase.signedIn:
+        unawaited(_admitWorkspace());
         devices.sessionChanged(controller.session);
         startup.sessionChanged(controller.session);
       case NativeSessionPhase.signedOut:
@@ -193,8 +278,11 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       bridge.realtimeSetForeground(true);
+      workspace.localLockChanged();
+      unawaited(_admitWorkspace());
     } else if (state != AppLifecycleState.inactive) {
       bridge.realtimeSetForeground(false);
+      workspace.lock();
     }
   }
 
@@ -205,6 +293,10 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     startup.dispose();
     devices.dispose();
     bridge.disposeRealtime();
+    workspace.removeListener(_workspaceChanged);
+    offlineRuntime.removeListener(_workspaceChanged);
+    workspace.dispose();
+    offlineRuntime.dispose();
     navigationHistory.dispose();
     localLock.removeListener(_lockChanged);
     lockNavigation.dispose();
@@ -222,11 +314,19 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
           googleAvailable: widget.google.available,
           version: const String.fromEnvironment('APP_VERSION'),
           authBridge: bridge,
+          localOfflineBuilder: (context) => workspace.hasLocalView
+              ? NativeOfflineWorkspacePage(
+                  runtime: offlineRuntime,
+                  onReconnect: () => unawaited(controller.forceRenew()),
+                )
+              : null,
           signedInBuilder: (context) => NativeNavigation(
             history: navigationHistory,
             builder: (context, route, navigate) {
               final page = BrowserAccountPage(
                 bridge: bridge,
+                onWorkspaceReady: workspace.bind,
+                onWorkspaceClosed: workspace.unbind,
                 localSecuritySetting: LocalLockSetting(controller: localLock),
                 navigation: route,
                 onNavigate: navigate,

@@ -147,7 +147,8 @@ class _State extends State<NativeSessionPage> {
         return widget.signedInBuilder!(context);
       }
       if (c.phase == NativeSessionPhase.offline ||
-          c.phase == NativeSessionPhase.unknown) {
+          c.phase == NativeSessionPhase.unknown ||
+          c.phase == NativeSessionPhase.signInRequired) {
         final local = widget.localOfflineBuilder?.call(context);
         if (local != null) return local;
       }
