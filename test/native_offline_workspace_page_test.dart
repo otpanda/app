@@ -116,10 +116,14 @@ void main() {
       expect(find.text('94287082'), findsOneWidget);
       expect(find.text('654321'), findsOneWidget);
       expect(find.textContaining('Offline.'), findsOneWidget);
-      await expectLater(
-        find.byType(MaterialApp),
-        matchesGoldenFile('native_offline_cold.png'),
-      );
+      // Pixel baseline was rendered with Linux Skia. Other hosts still run all
+      // functional/layout assertions, but use their own rasterizer/fonts.
+      if (Platform.isLinux) {
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile('native_offline_cold.png'),
+        );
+      }
       await tester.tap(find.byTooltip('Reconnect'));
       expect(reconnects, 1);
       await tester.runAsync(() async {

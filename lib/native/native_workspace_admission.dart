@@ -31,8 +31,9 @@ final class NativeWorkspaceScope {
         !RegExp(r'^[A-Za-z0-9_-]{22,64}$').hasMatch(s.install) ||
         s.epoch < 0 ||
         !RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(s.namespace) ||
-        !s.path.startsWith('/') ||
-        s.path.contains('/../')) {
+        !(s.path.startsWith('/') ||
+            RegExp(r'^[A-Za-z]:[\\/]').hasMatch(s.path)) ||
+        s.path.replaceAll('\\', '/').split('/').contains('..')) {
       throw const FormatException('Invalid workspace scope');
     }
     return s;
