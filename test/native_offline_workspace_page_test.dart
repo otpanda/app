@@ -19,7 +19,7 @@ void main() {
       final loader = FontLoader(family);
       final paths = family == 'MaterialIcons'
           ? [
-              '/downloads/otpanda/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+              '${Platform.environment['FLUTTER_ROOT'] ?? File(Platform.resolvedExecutable).parent.parent.parent.parent.path}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
             ]
           : (family == 'Figtree' ? [400, 500, 600, 700] : [700, 800])
                 .map((w) => 'assets/fonts/$family-$w.ttf')
