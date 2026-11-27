@@ -10,8 +10,8 @@ import org.otpanda.totp.*
 import java.util.concurrent.Executors
 
 /** Composed local adapters (seed custody, seed sync and workspace admission on one worker). Registration alone does not enroll, fetch, provision
- * or select an account. Production MainActivity deliberately does not register
- * this host yet. One worker/core pair spans engine recreation in this process.
+ * or select an account. Production MainActivity registers this host after the
+ * synthetic installed cold-workspace qualification on API34. One worker/core pair spans engine recreation in this process.
  */
 object SeedCustodyHost {
     private val worker = Executors.newSingleThreadExecutor()

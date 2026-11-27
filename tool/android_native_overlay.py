@@ -18,7 +18,7 @@ rec.mkdir(parents=True, exist_ok=True)
 for f in (Path(__file__).parent / 'android-recovery').glob('*.kt'):
     if not f.name.endswith('Test.kt'):
         shutil.copyfile(f, rec / f.name)
-# Composed custody/sync adapters compile, but production MainActivity does not register them.
+# Composed custody/sync/admission host is registered by reviewed MainActivity.
 custody = root / 'main' / 'kotlin' / 'org' / 'otpanda' / 'totp'
 custody.mkdir(parents=True, exist_ok=True)
 for name in ('TotpCalculator.kt', 'SeedCustody.kt', 'AndroidSeedVault.kt',
