@@ -194,7 +194,7 @@ jobs:
           path: candidate
       - name: Download immutable pinned upgrade fixtures
         run: |
-          mkdir -p repair-out original-alpha6 previous-alpha12
+          mkdir -p repair-out original-alpha6 previous-alpha12 previous-alpha13
           base=https://github.com/otpanda/app/releases/download/qualification-fixtures-2026-11-26
           curl -fLsS "$base/original-alpha6-google.apk" -o original-alpha6/otpanda-android-google-native-candidate.apk
           curl -fLsS "$base/original-alpha6-fdroid.apk" -o original-alpha6/otpanda-android-fdroid-native-candidate.apk
@@ -202,6 +202,9 @@ jobs:
           previous=https://github.com/otpanda/app/releases/download/v0.1.0-alpha.12
           curl -fLsS "$previous/otpanda-android-google-v0.1.0-alpha.12.apk" -o previous-alpha12/google.apk
           curl -fLsS "$previous/otpanda-android-fdroid-v0.1.0-alpha.12.apk" -o previous-alpha12/fdroid.apk
+          previous=https://github.com/otpanda/app/releases/download/v0.1.0-alpha.13
+          curl -fLsS "$previous/otpanda-android-google-v0.1.0-alpha.13.apk" -o previous-alpha13/google.apk
+          curl -fLsS "$previous/otpanda-android-fdroid-v0.1.0-alpha.13.apk" -o previous-alpha13/fdroid.apk
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
