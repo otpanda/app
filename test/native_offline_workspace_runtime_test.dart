@@ -95,6 +95,23 @@ void main() {
       expect(runtime.visibleCodes.single.expiresAt, 90000);
     },
   );
+  test(
+    'repeated same-scope open keeps ciphertext snapshot and key unchanged',
+    () async {
+      await open(fresh: true);
+      runtime.publishAuthenticated(saved());
+      final before = File('${dir.path}/db').readAsBytesSync();
+      for (var i = 0; i < 3; i++) {
+        await open();
+        expect(runtime.phase, NativeOfflineWorkspacePhase.ready);
+        expect(runtime.snapshot!.ownerId, 'owner');
+        expect(runtime.snapshot!.entries.first.service, 'Local service');
+        expect(runtime.visibleCodes.map((c) => c.value), contains('94287082'));
+      }
+      expect(keys.creates, 1);
+      expect(File('${dir.path}/db').readAsBytesSync(), before);
+    },
+  );
   test('locked custody never falls back to cached own TOTP code', () async {
     await open(fresh: true);
     runtime.publishAuthenticated(saved());
