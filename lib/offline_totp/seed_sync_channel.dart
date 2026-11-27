@@ -50,6 +50,30 @@ final class SeedEnrollmentState {
   final bool provable;
 }
 
+enum SeedEnrollmentPhase { prepared, signed, confirmed }
+
+/// Durable native record of the one enrollment attempt. Read-only on the Dart
+/// side. A `signed` phase means a signature may have reached the server, so the
+/// attempt is an unknown outcome until key-signed status says otherwise.
+final class SeedEnrollmentJournal {
+  SeedEnrollmentJournal(
+    this.keyId,
+    Uint8List publicKey,
+    this.installId,
+    this.generation,
+    this.phase,
+    this.actionDigest,
+  ) : _publicKey = Uint8List.fromList(publicKey);
+  final String keyId, installId;
+  final int generation;
+  final SeedEnrollmentPhase phase;
+
+  /// Null exactly while prepared. Lowercase hex SHA-256 once signed.
+  final String? actionDigest;
+  final Uint8List _publicKey;
+  Uint8List get publicKey => Uint8List.fromList(_publicKey);
+}
+
 final class SeedEraseResult {
   const SeedEraseResult(this.seedsPurged, this.keyDeleted, this.epoch);
   final bool seedsPurged, keyDeleted;
@@ -280,6 +304,93 @@ final class SeedSyncChannel {
           gen = _num(m['generation']);
       if (returnedInstall != installId || gen != generation) _bad();
       return SeedEnrollment(key, _point(m['publicKey']), gen, returnedInstall);
+    });
+  }
+
+  /// Create-only: native refuses with eraseIncomplete when any key exists. Never
+  /// a retry for a timeout; read [enrollmentJournal] first.
+  Future<SeedEnrollment> prepareEnrollment({
+    required String owner,
+    required String installId,
+    required int generation,
+  }) async {
+    return _mutation(() async {
+      _owner(owner);
+      _number(generation);
+      if (!_install.hasMatch(installId)) _input();
+      final m = _map(
+        await _call('syncPrepareEnrollment', {
+          'owner': owner,
+          'installId': installId,
+          'generation': generation,
+        }, mutation: true),
+        {'keyId', 'publicKey', 'generation', 'installId'},
+      );
+      final key = _str(m['keyId'], _hex),
+          returnedInstall = _str(m['installId'], _install),
+          gen = _num(m['generation']);
+      if (returnedInstall != installId || gen != generation) _bad();
+      return SeedEnrollment(key, _point(m['publicKey']), gen, returnedInstall);
+    });
+  }
+
+  /// Durable read. Null means no enrollment key exists for the owner.
+  Future<SeedEnrollmentJournal?> enrollmentJournal(String owner) async {
+    _owner(owner);
+    final raw = await _call('syncEnrollmentJournal', {'owner': owner});
+    if (raw == null) return null;
+    final m = _map(raw, {
+      'keyId',
+      'publicKey',
+      'installId',
+      'generation',
+      'phase',
+      'actionDigest',
+    });
+    final phase = switch (m['phase']) {
+      'prepared' => SeedEnrollmentPhase.prepared,
+      'signed' => SeedEnrollmentPhase.signed,
+      'confirmed' => SeedEnrollmentPhase.confirmed,
+      _ => _bad(),
+    };
+    final digest = m['actionDigest'];
+    if (phase == SeedEnrollmentPhase.prepared) {
+      if (digest != null) _bad();
+    } else {
+      if (digest is! String || !RegExp(r'^[a-f0-9]{64}$').hasMatch(digest)) {
+        _bad();
+      }
+    }
+    return SeedEnrollmentJournal(
+      _str(m['keyId'], _hex),
+      _point(m['publicKey']),
+      _str(m['installId'], _install),
+      _num(m['generation']),
+      phase,
+      digest as String?,
+    );
+  }
+
+  /// Only after an exact successful finish or key-signed status `active` for
+  /// this key. Returns false when native does not hold that exact signed tuple.
+  Future<bool> confirmEnrollment({
+    required String owner,
+    required String keyId,
+    required String actionDigest,
+  }) async {
+    return _mutation(() async {
+      _owner(owner);
+      if (!_hex.hasMatch(keyId) ||
+          !RegExp(r'^[a-f0-9]{64}$').hasMatch(actionDigest)) {
+        _input();
+      }
+      return _bool(
+        await _call('syncConfirmEnrollment', {
+          'owner': owner,
+          'keyId': keyId,
+          'actionDigest': actionDigest,
+        }, mutation: true),
+      );
     });
   }
 

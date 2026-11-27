@@ -3,7 +3,7 @@ name: Desktop compile verification
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, feat/native-offline-workspace]
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,6 +33,18 @@ jobs:
         run: sudo apt-get update -y && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev xvfb xdotool imagemagick
       - run: flutter --disable-analytics
       - run: python tool/desktop/bootstrap.py
+      - name: Windows wrapping key native qualification
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S tool/desktop/wrapping_tests -B build/wrapping
+          cmake --build build/wrapping --config Debug
+          & build/wrapping/Debug/wrapping_core.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & build/wrapping/Debug/wrapping_format.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & build/wrapping/Debug/wrapping_native.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run: flutter analyze
       - run: flutter test
       - name: Compile fictional development app

@@ -27,6 +27,8 @@ class SeedSyncBatchHandle private constructor(
     private val pending = LinkedHashSet(entries.keys)
     private var challenge: String? = null
     private var expiresAt = 0L
+    private var boundAt = 0L
+    private var localDeadline = 0L
     private var pinnedServerKey: String? = null
     var state = State.NEW; private set
     /** TEST ONLY: runs between decrypt and the guarded provision step. Never set in production (release guard). */
@@ -46,16 +48,21 @@ class SeedSyncBatchHandle private constructor(
         need(State.NEW)
         try {
             SeedSyncWire.challengeDigest(challenge)
-            if (nowMs < 0 || expiresAt <= nowMs || expiresAt > nowMs + SeedSyncWire.PROOF_TTL_MS || expiresAt > SeedSyncWire.MAX_SAFE) bad("expiresAt")
+            if (nowMs < 0 || expiresAt <= nowMs || expiresAt > nowMs + SeedSyncWire.PROOF_MAX_AHEAD_MS || expiresAt > SeedSyncWire.MAX_SAFE) bad("expiresAt")
         } catch (e: WireException) { discard(); throw e }
-        this.challenge = challenge; this.expiresAt = expiresAt; state = State.BOUND
+        this.challenge = challenge; this.expiresAt = expiresAt
+        boundAt = nowMs
+        // A behind clock may accept a later absolute server expiry, but cannot keep
+        // an ephemeral batch alive longer than 120 seconds after local receipt.
+        localDeadline = minOf(expiresAt, nowMs + SeedSyncWire.PROOF_TTL_MS)
+        state = State.BOUND
     }
 
     /** Signs the batch proof once. The entries digest and ephemeral digest come from this handle, the key must still be the one the handle began with, and epoch and
      * generation are checked against native state. After this call the challenge is considered used whatever happens: a failure discards the handle. */
     fun signProof(nowMs: Long): String = synchronized(lock) {
         need(State.BOUND)
-        if (nowMs >= expiresAt) { discard(); bad("expired") }
+        if (nowMs < boundAt || nowMs >= localDeadline) { discard(); bad("expired") }
         state = State.SIGNED // single use: a second attempt, or a retry after a failed signature, is refused
         try {
             SeedSyncWire.signBatchProof(core, owner, deviceId, generation, epoch, challenge!!, expiresAt, eph.raw, entries.values.map { it.entryId to it.seedVersion }, nowMs, keyId)
@@ -90,7 +97,7 @@ class SeedSyncBatchHandle private constructor(
 
     private fun consume(entryId: String, nowMs: Long): SealedEntrySpec {
         need(State.SIGNED)
-        if (nowMs >= expiresAt) { discard(); bad("expired") }
+        if (nowMs < boundAt || nowMs >= localDeadline) { discard(); bad("expired") }
         val spec = entries[entryId]
         if (spec == null || !pending.remove(entryId)) { discard(); bad("entry") } // unknown or already consumed: the response does not match the request
         return spec

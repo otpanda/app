@@ -46,8 +46,8 @@ import java.security.SecureRandom
 //    gone with nothing pending: TERMINAL, do not retry. "pending": an erase or key delete is already owed: call syncRetryPending, send no new status request.
 //    "unreadable": the enrollment document cannot be read, nothing changed: retry later, never treat as purge. WIRE_STATUS (unknown state string): retry later.
 //  * Half enrollment: syncEnroll makes a durable ACTIVE key but only this process holds the public point the enroll proof needs. After a process death before the
-//    server accepted it, syncEnrollmentState gives provable=false and syncSignEnrollProof gives WIRE_KEY. If Dart has no record that the server confirmed that key,
-//    it repairs by calling syncEnroll again: the old key is denied and deleted first, the new key is the only active one, and no seed is touched.
+//    server replied, syncEnrollmentState gives provable=false and syncSignEnrollProof gives WIRE_KEY. This does NOT prove that the server did not commit.
+//    Preserve the same durable key and pending attempt, reconcile through key-signed status, and never auto-replace on timeout, opaque status or capped-list absence.
 //  * installId: Dart is the single source (a random per-install id it persists, 22 to 64 chars of [A-Za-z0-9_-]). Native pins it in the enrollment record and refuses
 //    a different id for the same owner while an enrollment is active (INVALID_INPUT). There is no native install id in this base.
 //  * Erase, a status purge and re-enrollment discard that owner's live batch handles at once, so nothing begun under the old key can sign or provision.
@@ -76,7 +76,7 @@ class SeedSyncChannelHandler(
     private val lock = Any()
     private val handles = LinkedHashMap<String, Live>()
     /** The last enrollment per owner, in memory only: the public point is not persisted (the state document holds ids only), and the enroll proof needs it to
-     * recompute the action digest. After a process restart an unfinished enrollment cannot be proven; the caller enrolls again (a fresh key). */
+     * recompute the action digest. After restart the enroll proof is unavailable, but the durable key can still sign status. Never auto-replace an unknown-outcome enrollment. */
     private val enrolled = HashMap<String, Enrollment>()
 
     private fun Map<*, *>.str(k: String) = (this[k] as? String) ?: throw Bad()
@@ -84,7 +84,7 @@ class SeedSyncChannelHandler(
     private fun Map<*, *>.int(k: String): Int { val v = long(k); if (v < Int.MIN_VALUE || v > Int.MAX_VALUE) throw Bad(); return v.toInt() }
     private fun Map<*, *>.exact(vararg keys: String) { if (this.keys != keys.toSet()) throw Bad() }
 
-    private val known = setOf("syncEnroll", "syncEnrollmentState", "syncSignEnrollProof", "syncSignSnapshotProof", "syncSignRevokeProof", "syncBatchBegin", "syncBatchBind", "syncBatchSign",
+    private val known = setOf("syncPrepareEnrollment", "syncEnrollmentJournal", "syncConfirmEnrollment", "syncEnroll", "syncEnrollmentState", "syncSignEnrollProof", "syncSignSnapshotProof", "syncSignRevokeProof", "syncBatchBegin", "syncBatchBind", "syncBatchSign",
         "syncBatchOpen", "syncBatchSkip", "syncBatchFinish", "syncDiscoverOwners", "syncStatusKeyId", "syncStatusSign", "syncStatusApply", "syncErase", "syncRetryPending", "syncInstallIdGet", "syncInstallIdEnsure")
 
     private fun sweep(now: Long) {
@@ -113,7 +113,11 @@ class SeedSyncChannelHandler(
             val a = arguments as? Map<*, *> ?: if (method == "syncRetryPending" || method == "syncDiscoverOwners" || method == "syncInstallIdGet") emptyMap<Any, Any>() else throw Bad()
             val now = clockMs()
             when (method) {
-                "syncEnroll" -> { a.exact("owner", "installId", "generation"); val owner = a.str("owner"); val install = a.str("installId")
+                "syncEnrollmentJournal" -> { a.exact("owner"); synchronized(lock) {
+                    ChannelReply.Ok(core.enrollmentJournal(a.str("owner"))?.let { mapOf("keyId" to it.keyId, "publicKey" to it.publicKey.copyOf(), "installId" to it.installId, "generation" to it.generation, "phase" to it.phase, "actionDigest" to it.actionDigest) }) } }
+                "syncConfirmEnrollment" -> { a.exact("owner", "keyId", "actionDigest"); synchronized(lock) {
+                    ChannelReply.Ok(core.confirmEnrollment(a.str("owner"), a.str("keyId"), a.str("actionDigest"))) } }
+                "syncEnroll", "syncPrepareEnrollment" -> { a.exact("owner", "installId", "generation"); val owner = a.str("owner"); val install = a.str("installId")
                     synchronized(lock) {
                         // Dart is the single source of installId (a random per-install id it persists). Native pins it in the enrollment record and refuses a different one
                         // for the same owner while an enrollment is active: an id that changes inside one install is a bug or tampering, never a repair.
@@ -126,7 +130,7 @@ class SeedSyncChannelHandler(
                             if (stored != install) return ChannelReply.Err("INSTALL_ID_MISMATCH") }
                         core.installIdFor(owner)?.let { if (it != install) return ChannelReply.Err("INSTALL_ID_MISMATCH") }
                         try {
-                            core.enroll(owner, install, a.long("generation")).let { enrolled[owner] = it
+                            (if (method == "syncPrepareEnrollment") core.prepareEnrollment(owner, install, a.long("generation")) else core.enroll(owner, install, a.long("generation"))).let { enrolled[owner] = it
                                 ChannelReply.Ok(mapOf("keyId" to it.keyId, "publicKey" to it.publicKey.copyOf(), "generation" to it.generation, "installId" to it.installId)) }
                         } finally { discardOwner(owner) } // a new key invalidates every batch begun under the old one
                     } }
