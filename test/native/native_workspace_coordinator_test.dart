@@ -112,8 +112,9 @@ void main() {
         const channel = MethodChannel('test/admission-oneshot');
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
             .setMockMethodCallHandler(channel, (call) async {
-              if (call.method == 'admit')
+              if (call.method == 'admit') {
                 return {'scope': scope, 'createAllowed': grants++ == 0};
+              }
               if (call.method == 'confirm') {
                 confirmations++;
                 throw PlatformException(code: 'UNAVAILABLE');
