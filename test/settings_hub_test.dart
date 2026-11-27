@@ -172,6 +172,8 @@ void main() {
     expect(find.text('Clear local access'), findsNothing);
     await t.tap(find.byTooltip('Back to settings'));
     await t.pumpAndSettle();
+    await t.drag(find.byType(CustomScrollView).first, const Offset(0, -400));
+    await t.pumpAndSettle();
     await t.tap(find.text('Sign out'));
     await t.pumpAndSettle();
     expect(find.text('Devices & sessions'), findsNothing);

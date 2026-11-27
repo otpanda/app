@@ -1851,10 +1851,19 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     ),
                     if (!widget.workspaceEnabled)
                       SettingsCategory.organization: organizationReady
-                        ? organizationPage()
-                        : organizationBusy
-                        ? settingsCard('Organization', const [Text('Loading organization...', key: Key('organization-loading'))])
-                        : settingsCard('Organization', const [Text('Organization could not load. Your saved choices have not changed.')]),
+                          ? organizationPage()
+                          : organizationBusy
+                          ? settingsCard('Organization', const [
+                              Text(
+                                'Loading organization...',
+                                key: Key('organization-loading'),
+                              ),
+                            ])
+                          : settingsCard('Organization', const [
+                              Text(
+                                'Organization could not load. Your saved choices have not changed.',
+                              ),
+                            ]),
                     SettingsCategory.about: const AboutPage(),
                   },
                 ),
