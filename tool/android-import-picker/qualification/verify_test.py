@@ -16,7 +16,7 @@ FILES = {
     'errors': (logs('errors', ['errors_not_text', 'errors_too_large', 'phase_complete'], ['bad', 'big']), SEL('bad', 'big')),
     'rotation': (logs('rotation', ['rotation_text', 'phase_complete'], ['a']), SEL('a')),
     'recreate': (logs('recreate', ['rotation_recreated_dropped', 'phase_complete'], []), SEL('a')),
-    'stale_recreate': (logs('s', ['stale_old_engine_gone', 'stale_second_text', 'phase_complete'], ['b'], 'ACT create 2 restored true\nENGINE cleanup 1\nENGINE configure 1\nENGINE configure 2'), SEL('a', 'b') + '\nHARNESS recreated_before_selection'),
+    'stale_recreate': (logs('s', ['stale_old_engine_gone', 'stale_second_text', 'phase_complete'], ['b'], 'ACT create 2 restored true\nENGINE cleanup 1\nENGINE configure 1\nENGINE configure 2'), SEL('a', 'b') + '\nHARNESS config change font_scale'),
     'stale_kill': (logs('s', ['stale_old_engine_gone', 'stale_second_text', 'phase_complete'], ['b'], 'ACT create 2 restored true\nENGINE configure 1\nENGINE configure 2'), SEL('a', 'b') + '\nHARNESS pid_before 100\nHARNESS pid_after_kill none\nHARNESS killed_before_selection\nHARNESS pid_after_restore 200'),
 }
 
@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory() as t:
     assert not mutate('stale_kill', drive=lambda d: d.replace('pid_after_restore 200', 'pid_after_restore 100')), 'process must change'
     assert not mutate('stale_kill', drive=lambda d: d.replace('pid_after_kill none', 'pid_after_kill 100')), 'process must have died'
     assert not mutate('stale_kill', drive=lambda d: d.replace('HARNESS killed_before_selection', '')), 'death must precede the selection'
-    assert not mutate('stale_recreate', drive=lambda d: d.replace('HARNESS recreated_before_selection', '')), 'retirement must precede the selection'
+    assert not mutate('stale_recreate', drive=lambda d: d.replace('HARNESS config change font_scale', '')), 'the configuration change must be recorded'
     assert not mutate('stale_recreate', lambda l: l.replace('ENGINE cleanup 1', '')), 'engine cleanup must be observed'
     # ordinary lifecycle telemetry is not a failed check, a real false check is
     assert mutate('normal', lambda l: l + '\nACT create 1 restored false'), 'restored false telemetry must pass'

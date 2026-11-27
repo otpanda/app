@@ -31,6 +31,17 @@ def pid():
     return shell(f'pidof {PKG}').strip()
 
 
+def isolate():
+    """Leave nothing from an earlier scenario: no picker, no app process, default settings, home screen."""
+    shell('settings put global always_finish_activities 0')
+    shell('settings put system user_rotation 0'); shell('settings put system accelerometer_rotation 1')
+    shell('settings put system font_scale 1.0')
+    shell(f'am force-stop {PKG}')
+    shell('am force-stop com.android.documentsui')
+    shell('input keyevent KEYCODE_WAKEUP'); shell('wm dismiss-keyguard'); shell('input keyevent KEYCODE_HOME')
+    time.sleep(3)
+
+
 class Run:
     def __init__(self, out, name):
         self.out, self.name = pathlib.Path(out), name
@@ -90,10 +101,20 @@ class Run:
         self.note(f'HARNESS back {label}')
 
     def start(self):
-        adb('logcat', '-c')
-        shell(f'am force-stop {PKG}')
-        shell(f'am start -n {ACT} --es scenario {self.name.split("@")[0]} --ez fresh true')
-        self.note('HARNESS started')
+        """Clean state, then launch. Retries the launch once; an app that never logs ACT create is a harness failure."""
+        isolate()
+        scenario = self.name.split("@")[0]
+        for attempt in (1, 2):
+            adb('logcat', '-c')
+            shell(f'am start -n {ACT} --es scenario {scenario} --ez fresh true')
+            self.note(f'HARNESS started attempt {attempt}')
+            end = time.time() + 30
+            while time.time() < end:
+                if 'ACT create' in logcat():
+                    return
+                time.sleep(1)
+            shell(f'am force-stop {PKG}')
+        raise Harness(f'{self.name}: the fixture activity never started (leftover foreground window or install problem)')
 
     def finish(self, extra=''):
         time.sleep(2)
@@ -150,20 +171,20 @@ def sc_recreate(r):
 
 
 def sc_stale_recreate(r):
-    """Retire the caller (engine and activity destroyed and recreated by a real configuration change) while the picker is open,
-    PROVE it happened from the lifecycle log, and only then select the old document."""
+    """Caller engine retired by a real configuration change while the picker is up, then the old selection arrives.
+    Observed platform behavior (runs 46028325228 and 46030533362): a font scale or rotation change is applied to the STOPPED
+    caller only when it next resumes, i.e. when the picker returns. So the caller is recreated as the old result is delivered, and
+    that result goes to the NEW engine. It cannot be retired before the selection this way; stale_kill retires the process
+    before the selection. This scenario therefore proves: old result delivered to a recreated caller is never opened and never
+    reaches the new engine's request, and a fresh pick afterwards works. If the caller is NOT recreated the old engine's pick
+    completes, the fixture logs stale_old_engine_gone false and the run fails (never a silent pass)."""
     r.start()
     r.wait_for(r'MARK old_picker_open', what='old_picker_open'); r.picker_focused()
-    shell('settings put system font_scale 1.3'); r.note('HARNESS config change font_scale')
-    try:
-        r.wait_for(r'ENGINE cleanup 1[\s\S]*ACT create \d+ restored true[\s\S]*ENGINE configure 2', 30, 'caller retired and recreated while the picker is open')
-        r.note('HARNESS recreated_before_selection')
-        r.picker_focused()
-        r.select('fixture-a.txt', 'a')
-        r.wait_for(r'MARK pick_2', 90, 'pick_2 from the recreated engine'); r.select('fixture-b.txt', 'b')
-        complete(r)
-    finally:
-        shell('settings put system font_scale 1.0')
+    shell('settings put system font_scale 1.3'); r.note('HARNESS config change font_scale'); time.sleep(3)
+    r.select('fixture-a.txt', 'a')
+    r.wait_for(r'MARK pick_2', 90, 'pick_2 from the recreated engine')
+    r.select('fixture-b.txt', 'b')
+    complete(r)
 
 
 def kill_app(r):

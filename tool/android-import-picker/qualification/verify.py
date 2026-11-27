@@ -57,7 +57,7 @@ def check_scenario(name):
         # engine survived: the one selection opened once and was delivered. Engine retired: it must never have been opened.
         assert got == ({'a': 1} if used else {}), f'{name}: provider opens {got} do not match the observed outcome'
     if name == 'stale_recreate':
-        assert 'HARNESS recreated_before_selection' in drive and count(text, r'ENGINE cleanup') >= 1, f'{name}: the caller was not shown retired before the stale selection'
+        assert 'HARNESS config change font_scale' in drive and count(text, r'ENGINE cleanup') >= 1, f'{name}: the caller was never shown retired and recreated'
     if name == 'stale_kill':
         assert 'HARNESS killed_before_selection' in drive, f'{name}: the process was not shown dead before the stale selection'
     if name.startswith('stale'):

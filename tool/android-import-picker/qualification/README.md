@@ -25,11 +25,12 @@ Scenarios and what each proves:
 - rotation: real user rotation while the picker is open. Accepts either outcome and checks it is consistent: engine survived (text a,
   a opened once) or engine retired (new Dart run sees phase "picking", a never opened).
 - recreate: a configuration change (font scale) while the picker is open, same either-or check.
-- stale_recreate: a real configuration change (font scale) retires the caller (engine cleanup, activity destroyed and recreated)
-  while the picker is open. The harness proves from the lifecycle log that cleanup, a restored create and a second engine happened
-  BEFORE it selects the old document a. a must never be opened (opens a=0); a fresh pick of b then works (b=1). Font scale is
-  restored only after completion, so no second recreation hits the pending pick. (`always_finish_activities` via `settings put`
-  did not take effect on the API 34 image in run 46028325228, so it is not used.)
+- stale_recreate: a real configuration change (font scale) is made while the picker is open. Observed on the API 34 image: the
+  stopped caller is recreated only when it next resumes, i.e. as the picker returns, so the old result is delivered to the NEW
+  engine (not retired before the selection). a must never be opened (opens a=0) or reach the new engine's request, the first
+  engine must show cleanup and a restored create, and a fresh pick of b then works (b=1). If no recreation happens, the old pick
+  completes and the fixture fails with stale_old_engine_gone false. `always_finish_activities` via `settings put` and a font scale
+  wait for retirement-before-selection both proved unsupported (runs 46028325228, 46030533362).
 - stale_kill: `run-as app.otpanda kill -9 <pid>` (real SIGKILL of the debuggable app; `am kill` left a picker-hosting process
   alive in that run) while the picker is up. The harness fails if the pid survives, records `killed_before_selection`, then selects
   a, restores, and requires a new pid. a never opened; a fresh pick of b works (b=1).
@@ -41,3 +42,6 @@ real cloud providers, hardware. The allocator never reuses a request code (monot
 Local checks that DO run without a device: `python3 uinav_test.py`, `verify_test.py`, `check_release_test.py`; the Kotlin fixture
 compiles against android.jar, the Flutter embedding jar and androidx.lifecycle-common (with a stub `app.otpanda.MainActivity`);
 `flutter analyze` on `fixture_main.dart`.
+
+Isolation: every scenario starts with `isolate()` (force-stop the app and com.android.documentsui, default font scale, rotation and
+always_finish settings, HOME) and retries the launch once. An app that never logs `ACT create` is a harness failure.
