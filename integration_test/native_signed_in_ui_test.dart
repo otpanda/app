@@ -214,7 +214,23 @@ void main() {
       await t.tap(find.byKey(const Key('entry-edit')));
       await _until(t, find.byKey(const Key('entry-name')));
       expect(find.byKey(const Key('entry-edit-bar')), findsOneWidget);
+      // Integration tests keep the real IME by default. Register injection
+      // explicitly so Android cannot overwrite the injected value on attach.
+      t.testTextInput.register();
+      addTearDown(t.testTextInput.unregister);
       await t.enterText(find.byKey(const Key('entry-name')), 'Renamed in UI');
+      await t.pump(const Duration(milliseconds: 300));
+      expect(
+        t
+            .widget<TextField>(find.byKey(const Key('entry-name')))
+            .controller!
+            .text,
+        'Renamed in UI',
+      );
+      expect(
+        t.widget<FilledButton>(find.byKey(const Key('entry-save'))).onPressed,
+        isNotNull,
+      );
       await _shot(t, 'details-edit');
       await t.tap(find.byKey(const Key('entry-save')));
       await _until(t, find.text('Renamed in UI'));
