@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: otpanda/api
-          ref: f8b874221ce542d5b5aaf8da9dff785d10b064a8
+          ref: 72f4159ea58d8683a5f4d0689a4e50a6a81e9da7
           path: api-fixture
       - uses: actions/setup-java@v4
         with:
