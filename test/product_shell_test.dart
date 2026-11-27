@@ -1,5 +1,10 @@
 import 'package:flutter/services.dart';
 import 'package:otpanda_client/copy_hint.dart';
+import 'package:otpanda_client/organization_contract.dart';
+
+import 'dart:ui' as ui;
+
+import 'package:flutter/rendering.dart';
 
 import 'dart:convert';
 import 'dart:io';
@@ -117,11 +122,13 @@ Future<void> pump(
   WidgetTester t,
   FakeTransport tr, {
   bool out = false,
-  int initialTab = 0,
-  ValueChanged<int>? onTabChanged,
   bool assignmentEnabled = false,
   bool entryEditEnabled = true,
   CopyHintStore? copyHintStore,
+  OrganizationStore? organization,
+  bool showTags = false,
+  String? navigation,
+  ValueChanged<String>? onNavigate,
 }) async {
   t.view.physicalSize = const Size(360, 800);
   t.view.devicePixelRatio = 1;
@@ -135,11 +142,13 @@ Future<void> pump(
       theme: otpandaTheme(),
       home: ProductShell(
         controller: controller,
+        navigation: navigation,
+        onNavigate: onNavigate,
+        organization: organization,
+        showTileTags: showTags,
         copyHintStore: copyHintStore,
-        initialTab: initialTab,
         assignmentEnabled: assignmentEnabled,
         entryEditEnabled: entryEditEnabled,
-        onTabChanged: onTabChanged,
         onCopyAssigned: (_) async {},
         onCopyPrivate: (_) async {},
         clock: () => now,
@@ -190,6 +199,60 @@ void main() {
       await mono.load();
     }
   });
+
+  testWidgets(
+    'shared routed Details is read-only even with management-capable transport',
+    (t) async {
+      final tr = ManagedFake(
+        routes(
+          entries: [
+            {
+              'entry_id': 'a',
+              'service_name': 'Shared',
+              'account_name': 'viewer',
+              'capabilities': {'manage': false},
+            },
+          ],
+        ),
+      );
+      await pump(t, tr, navigation: 'accounts/YQ');
+      expect(find.byKey(const Key('account-details')), findsOneWidget);
+      expect(find.byKey(const Key('entry-edit')), findsNothing);
+      expect(find.byType(TextField), findsNothing);
+      expect(find.byKey(const Key('entry-save')), findsNothing);
+      expect(find.byKey(const Key('entry-delete')), findsNothing);
+      expect(tr.calls2, isEmpty);
+    },
+  );
+  testWidgets('missing routed account returns home once after completed load', (
+    t,
+  ) async {
+    final log = <String>[];
+    await pump(
+      t,
+      FakeTransport(routes()),
+      navigation: 'accounts/bWlzc2luZw',
+      onNavigate: log.add,
+    );
+    await t.pump(const Duration(seconds: 3));
+    expect(log, ['codes']);
+    expect(find.byKey(const Key('account-details')), findsNothing);
+  });
+  testWidgets(
+    'missing unassigned route returns home once when code and review absent',
+    (t) async {
+      final log = <String>[];
+      await pump(
+        t,
+        FakeTransport(routes()),
+        navigation: 'unassigned-details/c3Jj/ZXZlbnQ',
+        onNavigate: log.add,
+      );
+      await t.pump(const Duration(seconds: 3));
+      expect(log, ['codes']);
+      expect(find.byKey(const Key('unassigned-details')), findsNothing);
+    },
+  );
   testWidgets(
     '32-character code and placeholder fit narrow screen without changing length',
     (t) async {
@@ -467,24 +530,103 @@ void main() {
           ),
         ),
       );
-      expect(find.byTooltip('Copy code'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsNothing);
       time += 30000;
       final pending = Completer<SessionResponse>();
       tr.handler = (_) => pending.future;
       final poll = c.refresh();
       await t.pump();
-      expect(find.byTooltip('Copy code'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsNothing);
       expect(find.byType(CircularProgressIndicator), findsNothing);
       pending.complete(const SessionResponse(503, '{}'));
       await poll;
       await t.pump();
-      expect(find.byTooltip('Copy code'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsNothing);
       expect(find.textContaining('Connection interrupted'), findsNothing);
       expect(
         find.textContaining('Connection to the server was lost'),
         findsNothing,
       );
       c.dispose();
+    },
+  );
+
+  testWidgets(
+    'actual mobile hold selects, toolbar tags creates inline, timer remains bottom',
+    (t) async {
+      final org = OrganizationStore()..reconcileEntries(['a']);
+      final tr = ManagedFake(
+        routes(
+          entries: [
+            {
+              'entry_id': 'a',
+              'service_name': 'Alpha',
+              'account_name': 'me',
+              'capabilities': {'manage': true},
+            },
+          ],
+          codes: [
+            {
+              'entryId': 'a',
+              'code': '123456',
+              'receivedAt': now - 180000,
+              'expiresAt': now + 60000,
+            },
+          ],
+        ),
+      );
+      await pump(t, tr, organization: org, showTags: true);
+      expect(find.byType(PopupMenuButton<String>), findsNothing);
+      expect(find.byTooltip('Copy code'), findsNothing);
+      await t.longPress(find.text('Alpha'));
+      await t.pumpAndSettle();
+      expect(find.text('1 selected'), findsOneWidget);
+      expect(find.byType(Checkbox), findsNothing);
+      expect(
+        t.widget<TextButton>(find.byKey(const Key('edit-a'))).onPressed,
+        isNotNull,
+      );
+      expect(
+        t
+            .widget<TextButton>(find.widgetWithText(TextButton, 'Share'))
+            .onPressed,
+        isNull,
+      );
+      await t.tap(find.text('Tags'));
+      await t.pumpAndSettle();
+      await t.enterText(find.widgetWithText(TextField, 'New tag'), 'Work');
+      await t.pump();
+      await t.tap(find.byTooltip('Create tag'));
+      await t.pumpAndSettle();
+      expect(find.text('Work'), findsOneWidget);
+      await t.tap(find.text('Apply'));
+      await t.pumpAndSettle();
+      expect(org.preferencesFor('a').tagIds, isNotEmpty);
+      expect(find.byIcon(Icons.sell_outlined), findsNWidgets(2));
+      expect(find.text('Manage tags'), findsNothing);
+      expect(t.takeException(), isNull);
+      if (Platform.environment['SCREENSHOT_DIR'] != null) {
+        final boundary = t.renderObject<RenderRepaintBoundary>(
+          find.byType(RepaintBoundary).first,
+        );
+        await t.runAsync(() async {
+          final image = await boundary.toImage();
+          final data = await image.toByteData(format: ui.ImageByteFormat.png);
+          await File(
+            '${Platform.environment['SCREENSHOT_DIR']}/ui-mobile-selection-tags.png',
+          ).writeAsBytes(data!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+      await t.tap(find.byTooltip('Clear selection'));
+      await t.pumpAndSettle();
+      await t.drag(find.byType(ListView).first, const Offset(0, 100));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('account-sort-button')), findsOneWidget);
+      await t.tap(find.byKey(const Key('account-sort-button')));
+      await t.pumpAndSettle();
+      expect(find.text('Frequently used'), findsOneWidget);
+      expect(t.takeException(), isNull);
     },
   );
 
@@ -529,7 +671,7 @@ void main() {
       ),
     );
     expect(find.text('Acme'), findsOneWidget);
-    expect(find.text('123456'), findsOneWidget);
+    expect(find.text('123 456'), findsOneWidget);
   });
 
   testWidgets('fresh received codes sit on top, highlighted; old ones do not', (
@@ -585,13 +727,13 @@ void main() {
     expect(find.byKey(const Key('fresh-Bravo-222222')), findsOneWidget);
     // The older code is listed normally, once, below the fresh ones.
     expect(find.byKey(const Key('fresh-Alpha-111111')), findsNothing);
-    expect(find.text('111111'), findsOneWidget);
-    expect(find.text('222222'), findsOneWidget);
-    final top = t.getTopLeft(find.text('333333')).dy;
-    expect(top, lessThan(t.getTopLeft(find.text('111111')).dy));
+    expect(find.text('111 111'), findsOneWidget);
+    expect(find.text('222 222'), findsOneWidget);
+    final top = t.getTopLeft(find.text('333 333')).dy;
+    expect(top, lessThan(t.getTopLeft(find.text('111 111')).dy));
     expect(
-      t.getTopLeft(find.text('222222')).dy,
-      lessThan(t.getTopLeft(find.text('111111')).dy),
+      t.getTopLeft(find.text('222 222')).dy,
+      lessThan(t.getTopLeft(find.text('111 111')).dy),
     );
   });
 
@@ -615,7 +757,7 @@ void main() {
     });
     await pump(t, FakeTransport(r));
     expect(find.text('No codes yet'), findsNothing);
-    expect(find.text('444444'), findsOneWidget);
+    expect(find.text('444 444'), findsOneWidget);
   });
 
   testWidgets('no highlight without recent received codes', (t) async {
@@ -643,7 +785,7 @@ void main() {
       ),
     );
     expect(find.text('New arrivals'), findsNothing);
-    expect(find.text('555555'), findsOneWidget);
+    expect(find.text('555 555'), findsOneWidget);
   });
 
   testWidgets('failed read is not shown as an empty account', (t) async {
@@ -675,7 +817,7 @@ void main() {
       expect(bridge.status, 'idle');
       expect(find.text('No codes yet'), findsNothing);
       expect(find.text('Acme'), findsNothing);
-      expect(find.text('123456'), findsNothing);
+      expect(find.text('123 456'), findsNothing);
     },
   );
   testWidgets('background-cleared data never claims the account is empty', (
@@ -718,19 +860,42 @@ void main() {
     ],
   );
 
+  testWidgets(
+    'direct account details is full-page and inaccessible IDs return home',
+    (t) async {
+      final log = <String>[];
+      await pump(
+        t,
+        ManagedFake(twoEntries()),
+        navigation: 'accounts/YQ',
+        onNavigate: log.add,
+      );
+      expect(find.byKey(const Key('account-details')), findsOneWidget);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('Added'), findsNothing); // no invented date
+      expect(find.text('Type'), findsNothing);
+      expect(find.text('Tags'), findsOneWidget);
+      await t.tap(find.byTooltip('Back to codes'));
+      expect(log.last, 'codes');
+      await pump(
+        t,
+        ManagedFake(twoEntries()),
+        navigation: 'accounts/bWlzc2luZw',
+        onNavigate: log.add,
+      );
+      expect(log.last, 'codes');
+      expect(find.byKey(const Key('account-details')), findsNothing);
+    },
+  );
+
   testWidgets('entries: no edit controls without the capability or ownership', (
     t,
   ) async {
-    await pump(t, FakeTransport(twoEntries()), initialTab: 3);
+    await pump(t, FakeTransport(twoEntries()));
     expect(find.byKey(const Key('edit-a')), findsNothing);
-    await pump(t, ManagedFake(twoEntries(manage: false)), initialTab: 3);
+    await pump(t, ManagedFake(twoEntries(manage: false)));
     expect(find.byKey(const Key('edit-a')), findsNothing);
-    await pump(
-      t,
-      ManagedFake(twoEntries()),
-      initialTab: 3,
-      entryEditEnabled: false,
-    );
+    await pump(t, ManagedFake(twoEntries()), entryEditEnabled: false);
     expect(find.byKey(const Key('edit-a')), findsNothing);
   });
 
@@ -748,7 +913,7 @@ void main() {
           },
         ],
       );
-      await pump(t, ManagedFake(r), initialTab: 0);
+      await pump(t, ManagedFake(r));
       final status = t.getTopLeft(find.text('------'));
       final title = find.textContaining('A very long service');
       expect(t.getTopRight(title).dx + 8, lessThanOrEqualTo(status.dx));
@@ -760,20 +925,21 @@ void main() {
     t,
   ) async {
     final tr = ManagedFake(twoEntries());
-    await pump(t, tr, initialTab: 3);
+    await pump(t, tr);
+    await t.longPress(find.text('Alpha'));
+    await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('edit-a')));
     await t.pumpAndSettle();
-    expect(
-      t.widget<FilledButton>(find.byKey(const Key('entry-save'))).onPressed,
-      isNull,
-    );
+    expect(find.byKey(const Key('entry-save')), findsNothing);
+    await t.tap(find.byKey(const Key('entry-edit')));
+    await t.pumpAndSettle();
     await t.enterText(find.byKey(const Key('entry-name')), 'Alpha Two');
     await t.enterText(find.byKey(const Key('entry-account')), '');
     await t.pump();
     await t.tap(find.byKey(const Key('entry-save')));
     await t.pumpAndSettle();
     expect(tr.calls2, ['rename a Alpha Two', 'account a null']);
-    expect(find.byKey(const Key('entry-manage')), findsNothing);
+    expect(find.byKey(const Key('account-details')), findsNothing);
     // Shown at once: the test clock never reopens the read gate, so no reload
     // could have supplied it.
     expect(find.text('Alpha Two'), findsOneWidget);
@@ -787,8 +953,12 @@ void main() {
     (t) async {
       final r = twoEntries();
       final tr = ManagedFake(r);
-      await pump(t, tr, initialTab: 3);
+      await pump(t, tr);
+      await t.longPress(find.text('Alpha'));
+      await t.pumpAndSettle();
       await t.tap(find.byKey(const Key('edit-a')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('entry-edit')));
       await t.pumpAndSettle();
       await t.enterText(find.byKey(const Key('entry-name')), 'Gamma');
       await t.pump();
@@ -816,8 +986,12 @@ void main() {
     'entries: only the confirmed half shows when the second call fails',
     (t) async {
       final tr = ManagedFake(twoEntries());
-      await pump(t, tr, initialTab: 3);
+      await pump(t, tr);
+      await t.longPress(find.text('Alpha'));
+      await t.pumpAndSettle();
       await t.tap(find.byKey(const Key('edit-a')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('entry-edit')));
       await t.pumpAndSettle();
       await t.enterText(find.byKey(const Key('entry-name')), 'Delta');
       await t.enterText(find.byKey(const Key('entry-account')), 'you');
@@ -827,7 +1001,9 @@ void main() {
       await t.pumpAndSettle();
       expect(find.byKey(const Key('entry-error')), findsOneWidget);
       expect(tr.calls2, ['rename a Delta', 'account a you']);
-      await t.tap(find.text('Cancel'));
+      await t.tap(find.byKey(const Key('entry-cancel')));
+      await t.pumpAndSettle();
+      await t.tap(find.byTooltip('Back to codes'));
       await t.pumpAndSettle();
       expect(find.text('Delta'), findsOneWidget);
       expect(find.text('me'), findsOneWidget);
@@ -879,8 +1055,12 @@ void main() {
   );
 
   testWidgets('entries: empty name cannot be saved', (t) async {
-    await pump(t, ManagedFake(twoEntries()), initialTab: 3);
+    await pump(t, ManagedFake(twoEntries()));
+    await t.longPress(find.text('Alpha'));
+    await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('edit-a')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('entry-edit')));
     await t.pumpAndSettle();
     await t.enterText(find.byKey(const Key('entry-name')), '  ');
     await t.pump();
@@ -892,36 +1072,46 @@ void main() {
 
   testWidgets('entries: delete asks first, Cancel deletes nothing', (t) async {
     final tr = ManagedFake(twoEntries());
-    await pump(t, tr, initialTab: 3);
+    await pump(t, tr);
+    await t.longPress(find.text('Alpha'));
+    await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('edit-a')));
     await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('entry-edit')));
+    await t.pumpAndSettle();
+    await t.ensureVisible(find.byKey(const Key('entry-delete')));
     await t.tap(find.byKey(const Key('entry-delete')));
     await t.pumpAndSettle();
     expect(find.byKey(const Key('entry-delete-confirm')), findsOneWidget);
     await t.tap(find.text('Cancel').last);
     await t.pumpAndSettle();
     expect(tr.calls2, isEmpty);
+    await t.ensureVisible(find.byKey(const Key('entry-delete')));
     await t.tap(find.byKey(const Key('entry-delete')));
     await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('entry-delete-yes')));
     await t.pumpAndSettle();
     expect(tr.calls2, ['delete a']);
-    expect(find.byKey(const Key('entry-manage')), findsNothing);
+    expect(find.byKey(const Key('account-details')), findsNothing);
   });
 
   testWidgets('entries: failed change stays open, says unconfirmed, no retry', (
     t,
   ) async {
     final tr = ManagedFake(twoEntries())..failWith = StateError('x');
-    await pump(t, tr, initialTab: 3);
+    await pump(t, tr);
+    await t.longPress(find.text('Alpha'));
+    await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('edit-a')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('entry-edit')));
     await t.pumpAndSettle();
     await t.enterText(find.byKey(const Key('entry-name')), 'Beta');
     await t.pump();
     await t.tap(find.byKey(const Key('entry-save')));
     await t.pumpAndSettle();
     expect(find.byKey(const Key('entry-error')), findsOneWidget);
-    expect(find.byKey(const Key('entry-manage')), findsOneWidget);
+    expect(find.byKey(const Key('account-details')), findsOneWidget);
     expect(tr.calls2, ['rename a Beta']);
   });
 
@@ -949,23 +1139,18 @@ void main() {
   testWidgets('assign: hidden unless enabled and the bridge supports it', (
     t,
   ) async {
-    await pump(t, AssignFake(withPrivateCode()), initialTab: 2);
+    await pump(t, AssignFake(withPrivateCode()));
     expect(find.byKey(const Key('assign-v')), findsNothing);
-    await pump(
-      t,
-      FakeTransport(withPrivateCode()),
-      initialTab: 2,
-      assignmentEnabled: true,
-    );
+    await pump(t, FakeTransport(withPrivateCode()), assignmentEnabled: true);
     expect(find.byKey(const Key('assign-v')), findsNothing);
-    expect(find.text('666666'), findsOneWidget);
+    expect(find.text('666 666'), findsOneWidget);
   });
 
   testWidgets('assign: picks an owned entry, then only asks to prepare it', (
     t,
   ) async {
     final tr = AssignFake(withPrivateCode());
-    await pump(t, tr, initialTab: 2, assignmentEnabled: true);
+    await pump(t, tr, assignmentEnabled: true);
     String? copied;
     t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       SystemChannels.platform,
@@ -1027,7 +1212,7 @@ void main() {
       find.descendant(of: bar, matching: find.text('OTPanda')),
       findsNothing,
     );
-    expect(find.text('Search'), findsOneWidget);
+    expect(find.text('Search accounts'), findsOneWidget);
     expect(find.text('Search services or accounts'), findsNothing);
     expect(
       find.bySemanticsLabel(RegExp('Search services or accounts')),

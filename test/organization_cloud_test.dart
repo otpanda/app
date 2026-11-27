@@ -2,6 +2,45 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/organization_contract.dart';
 
 void main() {
+  test(
+    'tag draft refuses concurrent unseen changes without deleting anything',
+    () {
+      final s = OrganizationStore()..reconcileEntries(['a']);
+      s.createTag('old', 'Old');
+      final original = s.document();
+      final draft = OrganizationStore()
+        ..restore({'revision': 0, ...original, 'ranking': <Object>[]}, ['a']);
+      draft.deleteTag('old');
+      s.createTag('concurrent', 'Concurrent');
+      final current = s.document();
+      expect(s.applyDraft(original, draft.document()), false);
+      expect(s.document(), current);
+    },
+  );
+  test('invalid collision draft leaves live document unchanged and valid draft swaps', () {
+    final s = OrganizationStore()..reconcileEntries(['a']);
+    s.createTag('first', 'First');
+    final original = s.document();
+    expect(
+      () => s.applyDraft(original, {
+        'tags': [
+          {'id': 'x', 'label': 'Same'},
+          {'id': 'y', 'label': 'Same'},
+        ],
+        'entries': [],
+      }),
+      throwsArgumentError,
+    );
+    expect(s.document(), original);
+    final draft = OrganizationStore()
+      ..restore({'revision': 0, ...original, 'ranking': <Object>[]}, ['a']);
+    draft.renameTag('first', 'Renamed');
+    draft.setTags('a', ['first']);
+    expect(s.applyDraft(original, draft.document()), true);
+    expect(s.tags.single.label, 'Renamed');
+    expect(s.preferencesFor('a').tagIds, {'first'});
+  });
+
   test('cloud snapshot restore is atomic and ranks pins then recent score', () {
     final s = OrganizationStore();
     s.restore(

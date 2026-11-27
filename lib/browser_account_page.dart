@@ -6,6 +6,7 @@ import 'tile_display_store.dart';
 import 'about_page.dart';
 import 'auth_entry.dart';
 import 'product_shell.dart';
+import 'detail_routes.dart';
 import 'totp_batch_contract.dart';
 import 'read_workspace_controller.dart';
 import 'main.dart' show ClientHome;
@@ -16,7 +17,6 @@ import 'dart:convert';
 import 'assignment_dialog.dart';
 
 import 'organization_contract.dart';
-import 'organization_panel.dart';
 
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -65,10 +65,7 @@ class BrowserAccountPage extends StatefulWidget {
   final int Function()? clock;
   final Widget? localSecuritySetting;
 
-  /// Route id chosen from outside (the router). Null keeps the legacy
-  /// behavior of restoring the saved view. One of the allow-listed ids:
-  /// codes, sources, unassigned, entries, settings, settings/account-security,
-  /// settings/devices, settings/organization, settings/about. Anything else is ignored.
+  /// Unified codes or an allowed settings/recovery route. Unknown routes go home.
   final String? navigation;
 
   /// Called with a route id when the person navigates inside the page. It is
@@ -99,7 +96,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   late final CodeStore store;
   late final ReadWorkspaceController workspace;
   bool accountOpen = false;
-  int productTab = 0;
   SettingsCategory? settingsCategory;
   bool passkeysOpen = false;
   bool securityRequested = false;
@@ -113,7 +109,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   Timer? securitySpacing;
   bool securityCooling = false;
   int securityTicks = 0;
-  static const productRoutes = ['codes', 'sources', 'unassigned', 'entries'];
 
   /// Selects what [id] names without telling the router. Unknown ids do
   /// nothing. [direct] sets state only, for use before the first load.
@@ -123,45 +118,32 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         id == settingsPasskeysRoute) {
       overviewPreparedRevision = null;
     }
-    final tab = productRoutes.indexOf(id);
-    if (tab >= 0) {
+    if (id == 'codes' || parseDetailRoute(id) != null) {
       if (!widget.workspaceEnabled) return;
-      productTab = tab;
       settingsCategory = null;
       passkeysOpen = false;
       if (accountOpen) {
         accountOpen = false;
         if (!direct) {
           workspace.resume();
-          rememberView(tab);
+
           unawaited(workspace.refresh());
         }
-      } else if (!direct) {
-        rememberView(tab);
-      }
+      } else if (!direct) {}
       return;
     }
-    if (id == SettingsCategory.organization.route && widget.workspaceEnabled) {
+    if (!isSettingsRoute(id)) {
       applyRoute('codes', direct: direct);
       return;
     }
-    if (!isSettingsRoute(id)) return;
     passkeysOpen = id == settingsPasskeysRoute;
-    final wasOrganization = settingsCategory == SettingsCategory.organization;
     settingsCategory = passkeysOpen
         ? SettingsCategory.account
         : settingsCategoryForRoute(id);
-    if (!direct &&
-        accountOpen &&
-        !wasOrganization &&
-        settingsCategory == SettingsCategory.organization) {
-      scheduleMicrotask(() => unawaited(loadOrganizationSection()));
-    }
     if (!accountOpen && widget.workspaceEnabled) {
       accountOpen = true;
       if (!direct) {
         workspace.suspend(preserve: true);
-        rememberView(4);
         // The restored workspace already holds session/header identity.
         // Each category owns its reads when shown; the hub needs none.
       }
@@ -182,7 +164,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   void openSettings() {
     overviewPreparedRevision = null;
     workspace.suspend(preserve: true);
-    rememberView(4);
     setState(() {
       accountOpen = true;
       settingsCategory = null;
@@ -194,20 +175,13 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   void leaveSettings() {
     overviewPreparedRevision = null;
     workspace.resume();
-    rememberView(productTab);
     setState(() {
       accountOpen = false;
       settingsCategory = null;
       passkeysOpen = false;
     });
-    navigated(productRoutes[productTab]);
+    navigated('codes');
     workspace.refresh();
-  }
-
-  void rememberView(int view) {
-    if (bridge is SessionViewBridge) {
-      (bridge as SessionViewBridge).setView(view);
-    }
   }
 
   bool busy = true;
@@ -325,8 +299,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
             (accountOpen &&
                 !organizationReady &&
                 !organizationBusy &&
-                (widget.navigation == null ||
-                    settingsCategory == SettingsCategory.organization))) {
+                widget.navigation == null)) {
           unawaited(refresh());
         }
       }
@@ -365,11 +338,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       if (!mounted) return;
       setState(() => status = bridge.status);
       if (status == 'restored') {
-        final view = bridge is SessionViewBridge
-            ? (bridge as SessionViewBridge).restoredView
-            : 0;
-        productTab = view < 4 ? view : 0;
-        accountOpen = view >= 4;
+        accountOpen = false;
         applyRoute(widget.navigation, direct: true);
         if (accountOpen) workspace.suspend(preserve: true);
         // A Google connect that just returned may have changed the picture
@@ -394,9 +363,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
               bridge as ExtensionConnectBridge,
             ),
           );
-        }
-        if (view == 5 && mounted && bridge.status == 'restored') {
-          await loadSecurity();
         }
       }
     } catch (_) {
@@ -617,13 +583,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   }
 
   Future<void> loadAccount(int attempt) async {
-    if (!widget.accountOnly) {
-      await store.load(now, includePrivateInbox: true);
-      if (mounted && attempt == revision && bridge.status == 'restored') {
-        await loadOrganization();
-      }
-      return;
-    }
     if (widget.workspaceEnabled && !accountOpen) {
       await workspace.refresh();
       if (workspace.sessionEnded) {
@@ -732,23 +691,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
     if (!skip) forceOverview = false;
     if (!mounted || attempt != revision || status != 'restored') return;
-    // Entries and organization are only shown by the Organization category,
-    // so the settings hub loads them there, not on every open.
-    // Without the workspace the hub is the whole page, so accountOpen is
-    // never set there.
-    if (widget.navigation != null &&
-        (accountOpen || !widget.workspaceEnabled) &&
-        settingsCategory == SettingsCategory.organization &&
-        // A ready copy may hold unsaved edits. Opening the category reloads
-        // it explicitly; a periodic refresh must not replace it.
-        !organizationReady) {
-      await loadOrganizationSection(attempt);
-    }
   }
 
-  /// Entries and organization for the Organization category. Always read
-  /// live: a saved organization is written back whole, so a remembered copy
-  /// could overwrite a change made elsewhere.
+  /// Live organization feeding the unified workspace. Never edit a stale copy
+  /// while a reload is about to replace it.
   Future<void> loadOrganizationSection([int? attempt]) async {
     final mine = attempt ?? revision;
     if (!mounted || status != 'restored' || organizationBusy) return;
@@ -759,7 +705,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
       organizationReady = false;
     });
     try {
-      await store.load(now, includePrivateInbox: true);
+      if (!widget.workspaceEnabled) {
+        await store.load(now, includePrivateInbox: true);
+      }
       if (mounted && mine == revision && bridge.status == 'restored') {
         await loadOrganization();
       }
@@ -865,8 +813,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     if (accountOpen &&
         !organizationReady &&
         !organizationBusy &&
-        (widget.navigation == null ||
-            settingsCategory == SettingsCategory.organization)) {
+        widget.navigation == null) {
       unawaited(loadOrganizationSection());
     }
     unawaited(refreshSecurity().then((_) => drainSecurityHint()));
@@ -921,7 +868,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         securityInfo = value;
         securityFailed = false;
         securityOpen = true;
-        rememberView(5);
       });
     } catch (_) {
       if (mounted && epoch == organizationEpoch && status == 'restored') {
@@ -1051,7 +997,9 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
           .map((e) => e['entryId'])
           .whereType<String>();
       organization.restore(document, {
-        ...store.entries.map((e) => e.id),
+        ...(widget.workspaceEnabled ? workspace.store : store).entries.map(
+          (e) => e.id,
+        ),
         ...retained,
       });
       organizationSnapshot++;
@@ -1061,8 +1009,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     }
   }
 
-  Future<void> saveOrganization() async {
-    if (!organizationReady || organizationBusy || status != 'restored') return;
+  Future<bool> saveOrganization() async {
+    if (!organizationReady || organizationBusy || status != 'restored') {
+      return false;
+    }
     final epoch = organizationEpoch;
     setState(() => organizationBusy = true);
     try {
@@ -1073,13 +1023,15 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
           'document': organization.document(),
         }),
       );
-      if (!mounted || epoch != organizationEpoch) return;
+      if (!mounted || epoch != organizationEpoch) return false;
       if (response.status != 200) message = 'Organization was not saved. Checking your saved choices automatically.';
       await loadOrganization();
+      return response.status == 200 && organizationReady;
     } catch (_) {
-      if (!mounted || epoch != organizationEpoch) return;
+      if (!mounted || epoch != organizationEpoch) return false;
       organizationReady = false;
-      message = 'Could not confirm changes. Checking your saved choices automatically.';
+      message = 'Could not confirm tags. Reopen Codes to check your saved tags before editing again.';
+      rethrow;
     } finally {
       if (mounted && epoch == organizationEpoch) {
         setState(() => organizationBusy = false);
@@ -1720,20 +1672,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     );
   }
 
-  Widget organizationPage() => AbsorbPointer(
-    absorbing: organizationBusy,
-    child: OrganizationPanel(
-      key: ValueKey('$organizationEpoch:$organizationSnapshot'),
-      store: organization,
-      entries: [
-        for (final e in store.entries)
-          OrganizationPanelEntry(e.id, e.service, e.account),
-      ],
-      viewerEpoch: organizationSnapshot,
-      onChanged: saveOrganization,
-    ),
-  );
-
   Widget settingsScaffold() {
     return LayoutBuilder(
       builder: (context, box) {
@@ -1818,9 +1756,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     if (c != SettingsCategory.account) {
                       overviewPreparedRevision = null;
                     }
-                    if (c == SettingsCategory.organization) {
-                      unawaited(loadOrganizationSection());
-                    }
                   },
                   pages: {
                     SettingsCategory.account: _WhenShown(
@@ -1867,21 +1802,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                     SettingsCategory.display: DisplaySettings(
                       preference: tileDisplay,
                     ),
-                    if (!widget.workspaceEnabled)
-                      SettingsCategory.organization: organizationReady
-                          ? organizationPage()
-                          : organizationBusy
-                          ? settingsCard('Organization', const [
-                              Text(
-                                'Loading organization...',
-                                key: Key('organization-loading'),
-                              ),
-                            ])
-                          : settingsCard('Organization', const [
-                              Text(
-                                'Organization could not load. Your saved choices have not changed.',
-                              ),
-                            ]),
                     SettingsCategory.about: const AboutPage(),
                   },
                 ),
@@ -1920,20 +1840,19 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
     if (isExtensionPopup(bridge)) {
       return ExtensionPopupView(bridge: bridge, clock: widget.clock);
     }
-    final codes = store.visibleCodes(now());
     if (widget.workspaceEnabled &&
         ['restored', 'session-paused', 'restoring'].contains(status) &&
         !accountOpen) {
       return ProductShell(
+        navigation: widget.navigation,
+        onNavigate: widget.onNavigate,
         organization: organizationReady ? organization : null,
         organizationBusy: organizationBusy,
-        onOrganizationChanged: saveOrganization,
-        organizationTools: organizationReady
-            ? ExpansionTile(
-                title: const Text('Manage tags'),
-                children: [organizationPage()],
-              )
-            : null,
+        organizationMessage: message,
+        onOrganizationChanged: () {
+          unawaited(saveOrganization().catchError((Object _) => false));
+        },
+        saveOrganization: saveOrganization,
         showTileTags: tileDisplay.showTags,
         profileEmail: overview?['email'] as String? ?? cachedProfile?.email,
         profilePicture: overview != null
@@ -1968,12 +1887,6 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 minRemainingMs: 1,
               )
             : null,
-        initialTab: productTab,
-        onTabChanged: (tab) {
-          productTab = tab;
-          rememberView(tab);
-          navigated(productRoutes[tab]);
-        },
         clock: now,
         onSignedOut: () {
           bridge.clear();
@@ -2026,7 +1939,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         ),
       );
     }
-    if (widget.accountOnly && status != 'restored') {
+    if (status != 'restored') {
       return Scaffold(
         appBar: AppBar(
           title: Row(
@@ -2070,209 +1983,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         ),
       );
     }
-    if (status == 'restored' && widget.accountOnly) return settingsScaffold();
-    return Scaffold(
-      appBar: AppBar(
-        leading: null,
-        title: const Text('Your account'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const ClientHome(fictionalCatalog: true),
-              ),
-            ),
-            child: const Text('Temporary demo'),
-          ),
-        ],
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: ListView(
-            padding: const EdgeInsets.all(24),
-            children: [
-              const Text(
-                'Your account',
-                style: TextStyle(
-                  fontFamily: 'BricolageGrotesque',
-                  fontSize: 25,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text('Your sign-in methods and security, in one place.'),
-              const SizedBox(height: 20),
-              if (status != 'restored')
-                Text(
-                  status == 'unsupported'
-                      ? 'Use a browser to sign in on this device.'
-                      : status == 'signup-ready'
-                      ? 'Create a passkey for your verified account email.'
-                      : status == 'signup-retry-required'
-                      ? 'Passkey setup did not finish. Return to the signup form in this same browser and retry using the email proof. If you already created the passkey, use ordinary sign-in.'
-                      : status == 'check-clock-or-restart'
-                      ? 'Check your device date and time, then restart signup or sign-in. The secure request may have expired.'
-                      : status == 'passkey-ready'
-                      ? 'Your browser is ready for its passkey prompt.'
-                      : status == 'restored'
-                      ? 'Browser session available.'
-                      : 'No active browser access.',
-                ),
-              if (busy)
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: LinearProgressIndicator(),
-                ),
-              if (message.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  child: Text(message),
-                ),
-              const SizedBox(height: 16),
-              if (status == 'passkey-ready' || status == 'signup-ready')
-                FilledButton(
-                  onPressed: busy ? null : () => run(bridge.passkey),
-                  child: Text(
-                    status == 'signup-ready' ? 'Create passkey' : 'Use passkey',
-                  ),
-                ),
-              if (status != 'unsupported' &&
-                  status != 'restored' &&
-                  status != 'passkey-ready' &&
-                  status != 'signup-ready') ...[
-                FilledButton(
-                  onPressed: busy || !widget.loginEnabled
-                      ? null
-                      : () => run(() => bridge.start('login')),
-                  child: const Text('Sign in with passkey'),
-                ),
-                OutlinedButton(
-                  onPressed: busy || !widget.loginEnabled
-                      ? null
-                      : () => run(() => bridge.start('restore')),
-                  child: const Text('Restore saved browser session'),
-                ),
-                OutlinedButton(
-                  onPressed: busy || !widget.loginEnabled
-                      ? null
-                      : () => run(() => bridge.start('signup')),
-                  child: const Text('Create account with a passkey'),
-                ),
-                const Text(
-                  'After opening an email, return to the browser where signup started. Reloading this page clears a pending passkey request. Return to the same signup form to retry, or sign in if the passkey was already created.',
-                ),
-              ],
-              if (status == 'restored' && !widget.accountOnly) ...[
-                if (store.visibleUnassigned(now()).isNotEmpty) ...[
-                  const Text(
-                    'Fresh private unassigned codes',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const Text(
-                    'Only you can see these. No service or shared entry has been selected.',
-                  ),
-                  for (final code in store.visibleUnassigned(now()))
-                    ListTile(
-                      title: Text(code.value),
-                      subtitle: Text(
-                        store.sources
-                            .firstWhere((s) => s.id == code.sourceId)
-                            .label,
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (widget.assignmentEnabled &&
-                              bridge is AssignmentBridge)
-                            IconButton(
-                              tooltip: 'Assign private code',
-                              onPressed: () => assignPrivate(code),
-                              icon: const Icon(Icons.move_to_inbox_outlined),
-                            ),
-                          IconButton(
-                            tooltip: 'Copy private code',
-                            onPressed: () => copyPrivate(code),
-                            icon: const Icon(Icons.copy_outlined),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-                if (codes.isNotEmpty) ...[
-                  const Text(
-                    'Received entry codes',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  for (final code in codes)
-                    Builder(
-                      builder: (context) {
-                        final entry = store.entries.firstWhere(
-                          (e) => e.id == code.entryId,
-                        );
-                        return ListTile(
-                          title: Text(code.value),
-                          subtitle: Text(
-                            '${entry.service}${entry.account.isEmpty ? '' : ' · ${entry.account}'}${entry.manage ? '' : '\nShared with you · Read-only · Source hidden'}',
-                          ),
-                          trailing: IconButton(
-                            tooltip: 'Copy entry code',
-                            onPressed: () => copyAssigned(code),
-                            icon: const Icon(Icons.copy_outlined),
-                          ),
-                        );
-                      },
-                    ),
-                ],
-
-                if (!busy && codes.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('No active codes in selected entries.'),
-                  ),
-                if (!organizationReady)
-                  for (final entry in store.entries)
-                    ListTile(
-                      title: Text(entry.service),
-                      subtitle: Text(
-                        entry.account.isEmpty
-                            ? 'No account label'
-                            : entry.account,
-                      ),
-                      trailing: Text(
-                        '${codes.where((c) => c.entryId == entry.id).length} active',
-                        semanticsLabel: 'Active code count',
-                      ),
-                    ),
-              ],
-              if (status != 'unsupported' && widget.loginEnabled)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: OutlinedButton(
-                    onPressed: busy ? null : signOutBrowser,
-                    child: const Text('Sign out'),
-                  ),
-                ),
-              if (status == 'restored' && organizationReady)
-                AbsorbPointer(
-                  absorbing: organizationBusy,
-                  child: OrganizationPanel(
-                    key: ValueKey('$organizationEpoch:$organizationSnapshot'),
-                    store: organization,
-                    entries: [
-                      for (final e in store.entries)
-                        OrganizationPanelEntry(e.id, e.service, e.account),
-                    ],
-                    viewerEpoch: organizationSnapshot,
-                    onChanged: saveOrganization,
-                  ),
-                ),
-              if (organizationBusy) const LinearProgressIndicator(),
-            ],
-          ),
-        ),
-      ),
-    );
+    return settingsScaffold();
   }
 }
 

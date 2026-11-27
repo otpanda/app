@@ -168,6 +168,26 @@ void main() {
         RepaintBoundary(key: _shotKey, child: buildNativeRoot()),
       );
       await _until(t, find.text('123 456'));
+      // Exercise actual corrected shell and Details on the installed native root.
+      await t.longPress(find.text('Fictional service'));
+      await _until(t, find.text('1 selected'));
+      await t.tap(find.text('Details'));
+      await _until(t, find.byKey(const Key('account-details')));
+      expect(find.byKey(const Key('entry-name')), findsNothing);
+      await _shot(t, 'root-details-view');
+      await t.tap(find.byKey(const Key('entry-edit')));
+      await _until(t, find.byKey(const Key('entry-name')));
+      expect(find.byKey(const Key('entry-edit-bar')), findsOneWidget);
+      await t.enterText(
+        find.byKey(const Key('entry-name')),
+        'Discarded native edit',
+      );
+      await _shot(t, 'root-details-edit');
+      await t.tap(find.byKey(const Key('entry-cancel')));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(find.text('Discarded native edit'), findsNothing);
+      await t.tap(find.byTooltip('Back to codes'));
+      await _until(t, find.text('123 456'));
 
       _lifecycle(t, [
         AppLifecycleState.inactive,

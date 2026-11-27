@@ -30,12 +30,6 @@ enum SettingsCategory {
     'Account tile appearance on this device',
     Icons.view_compact_outlined,
   ),
-  organization(
-    'settings/organization',
-    'Organization',
-    'Tags and pinned entries',
-    Icons.sell_outlined,
-  ),
   about(
     'settings/about',
     'About',

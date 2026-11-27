@@ -32,8 +32,11 @@ class _RevealedFilterListState extends State<RevealedFilterList> {
               return false;
             }
             if (n is ScrollStartNotification) travel = 0;
-            if (n is ScrollUpdateNotification && n.dragDetails != null) {
-              final delta = n.scrollDelta ?? 0;
+            if ((n is ScrollUpdateNotification && n.dragDetails != null) ||
+                (n is OverscrollNotification && n.dragDetails != null)) {
+              final delta = n is OverscrollNotification
+                  ? n.overscroll
+                  : (n as ScrollUpdateNotification).scrollDelta ?? 0;
               if (delta != 0) {
                 if (travel.sign != delta.sign) travel = 0;
                 travel += delta;

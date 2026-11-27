@@ -1,7 +1,7 @@
 name: Isolated native authenticated lifecycle qualification
 on:
   push:
-    branches: [native-lifecycle-current]
+    branches: [native-lifecycle-current, ui-spec-qualification]
 permissions:
   contents: read
 jobs:
@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: otpanda/api
-          ref: 810b7d0860d82f5b80e0f467b10706ae481db7de
+          ref: bc2590dc3625d98648f88c0e125b84eb42266064
           path: api-fixture
       - uses: actions/setup-java@v4
         with:

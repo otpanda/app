@@ -1,7 +1,7 @@
 function streaming(r){if(r&&typeof r.text==='function'&&!r.body){r.body={getReader(){let sent=false;return {async read(){if(sent)return {done:true};sent=true;return {done:false,value:new TextEncoder().encode(await r.text())};},async cancel(){},releaseLock(){}};}};}return r;}
 const {test}=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');const fs=require('node:fs');const script=fs.readFileSync('tool/session-bootstrap.js','utf8');
 const NOW=1800000000000,token='otpda_'+'a'.repeat(55),state='s'.repeat(43);
-function env({hash='',saved,now=NOW,response={access:token,accessExpiresAt:NOW+300000},hint,navigator,fetchImpl,sessionValues=new Map(),events,lib,path='/app/',query=''}={}){let stored=saved,cleaned=false,calls=0;const location={origin:'https://otpanda.github.io',pathname:path,search:query,hash,assign(url){location.assigned=url;}};const hints=new Map(hint?[['otpanda-session-present','yes']]:[]);const context={AbortController,setTimeout,clearTimeout,localStorage:{getItem:k=>hints.get(k),setItem:(k,v)=>hints.set(k,v),removeItem:k=>hints.delete(k)},location,history:{replaceState(){cleaned=true;location.hash='';}},sessionStorage:{getItem(k){return k==='otpanda.restore.tab.v1'?stored:sessionValues.get(k)??null;},removeItem(k){if(k==='otpanda.restore.tab.v1')stored=undefined;else sessionValues.delete(k);},setItem(k,v){if(k==='otpanda.restore.tab.v1')stored=v;else sessionValues.set(k,v);}},fetch:async(url,options)=>{assert.ok(cleaned);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');calls++;return {ok:true,text:async()=>JSON.stringify(response)};},URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),crypto:require('node:crypto').webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Date:class extends Date{static now(){return now;}}};if(navigator)context.navigator=navigator;if(fetchImpl)context.fetch=fetchImpl;let fetchValue=context.fetch;Object.defineProperty(context,'fetch',{get(){return async(...args)=>streaming(await fetchValue(...args));},set(v){fetchValue=v;},enumerable:true,configurable:true});if(events)context.addEventListener=(n,f)=>{events[n]=f;};vm.createContext(context);if(lib){vm.runInContext(fs.readFileSync('tool/native-launch-intent.js','utf8'),context);vm.runInContext(fs.readFileSync('tool/extension-launch-intent.js','utf8'),context);}vm.runInContext(script,context);return {context,get cleaned(){return cleaned;},get stored(){return stored;},get calls(){return calls;}};}
+function env({hash='',saved,now=NOW,response={access:token,accessExpiresAt:NOW+300000},hint,navigator,fetchImpl,sessionValues=new Map(),events,lib,path='/app/',query=''}={}){let stored=saved,cleaned=false,calls=0;const location={origin:'https://otpanda.github.io',pathname:path,search:query,hash,assign(url){location.assigned=url;}};const hints=new Map(hint?[['otpanda-session-present','yes']]:[]);const context={AbortController,setTimeout,clearTimeout,localStorage:{getItem:k=>hints.get(k),setItem:(k,v)=>hints.set(k,v),removeItem:k=>hints.delete(k)},location,history:{replaceState(_s,_t,url){cleaned=true;location.hash=typeof url==='string'&&url.includes('#')?url.slice(url.indexOf('#')):'';}},sessionStorage:{getItem(k){return k==='otpanda.restore.tab.v1'?stored:sessionValues.get(k)??null;},removeItem(k){if(k==='otpanda.restore.tab.v1')stored=undefined;else sessionValues.delete(k);},setItem(k,v){if(k==='otpanda.restore.tab.v1')stored=v;else sessionValues.set(k,v);}},fetch:async(url,options)=>{assert.ok(cleaned);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');calls++;return {ok:true,text:async()=>JSON.stringify(response)};},URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),crypto:require('node:crypto').webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Date:class extends Date{static now(){return now;}}};if(navigator)context.navigator=navigator;if(fetchImpl)context.fetch=fetchImpl;let fetchValue=context.fetch;Object.defineProperty(context,'fetch',{get(){return async(...args)=>streaming(await fetchValue(...args));},set(v){fetchValue=v;},enumerable:true,configurable:true});if(events)context.addEventListener=(n,f)=>{events[n]=f;};vm.createContext(context);if(lib){vm.runInContext(fs.readFileSync('tool/native-launch-intent.js','utf8'),context);vm.runInContext(fs.readFileSync('tool/extension-launch-intent.js','utf8'),context);}vm.runInContext(script,context);return {context,get cleaned(){return cleaned;},get stored(){return stored;},get calls(){return calls;}};}
 test('callback cleans synchronously before exchange; state consumed and memory access returned',async()=>{const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(e.calls,1);assert.equal(e.stored,undefined);assert.equal(e.context.OTPandaSession.status(),'restored');assert.equal(e.context.OTPandaSession.access(),token);e.context.OTPandaSession.clear();assert.equal(e.context.OTPandaSession.access(),undefined);});
 test('wrong state duplicates missing pending and future/expired state never exchange',async()=>{for(const change of [{saved:undefined},{hash:'#code='+token+'&state=wrong'},{hash:'#code='+token+'&state='+state+'&state='+state},{now:NOW+300001},{now:NOW-1}]){const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),...change});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');}});
 test('invalid response never becomes access; secrets absent from storage',async()=>{const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),response:{access:token,refresh:'bad',accessExpiresAt:NOW+300000}});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaSession.access(),undefined);assert.equal(e.stored,undefined);});
@@ -266,8 +266,8 @@ test('page hash is not an auth callback and never consumes a pending ceremony',a
  assert.equal(e.context.OTPandaSession.status(),'idle');assert.equal(e.context.OTPandaNavigation.current(),'settings/devices');
 });
 test('page destination survives canonical login and only identifiers are stored',async()=>{
- const e=env({hash:'#/settings/organization'});await e.context.OTPandaSession.start('login');
- const record=JSON.parse(e.stored);assert.equal(record.route,'settings/organization');
+ const e=env({hash:'#/settings/display'});await e.context.OTPandaSession.start('login');
+ const record=JSON.parse(e.stored);assert.equal(record.route,'settings/display');
  assert.equal(new URL(e.context.location.assigned).searchParams.get('redirect_uri'),'https://otpanda.github.io/app/');
  assert.ok(!e.context.location.assigned.includes('settings'));
 });
@@ -282,6 +282,9 @@ test('unknown or parameter-bearing page links cannot become commands or destinat
  }
  const e=env();assert.throws(()=>e.context.OTPandaNavigation.go('https://evil.test'));
 });
+test('obsolete stored callback route normalizes home without breaking the ceremony',async()=>{
+ const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW,route:'settings/organization'})});await e.context.OTPandaSession.ready;assert.equal(e.calls,1);assert.equal(e.context.OTPandaSession.status(),'restored');assert.equal(e.context.OTPandaNavigation.current(),'codes');
+});
 test('untrusted stored callback route is rejected before exchange',async()=>{
  const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW,route:'https://evil.test'})});await e.context.OTPandaSession.ready;assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');
 });
@@ -289,8 +292,8 @@ test('page navigation uses history entries and back listeners without action fet
  const e=env({hash:'#/codes'});const writes=[];
  e.context.history.pushState=(_s,_t,url)=>{writes.push(url);e.context.location.hash=url.slice(url.indexOf('#'));};
  let changed=0;e.context.OTPandaNavigation.listen(()=>changed++);
- e.context.OTPandaNavigation.go('sources');e.context.OTPandaNavigation.go('entries');
- assert.deepEqual(writes,['/app/#/sources','/app/#/entries']);assert.equal(changed,2);assert.equal(e.calls,0);
+ e.context.OTPandaNavigation.go('settings/sources');e.context.OTPandaNavigation.go('settings/display');
+ assert.deepEqual(writes,['/app/#/settings/sources','/app/#/settings/display']);assert.equal(changed,2);assert.equal(e.calls,0);
 });
 test('recovery deep links open a view without restoring, sending mail or security effects',async()=>{
  for(const hash of ['#/recovery','#/recovery/start','#/recovery/finish']){
@@ -763,4 +766,17 @@ test('auth navigation UI latch waits, returns from BFCache, and times out withou
  let done=false;const pending=e.context.OTPandaSession.waitForAuthNavigation().then(()=>done=true);
  await Promise.resolve();assert.equal(done,false);events.pageshow({persisted:false});await Promise.resolve();assert.equal(done,false);events.pageshow({persisted:true});await pending;assert.equal(done,true);assert.equal(cleared,1);
  const failed=e.context.OTPandaSession.waitForAuthNavigation();fire();await assert.rejects(failed,/navigation did not finish/);assert.equal(e.calls,0);
+});
+
+test('superseded and unknown routes normalize home without legacy views', async()=>{
+ for(const r of ['sources','entries','unassigned','settings/organization','unknown']) {
+  const e=env({hash:'#/'+r});await e.context.OTPandaSession.ready;
+  assert.equal(e.context.OTPandaNavigation.current(),'codes');
+  assert.equal(e.context.location.hash,'#/codes');assert.equal(e.calls,0);
+ }
+});
+
+test('stable Details routes restore and malformed IDs normalize home',async()=>{
+ for(const r of ['accounts/YQ','unassigned-details/c3Jj/ZXZlbnQ']){const e=env({hash:'#/'+r});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaNavigation.current(),r);}
+ for(const r of ['accounts/AA','accounts/YQ==','accounts/_w','accounts/YR','unassigned-details/YQ']){const e=env({hash:'#/'+r});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaNavigation.current(),'codes');assert.equal(e.context.location.hash,'#/codes');}
 });

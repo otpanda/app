@@ -114,6 +114,56 @@ void main() {
     expect(isSettingsRoute('codes'), isFalse);
   });
 
+  testWidgets(
+    'workspace loads organization once and reuses loaded entry snapshot',
+    (t) async {
+      final b = CountingBridge()
+        ..status = 'restored'
+        ..clockNow = 100000;
+      await pump(t, b, navigation: 'codes', workspace: true);
+      expect(b.organizationReads, 1);
+      expect(b.paths.where((p) => p == '/v1/manage/entries').length, 1);
+      expect(find.byKey(const Key('product-top-bar')), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'organization loading disables edits and leaving workspace is safe',
+    (t) async {
+      final b = SlowOrganizationBridge()
+        ..status = 'restored'
+        ..clockNow = 100000
+        ..gate = Completer<SessionResponse>()
+        ..entries = [
+          {
+            'entry_id': 'a',
+            'service_name': 'Alpha',
+            'capabilities': {'manage': true},
+          },
+        ];
+      await pump(t, b, navigation: 'codes', workspace: true);
+      await t.longPress(find.text('Alpha'));
+      await t.pumpAndSettle();
+      expect(
+        t.widget<TextButton>(find.widgetWithText(TextButton, 'Pin')).onPressed,
+        isNull,
+      );
+      expect(
+        t.widget<TextButton>(find.widgetWithText(TextButton, 'Tags')).onPressed,
+        isNull,
+      );
+      await t.tap(find.byTooltip('Account & security'));
+      await t.pump(const Duration(milliseconds: 300));
+      b.gate!.complete(
+        const SessionResponse(
+          200,
+          '{"revision":0,"tags":[],"entries":[],"ranking":[]}',
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+      expect(find.text('Settings'), findsWidgets);
+    },
+  );
   testWidgets('narrow: hub lists categories, each opens its own page', (
     t,
   ) async {
@@ -122,7 +172,7 @@ void main() {
     expect(find.text('Account & security'), findsOneWidget);
     expect(find.text('Devices & sessions'), findsOneWidget);
     // The approved hub keeps its stable category even during a failed read.
-    expect(find.text('Organization'), findsOneWidget);
+    expect(find.text('Organization'), findsNothing);
     expect(find.text('Sign-in methods'), findsNothing);
     // No Licenses row in the hub: it lives under About.
     expect(find.text('Licenses'), findsNothing);
@@ -347,26 +397,6 @@ void main() {
     }
   });
 
-  testWidgets('Organization category reads entries and organization live', (
-    t,
-  ) async {
-    final b = CountingBridge()
-      ..status = 'restored'
-      ..clockNow = 100000;
-    await pump(t, b, navigation: 'settings');
-    await t.tap(find.text('Organization'));
-    await t.pumpAndSettle();
-    expect(b.organizationReads, 1);
-    expect(b.paths, contains('/v1/manage/entries'));
-    // Leaving and returning reads again: a saved organization is written
-    // back whole, so it is never served from memory.
-    await t.tap(find.byTooltip('Back to settings'));
-    await t.pumpAndSettle();
-    await t.tap(find.text('Organization'));
-    await t.pumpAndSettle();
-    expect(b.organizationReads, 2);
-  });
-
   testWidgets('failed initial restore then two Account entries each read', (
     t,
   ) async {
@@ -511,52 +541,6 @@ void main() {
     expect(find.byKey(const Key('overview-stale')), findsNothing);
   });
 
-  testWidgets('Organization shows a loading state and no editor meanwhile', (
-    t,
-  ) async {
-    final b = SlowOrganizationBridge()
-      ..status = 'restored'
-      ..clockNow = 100000
-      ..gate = Completer();
-    await pump(t, b, navigation: 'settings');
-    await t.tap(find.text('Organization'));
-    await t.pump();
-    await t.pump();
-    expect(find.byKey(const Key('organization-loading')), findsOneWidget);
-    expect(
-      find.text(
-        'Organization could not load. Your saved choices have not changed.',
-      ),
-      findsNothing,
-    );
-    b.gate!.complete(SessionResponse(200, jsonEncode(b.cloud)));
-    await t.pumpAndSettle();
-    expect(find.byKey(const Key('organization-loading')), findsNothing);
-  });
-
-  testWidgets('direct route to Organization loads it once', (t) async {
-    final b = CountingBridge()
-      ..status = 'restored'
-      ..clockNow = 100000;
-    await pump(t, b, navigation: 'settings/organization');
-    expect(b.organizationReads, 1);
-    expect(b.paths, contains('/v1/manage/entries'));
-  });
-
-  testWidgets('leaving settings while Organization loads is safe', (t) async {
-    final b = SlowOrganizationBridge()
-      ..status = 'restored'
-      ..clockNow = 100000
-      ..gate = Completer();
-    await pump(t, b, navigation: 'settings');
-    await t.tap(find.text('Organization'));
-    await t.pump();
-    await t.pumpWidget(const SizedBox.shrink());
-    b.gate!.complete(SessionResponse(200, jsonEncode(b.cloud)));
-    await t.pumpAndSettle();
-    expect(t.takeException(), isNull);
-  });
-
   testWidgets('malformed overview 200 is flagged as a failed refresh', (
     t,
   ) async {
@@ -574,17 +558,13 @@ void main() {
     expect(find.byKey(const Key('overview-stale')), findsOneWidget);
   });
 
-  testWidgets('periodic refresh does not replace a ready organization', (
-    t,
-  ) async {
+  testWidgets('removed organization route has no legacy editor', (t) async {
     final b = CountingBridge()
       ..status = 'restored'
       ..clockNow = 100000;
-    await pump(t, b, navigation: 'settings/organization');
-    expect(b.organizationReads, 1);
-    // The page ticks every second and refreshes every 30 ticks.
-    await t.pump(const Duration(seconds: 65));
-    await t.pumpAndSettle();
-    expect(b.organizationReads, 1);
+    await pump(t, b, navigation: 'settings/organization', workspace: true);
+    expect(find.text('Organize your entries'), findsNothing);
+    expect(find.text('Manage tags'), findsNothing);
+    expect(t.takeException(), isNull);
   });
 }

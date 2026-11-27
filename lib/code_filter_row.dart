@@ -14,10 +14,14 @@ class CodeFilterRow extends StatelessWidget {
     required this.choices,
     required this.selected,
     required this.onChanged,
+    this.matchAll = false,
+    this.onMatchAllChanged,
   });
   final List<CodeFilterChoice> choices;
   final Set<String> selected;
   final ValueChanged<Set<String>> onChanged;
+  final bool matchAll;
+  final ValueChanged<bool>? onMatchAllChanged;
 
   List<CodeFilterChoice> get ordered => [
     ...choices.where((c) => selected.contains(c.id)),
@@ -97,6 +101,8 @@ class CodeFilterRow extends StatelessWidget {
     // The dialog owns no independent selection. A local view of the same set
     // lets taps update immediately even when the parent row is offstage.
     var current = {...selected};
+    final frozenOrder = ordered;
+    var all = matchAll;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -106,29 +112,40 @@ class CodeFilterRow extends StatelessWidget {
           content: SizedBox(
             width: 460,
             child: SingleChildScrollView(
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  for (final c in [
-                    ...choices.where((c) => current.contains(c.id)),
-                    ...choices.where((c) => !current.contains(c.id)),
-                  ])
-                    FilterChip(
-                      key: ValueKey('dialog-filter-${c.id}'),
-                      label: Text(c.label),
-                      selected: current.contains(c.id),
-                      onSelected: (enabled) {
-                        refresh(() {
-                          if (enabled) {
-                            current.add(c.id);
-                          } else {
-                            current.remove(c.id);
-                          }
-                        });
-                        onChanged(Set.unmodifiable(current));
+                  if (onMatchAllChanged != null)
+                    SwitchListTile(
+                      title: const Text('Match all selected tags'),
+                      value: all,
+                      onChanged: (v) {
+                        refresh(() => all = v);
+                        onMatchAllChanged!(v);
                       },
                     ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final c in frozenOrder)
+                        FilterChip(
+                          key: ValueKey('dialog-filter-${c.id}'),
+                          label: Text(c.label),
+                          selected: current.contains(c.id),
+                          onSelected: (enabled) {
+                            refresh(() {
+                              if (enabled) {
+                                current.add(c.id);
+                              } else {
+                                current.remove(c.id);
+                              }
+                            });
+                            onChanged(Set.unmodifiable(current));
+                          },
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ),

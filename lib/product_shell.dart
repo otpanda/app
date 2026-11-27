@@ -12,9 +12,9 @@ import 'totp_batch_contract.dart';
 
 import 'browser_session_contract.dart';
 import 'assignment_dialog.dart';
-import 'entry_manage_dialog.dart';
+import 'account_details_page.dart';
+import 'detail_routes.dart';
 import 'totp_enrollment.dart';
-import 'gmail_source.dart';
 import 'read_workspace_controller.dart';
 
 import 'package:material_ui/material_ui.dart';
@@ -35,12 +35,15 @@ import 'session_contract.dart';
 /// states. No fixture data is ever shown here. Mutations are not offered
 /// until their endpoints exist.
 class ProductShell extends StatefulWidget {
+  final String? navigation;
+  final ValueChanged<String>? onNavigate;
   final ReadWorkspaceController controller;
   final OrganizationStore? organization;
   final VoidCallback? onOrganizationChanged;
-  final Widget? organizationTools;
+  final Future<bool> Function()? saveOrganization;
   final bool showTileTags;
   final bool organizationBusy;
+  final String organizationMessage;
   final BatchPolicy? batchPolicy;
   final CopyHintStore? copyHintStore;
 
@@ -62,8 +65,6 @@ class ProductShell extends StatefulWidget {
   /// mounted and verified for the real account.
   final bool entryEditEnabled;
   final bool entryDomainsEnabled;
-  final int initialTab;
-  final ValueChanged<int>? onTabChanged;
 
   /// Pull-down action on the web: reload the whole page. Null on native
   /// clients, which refresh their data in place instead.
@@ -71,11 +72,14 @@ class ProductShell extends StatefulWidget {
   const ProductShell({
     super.key,
     required this.controller,
+    this.navigation,
+    this.onNavigate,
     this.organization,
     this.onOrganizationChanged,
-    this.organizationTools,
+    this.saveOrganization,
     this.showTileTags = false,
     this.organizationBusy = false,
+    this.organizationMessage = '',
     this.copyHintStore,
     this.batchPolicy,
     this.batchClock,
@@ -89,8 +93,6 @@ class ProductShell extends StatefulWidget {
     this.assignmentEnabled = false,
     this.entryEditEnabled = false,
     this.entryDomainsEnabled = false,
-    this.initialTab = 0,
-    this.onTabChanged,
     this.pageReload = platform.pageReload,
   });
   @override
@@ -120,27 +122,42 @@ class _ProductShellState extends State<ProductShell>
       : widget.controller.message.isNotEmpty
       ? (widget.controller.rateLimited ? _Phase.rateLimited : _Phase.failed)
       : _Phase.cleared;
-  late int tab = widget.initialTab.clamp(0, 3);
+  String? localDetailRoute;
+  String? detailOwner;
+  String? scheduledUnavailableRoute;
+  void openDetails(String route) {
+    detailOwner = widget.controller.store.ownerId;
+    if (widget.onNavigate != null) {
+      widget.onNavigate!(route);
+    } else {
+      setState(() => localDetailRoute = route);
+    }
+  }
+
+  void closeDetails({bool refresh = true}) {
+    if (refresh) widget.controller.refreshAfterMutation();
+    if (widget.onNavigate != null) {
+      widget.onNavigate!('codes');
+    } else {
+      setState(() => localDetailRoute = null);
+    }
+  }
+
   String query = '';
   AccountSort accountSort = AccountSort.frequentlyUsed;
   Set<String> filters = {}, selectedAccounts = {};
+  bool matchAllTags = false;
   final Map<String, int> localLastUsed = {};
   String? selectionOwner;
   final searchController = TextEditingController();
 
   /// Search only filters Codes and Entries.
-  bool get searchable => tab == 0 || tab == 3;
+  bool get searchable => true;
 
   void clearSearch() {
     query = '';
     searchController.clear();
   }
-
-  void selectTab(int i) => setState(() {
-    tab = i;
-    widget.onTabChanged?.call(i);
-    clearSearch();
-  });
 
   /// Codes that arrived this recently sit on top, highlighted.
   static const freshForMs = 120000;
@@ -175,8 +192,6 @@ class _ProductShellState extends State<ProductShell>
     final now = widget.clock();
     final c = widget.controller;
     final private = c.store.visibleUnassigned(now).any(c.canCopyPrivate);
-    if (tab == 2) return private;
-    if (tab != 0) return false;
     final q = query.trim().toLowerCase();
     if (q.isEmpty && private) return true;
     final codes = {
@@ -368,6 +383,7 @@ class _ProductShellState extends State<ProductShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    selectionOwner = widget.controller.store.ownerId;
     _copyHintStore = widget.copyHintStore ?? createCopyHintStore();
     _copyHintStore
         .copiedBefore()
@@ -406,15 +422,15 @@ class _ProductShellState extends State<ProductShell>
   @override
   void didUpdateWidget(covariant ProductShell oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.navigation != oldWidget.navigation) {
+      scheduledUnavailableRoute = null;
+      if (widget.navigation == 'codes') detailOwner = null;
+    }
     if (selectionOwner != widget.controller.store.ownerId) {
       selectionOwner = widget.controller.store.ownerId;
       selectedAccounts.clear();
       filters.clear();
       localLastUsed.clear();
-    }
-    if (oldWidget.initialTab != widget.initialTab) {
-      tab = widget.initialTab.clamp(0, 3);
-      clearSearch();
     }
   }
 
@@ -452,7 +468,11 @@ class _ProductShellState extends State<ProductShell>
     await widget.pageReload?.call();
   }
 
-  String spaced(String c) => c;
+  String spaced(String c) => c.length == 6
+      ? '${c.substring(0, 3)} ${c.substring(3)}'
+      : c.length == 8
+      ? '${c.substring(0, 4)} ${c.substring(4)}'
+      : c;
 
   Widget avatar(String name, [String? serviceId, String? issuer]) =>
       ServiceAvatar(
@@ -489,237 +509,200 @@ class _ProductShellState extends State<ProductShell>
     Widget? below,
     Widget? leading,
     bool pin = false,
+    VoidCallback? onHold,
+    VoidCallback? onSelect,
+    bool selected = false,
   ]) => Card(
     clipBehavior: Clip.antiAlias,
     key: fresh ? Key('fresh-$title-${code ?? ''}') : null,
-    color: fresh ? context.pal.fresh : null,
-    shape: fresh
+    color: selected ? context.pal.fresh : (fresh ? context.pal.fresh : null),
+    shape: fresh || selected
         ? RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
             side: BorderSide(color: context.pal.accent, width: 1.2),
           )
         : null,
-    child: Tooltip(
-      message: code != null && onCopy != null && copyId != null
-          ? (early ? 'Copy next code, valid in up to 2 seconds' : 'Copy code')
-          : '',
-      child: InkWell(
-        onTap: code != null && onCopy != null && copyId != null
-            ? () => copyTile(copyId, onCopy)
-            : null,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Stack(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: SizedBox(
-                    height:
-                        40 * MediaQuery.textScalerOf(context).scale(14) / 14,
-                    child: Row(
-                      children: [
-                        ?leading,
-                        avatar(title, serviceId, issuer),
-                        const SizedBox(width: 11),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
+    child: InkWell(
+      onLongPress: onHold,
+      onTap:
+          onSelect ??
+          (code != null && onCopy != null && copyId != null
+              ? () => copyTile(copyId, onCopy)
+              : null),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: SizedBox(
+                  height: 40 * MediaQuery.textScalerOf(context).scale(14) / 14,
+                  child: Row(
+                    children: [
+                      ?leading,
+                      avatar(title, serviceId, issuer),
+                      const SizedBox(width: 11),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                              ),
+                            ),
+                            if (sub.isNotEmpty)
                               Text(
-                                title,
+                                sub,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: context.pal.muted,
                                 ),
                               ),
-                              if (sub.isNotEmpty)
-                                Text(
-                                  sub,
-                                  overflow: TextOverflow.ellipsis,
+                          ],
+                        ),
+                      ),
+                      if (pin)
+                        Padding(
+                          padding: EdgeInsets.only(left: 4),
+                          child: Icon(
+                            Icons.push_pin,
+                            size: 14,
+                            color: context.pal.accent,
+                          ),
+                        ),
+                      if (code != null) ...[
+                        const SizedBox(width: 6),
+                        codeSlot(
+                          Stack(
+                            clipBehavior: Clip.none,
+                            alignment: Alignment.center,
+                            children: [
+                              Opacity(
+                                opacity: _copiedTile == copyId && copyId != null
+                                    ? 0
+                                    : (expired ? 0.45 : 1),
+                                child: Text(
+                                  spaced(code),
                                   style: TextStyle(
-                                    fontSize: 12,
-                                    color: context.pal.muted,
+                                    fontFamily: 'CodeMono',
+                                    fontFeatures: [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w600,
+                                    color: expired
+                                        ? context.pal.muted
+                                        : context.pal.ink,
+                                  ),
+                                ),
+                              ),
+                              if (expired)
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: -10,
+                                  child: Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Text(
+                                      'Updating',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        color: context.pal.muted,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (_copiedTile == copyId && copyId != null)
+                                Semantics(
+                                  liveRegion: true,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.check,
+                                        size: 16,
+                                        color: context.pal.accent,
+                                      ),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'Copied',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: context.pal.accent,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                             ],
                           ),
                         ),
-                        if (pin)
-                          Padding(
-                            padding: EdgeInsets.only(left: 4),
-                            child: Icon(
-                              Icons.push_pin,
-                              size: 14,
-                              color: context.pal.accent,
-                            ),
-                          ),
-                        if (code != null) ...[
-                          const SizedBox(width: 6),
-                          codeSlot(
-                            Stack(
-                              clipBehavior: Clip.none,
-                              alignment: Alignment.center,
-                              children: [
-                                Opacity(
-                                  opacity:
-                                      _copiedTile == copyId && copyId != null
-                                      ? 0
-                                      : (expired ? 0.45 : 1),
-                                  child: Text(
-                                    spaced(code),
-                                    style: TextStyle(
-                                      fontFamily: 'CodeMono',
-                                      fontFeatures: [
-                                        FontFeature.tabularFigures(),
-                                      ],
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w600,
-                                      color: expired
-                                          ? context.pal.muted
-                                          : context.pal.ink,
-                                    ),
-                                  ),
-                                ),
-                                if (expired)
-                                  Positioned(
-                                    left: 0,
-                                    right: 0,
-                                    bottom: -10,
-                                    child: Align(
-                                      alignment: Alignment.bottomCenter,
-                                      child: Text(
-                                        'Updating',
-                                        style: TextStyle(
-                                          fontSize: 9,
-                                          color: context.pal.muted,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                if (_copiedTile == copyId && copyId != null)
-                                  Semantics(
-                                    liveRegion: true,
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.check,
-                                          size: 16,
-                                          color: context.pal.accent,
-                                        ),
-                                        SizedBox(width: 4),
-                                        Text(
-                                          'Copied',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: context.pal.accent,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ] else if (showCodeStatus) ...[
-                          const SizedBox(width: 12),
-                          SizedBox(
-                            height: 48,
-                            child: Center(
-                              child: codeSlot(
-                                Text(
-                                  '-' * (expectedDigits ?? 6),
-                                  semanticsLabel: renewing
-                                      ? 'Updating code'
-                                      : 'No active code',
-                                  style: TextStyle(
-                                    fontFamily: 'CodeMono',
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w600,
-                                    color: context.pal.muted,
-                                  ),
+                      ] else if (showCodeStatus) ...[
+                        const SizedBox(width: 12),
+                        SizedBox(
+                          height: 48,
+                          child: Center(
+                            child: codeSlot(
+                              Text(
+                                '-' * (expectedDigits ?? 6),
+                                semanticsLabel: renewing
+                                    ? 'Updating code'
+                                    : 'No active code',
+                                style: TextStyle(
+                                  fontFamily: 'CodeMono',
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  color: context.pal.muted,
                                 ),
                               ),
                             ),
                           ),
-                        ],
-                        if (_showCopyButton &&
-                            code != null &&
-                            onCopy != null &&
-                            copyId != null) ...[
-                          const SizedBox(width: 8),
-                          IconButton(
-                            key: ValueKey('copy-button-$copyId'),
-                            tooltip: early
-                                ? 'Copy next code to clipboard'
-                                : 'Copy code to clipboard',
-                            onPressed: () => copyTile(copyId, onCopy),
-                            icon: const Icon(Icons.copy_outlined, size: 20),
-                          ),
-                        ],
-                        if (trailing != null) ...[
-                          const SizedBox(width: 4),
-                          trailing,
-                        ],
+                        ),
                       ],
-                    ),
+                      if (_showCopyButton &&
+                          code != null &&
+                          onCopy != null &&
+                          copyId != null) ...[
+                        const SizedBox(width: 8),
+                        IconButton(
+                          key: ValueKey('copy-button-$copyId'),
+                          tooltip: early
+                              ? 'Copy next code to clipboard'
+                              : 'Copy code to clipboard',
+                          onPressed: () => copyTile(copyId, onCopy),
+                          icon: const Icon(Icons.copy_outlined, size: 20),
+                        ),
+                      ],
+                      if (trailing != null) ...[
+                        const SizedBox(width: 4),
+                        trailing,
+                      ],
+                    ],
                   ),
                 ),
-                if (remainingMs != null && periodMs != null && code != null)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: RefreshBar(
-                      key: ValueKey(barId ?? 'refresh-$title'),
-                      remainingMs: remainingMs,
-                      periodMs: periodMs,
-                    ),
-                  ),
-              ],
+              ),
+            ],
+          ),
+          ?below,
+          if (remainingMs != null && periodMs != null && code != null)
+            RefreshBar(
+              key: ValueKey(barId ?? 'refresh-$title'),
+              remainingMs: remainingMs,
+              periodMs: periodMs,
             ),
-            ?below,
-          ],
-        ),
+        ],
       ),
     ),
   );
 
-  Future<void> contextDetails(UnassignedContext review) async {
-    await showDialog<void>(
-      context: context,
-      builder: (c) => AlertDialog(
-        constraints: const BoxConstraints(maxWidth: 600),
-        title: const Text('Unassigned details'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(review.kind == 'sms' ? 'SMS' : 'Email'),
-              Text(review.sourceLabel),
-              Text('From: ${review.sender}'),
-              const SizedBox(height: 12),
-              Text(
-                review.contentLabel,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              Text(review.redactedText ?? 'Message details unavailable.'),
-              if (review.truncated) const Text('Text shortened.'),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
+  void contextDetails(UnassignedContext review) =>
+      openDetails(unassignedDetailRoute(review.sourceId, review.eventId));
 
   Widget reviewTile(
     UnassignedContext review,
@@ -757,9 +740,12 @@ class _ProductShellState extends State<ProductShell>
             onPressed: () => contextDetails(review),
             icon: const Icon(Icons.info_outline),
           ),
-          if (code != null && widget.assignmentEnabled)
+          if (code != null &&
+              widget.assignmentEnabled &&
+              widget.controller.bridge is AssignmentBridge)
             IconButton(
-              tooltip: 'Assign',
+              key: Key('assign-${code.eventId}'),
+              tooltip: 'Assign to an entry',
               onPressed: () => assign(code),
               icon: const Icon(Icons.drive_file_move_outline),
             ),
@@ -802,7 +788,9 @@ class _ProductShellState extends State<ProductShell>
       return (ownership.isEmpty ||
               ownership.contains(e.manage ? 'mine' : 'shared')) &&
           (selectedTags.isEmpty ||
-              tags(e.id).intersection(selectedTags).isNotEmpty);
+              (matchAllTags
+                  ? selectedTags.every(tags(e.id).contains)
+                  : tags(e.id).intersection(selectedTags).isNotEmpty));
     }
 
     final entries = input.where(matches).toList();
@@ -825,7 +813,6 @@ class _ProductShellState extends State<ProductShell>
         entries
             .where(
               (e) =>
-                  !e.totp &&
                   codes[e.id] != null &&
                   now - codes[e.id]!.receivedAt < freshForMs,
             )
@@ -885,8 +872,8 @@ class _ProductShellState extends State<ProductShell>
             ),
           );
     Widget account(ManagedEntry e, {bool arrival = false}) {
-      final received = codes[e.id],
-          generated = e.totp ? batch?.tileCurrent(e.id) : null;
+      final received = !e.totp || arrival ? codes[e.id] : null,
+          generated = e.totp && !arrival ? batch?.tileCurrent(e.id) : null;
       final value = received?.value ?? generated?.value;
       final copyId = received != null
           ? 'entry/${e.id}/${received.receivedAt}'
@@ -894,7 +881,7 @@ class _ProductShellState extends State<ProductShell>
           ? 'totp/${e.id}/${generated.periodStartMs}'
           : null;
       Future<bool> copy() async {
-        if (e.totp) return await batch?.copy(e.id) ?? false;
+        if (e.totp && !arrival) return await batch?.copy(e.id) ?? false;
         if (received == null || !widget.controller.canCopyAssigned(received)) {
           return false;
         }
@@ -926,10 +913,21 @@ class _ProductShellState extends State<ProductShell>
                 onPressed: known(e.id) && !widget.organizationBusy
                     ? () => editAccountTags({e.id})
                     : null,
-                child: Text(
-                  labels.isEmpty ? 'Add tags' : labels.join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Row(
+                  children: [
+                    Icon(
+                      labels.isEmpty ? Icons.add : Icons.sell_outlined,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        labels.isEmpty ? 'Add tags' : labels.join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             )
@@ -951,35 +949,13 @@ class _ProductShellState extends State<ProductShell>
         generated != null && !generated.copyable ? null : copy,
         true,
         arrival,
-        selectedAccounts.isNotEmpty && !desktop
-            ? Checkbox(
-                value: selectedAccounts.contains(e.id),
-                onChanged: (_) => setState(
-                  () => selectedAccounts.contains(e.id)
-                      ? selectedAccounts.remove(e.id)
-                      : selectedAccounts.add(e.id),
-                ),
-              )
-            : editable(e)
-            ? PopupMenuButton<String>(
-                tooltip: 'Account actions',
-                onSelected: (action) {
-                  if (action == 'edit') editEntry(e);
-                },
-                itemBuilder: (_) => [
-                  const PopupMenuItem(
-                    value: 'edit',
-                    child: Text('Edit account'),
-                  ),
-                ],
-              )
-            : null,
+        null,
         e.catalogId,
         e.issuer,
         generated?.remainingMs,
         generated == null ? null : generated.period * 1000,
         generated == null ? null : '${e.id}/${generated.periodStartMs}',
-        e.totp && (batch?.awaitingBoundary(e.id) ?? false),
+        e.totp && !arrival && (batch?.awaitingBoundary(e.id) ?? false),
         copyId,
         generated != null && !generated.copyable,
         generated?.early ?? false,
@@ -987,15 +963,21 @@ class _ProductShellState extends State<ProductShell>
         tagRow,
         selection,
         pinned(e.id),
-      );
-      return GestureDetector(
-        onLongPress: () => setState(
+        () => setState(
           () => selectedAccounts.contains(e.id)
               ? selectedAccounts.remove(e.id)
               : selectedAccounts.add(e.id),
         ),
-        child: tile,
+        selectedAccounts.isNotEmpty
+            ? () => setState(
+                () => selectedAccounts.contains(e.id)
+                    ? selectedAccounts.remove(e.id)
+                    : selectedAccounts.add(e.id),
+              )
+            : null,
+        selectedAccounts.contains(e.id),
       );
+      return tile;
     }
 
     Widget unassigned(UnassignedCode c, {bool arrival = false}) => codeTile(
@@ -1009,13 +991,25 @@ class _ProductShellState extends State<ProductShell>
       },
       true,
       arrival,
-      widget.assignmentEnabled
-          ? IconButton(
-              tooltip: 'Assign',
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Details',
+            onPressed: () =>
+                openDetails(unassignedDetailRoute(c.sourceId, c.eventId)),
+            icon: const Icon(Icons.info_outline),
+          ),
+          if (widget.assignmentEnabled &&
+              widget.controller.bridge is AssignmentBridge)
+            IconButton(
+              key: Key('assign-${c.eventId}'),
+              tooltip: 'Assign to an entry',
               onPressed: () => assign(c),
               icon: const Icon(Icons.drive_file_move_outline),
-            )
-          : null,
+            ),
+        ],
+      ),
       null,
       null,
       null,
@@ -1028,46 +1022,120 @@ class _ProductShellState extends State<ProductShell>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (selectedAccounts.isNotEmpty)
-          Wrap(
-            spacing: 8,
-            children: [
-              Text('${selectedAccounts.length} selected'),
-              TextButton(
-                onPressed: () => setState(() => selectedAccounts.clear()),
-                child: const Text('Clear'),
-              ),
-              TextButton(
-                onPressed: org != null && !widget.organizationBusy
-                    ? () =>
-                          editAccountTags(selectedAccounts.where(known).toSet())
-                    : null,
-                child: const Text('Tags'),
-              ),
-              TextButton(
-                onPressed: org != null && !widget.organizationBusy
-                    ? () {
-                        for (final id in selectedAccounts.where(known)) {
-                          org.setPinned(id, true);
-                        }
-                        widget.onOrganizationChanged?.call();
-                        setState(() {});
-                      }
-                    : null,
-                child: const Text('Pin'),
-              ),
-              TextButton(
-                onPressed: org != null && !widget.organizationBusy
-                    ? () {
-                        for (final id in selectedAccounts.where(known)) {
-                          org.setPinned(id, false);
-                        }
-                        widget.onOrganizationChanged?.call();
-                        setState(() {});
-                      }
-                    : null,
-                child: const Text('Unpin'),
-              ),
-            ],
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Clear selection',
+                      onPressed: () => setState(() => selectedAccounts.clear()),
+                      icon: const Icon(Icons.close),
+                    ),
+                    Text('${selectedAccounts.length} selected'),
+                  ],
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: TextButton.icon(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            minimumSize: const Size(0, 40),
+                          ),
+                          label: Text(
+                            selectedAccounts.every(pinned) ? 'Unpin' : 'Pin',
+                          ),
+                          onPressed: org != null && !widget.organizationBusy
+                              ? () {
+                                  final value = !selectedAccounts.every(pinned);
+                                  for (final id in selectedAccounts.where(
+                                    known,
+                                  )) {
+                                    org.setPinned(id, value);
+                                  }
+                                  widget.onOrganizationChanged?.call();
+                                  setState(() {});
+                                }
+                              : null,
+                          icon: Icon(
+                            selectedAccounts.every(pinned)
+                                ? Icons.push_pin
+                                : Icons.push_pin_outlined,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: TextButton.icon(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            minimumSize: const Size(0, 40),
+                          ),
+                          label: const Text('Tags'),
+                          onPressed: org != null && !widget.organizationBusy
+                              ? () => editAccountTags(
+                                  selectedAccounts.where(known).toSet(),
+                                )
+                              : null,
+                          icon: const Icon(Icons.sell_outlined),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: TextButton.icon(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            minimumSize: const Size(0, 40),
+                          ),
+                          label: const Text('Share'),
+                          onPressed: null,
+                          icon: Icon(
+                            Icons.share_outlined,
+                            color: context.pal.muted.withValues(alpha: 0.35),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: TextButton.icon(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            minimumSize: const Size(0, 40),
+                          ),
+                          key: selectedAccounts.length == 1
+                              ? Key('edit-${selectedAccounts.single}')
+                              : null,
+                          label: const Text('Details'),
+                          onPressed:
+                              selectedAccounts.length == 1 &&
+                                  input.any(
+                                    (e) => selectedAccounts.contains(e.id),
+                                  )
+                              ? () => editEntry(
+                                  input.firstWhere(
+                                    (e) => selectedAccounts.contains(e.id),
+                                  ),
+                                )
+                              : null,
+                          icon: const Icon(Icons.info_outline),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         section('New arrivals', [
           for (final e in fresh) account(e, arrival: true),
@@ -1126,7 +1194,7 @@ class _ProductShellState extends State<ProductShell>
             ))
               unassigned(c),
           ]),
-        if (widget.organizationTools != null) widget.organizationTools!,
+
         if (entries.isEmpty &&
             private.isEmpty &&
             widget.controller.contexts.isEmpty)
@@ -1135,10 +1203,27 @@ class _ProductShellState extends State<ProductShell>
     );
   }
 
-  Future<void> editAccountTags(Set<String> ids) async {
-    final org = widget.organization;
+  Future<void> editAccountTags(
+    Set<String> ids, {
+    OrganizationStore? staged,
+  }) async {
+    final org = staged ?? widget.organization;
     if (org == null || ids.isEmpty) return;
+    final owner = widget.controller.store.ownerId;
+    bool current() =>
+        mounted &&
+        (staged != null || identical(widget.organization, org)) &&
+        widget.controller.store.ownerId == owner;
+    final originalDocument = org.document();
+    final draft = OrganizationStore()
+      ..restore(
+        {'revision': org.revision, ...org.document(), 'ranking': <Object>[]},
+        (org.document()['entries'] as List).map((e) => e['entryId'] as String),
+      );
     final decisions = <String, bool>{};
+    var newTag = '';
+    var tagInputRevision = 0;
+    String? tagError;
     final accepted = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -1149,10 +1234,122 @@ class _ProductShellState extends State<ProductShell>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                for (final tag in org.tags)
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: ValueKey('new-tag-$tagInputRevision'),
+                        decoration: InputDecoration(
+                          labelText: 'New tag',
+                          errorText: tagError,
+                        ),
+                        onChanged: (value) => update(() => newTag = value),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Create tag',
+                      onPressed: newTag.trim().isEmpty
+                          ? null
+                          : () => update(() {
+                              if (!current()) return;
+                              try {
+                                final id =
+                                    'personal-${DateTime.now().microsecondsSinceEpoch}';
+                                draft.createTag(id, newTag.trim());
+                                decisions[id] = true;
+                                newTag = '';
+                                tagInputRevision++;
+                                tagError = null;
+                              } catch (_) {
+                                tagError = 'Use a unique tag name';
+                              }
+                            }),
+                      icon: const Icon(Icons.add),
+                    ),
+                  ],
+                ),
+                for (final tag in draft.tags)
                   CheckboxListTile(
                     tristate: true,
-                    title: Text(tag.label),
+                    title: Row(
+                      children: [
+                        Expanded(child: Text(tag.label)),
+                        IconButton(
+                          tooltip: 'Rename ${tag.label}',
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          onPressed: () async {
+                            var name = tag.label;
+                            final next = await showDialog<String>(
+                              context: context,
+                              builder: (c) => AlertDialog(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 400,
+                                ),
+                                title: const Text('Rename tag'),
+                                content: TextFormField(
+                                  initialValue: name,
+                                  onChanged: (v) => name = v,
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(c),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () => Navigator.pop(c, name),
+                                    child: const Text('Save'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (next != null && current()) {
+                              update(() {
+                                try {
+                                  draft.renameTag(tag.id, next);
+                                  tagError = null;
+                                } catch (_) {
+                                  tagError = 'Use a unique tag name';
+                                }
+                              });
+                            }
+                          },
+                        ),
+                        IconButton(
+                          tooltip: 'Delete ${tag.label}',
+                          icon: const Icon(Icons.delete_outline, size: 18),
+                          onPressed: () async {
+                            final yes = await showDialog<bool>(
+                              context: context,
+                              builder: (c) => AlertDialog(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 400,
+                                ),
+                                title: Text('Delete ${tag.label}?'),
+                                content: const Text(
+                                  'This removes the tag from all accounts.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(c, false),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () => Navigator.pop(c, true),
+                                    child: const Text('Delete'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (yes == true && current()) {
+                              update(() {
+                                draft.deleteTag(tag.id);
+                                decisions.remove(tag.id);
+                              });
+                            }
+                          },
+                        ),
+                      ],
+                    ),
                     value:
                         decisions[tag.id] ??
                         (ids.every(
@@ -1200,18 +1397,40 @@ class _ProductShellState extends State<ProductShell>
         ),
       ),
     );
-    if (accepted != true || !mounted || !identical(widget.organization, org)) {
+    if (accepted != true) return;
+    if (!current()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Account or tags changed. Reopen Tags and try again.',
+            ),
+          ),
+        );
+      }
       return;
     }
     final accessible = widget.controller.store.entries.map((e) => e.id).toSet();
     for (final id in ids.where(accessible.contains)) {
-      final tags = {...org.preferencesFor(id).tagIds};
+      final tags = {...draft.preferencesFor(id).tagIds};
       for (final choice in decisions.entries) {
         choice.value ? tags.add(choice.key) : tags.remove(choice.key);
       }
-      org.setTags(id, tags);
+      draft.setTags(id, tags);
     }
-    widget.onOrganizationChanged?.call();
+    if (!org.applyDraft(originalDocument, draft.document())) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Tags changed while this dialog was open. Reopen and try again.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    if (staged == null) widget.onOrganizationChanged?.call();
     setState(() {});
   }
 
@@ -1297,126 +1516,7 @@ class _ProductShellState extends State<ProductShell>
         '${e.service} ${e.account}'.toLowerCase().contains(q);
     final entries = store.entries.where(match).toList();
     final codes = {for (final c in store.visibleCodes(now)) c.entryId: c};
-    switch (tab) {
-      case 0:
-        return unifiedCodes(entries, codes, now);
-      case 1:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (widget.controller.bridge is GmailSourceBridge)
-              GmailSourceConnect(
-                bridge: widget.controller.bridge as GmailSourceBridge,
-                onOpenAccount: widget.onOpenAccount,
-                hasGmailSource: store.sources.any((s) => s.kind == 'gmail'),
-              ),
-            if (store.sources.isEmpty)
-              empty(
-                'No sources yet',
-                'Phones and mailboxes that send codes to your account appear here.',
-              ),
-            for (final s in store.sources)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    codeTile(s.label, s.kind.toUpperCase(), null, null, false),
-                    if (s.kind == 'gmail' &&
-                        widget.controller.bridge is GmailSourceBridge)
-                      GmailSourceDisconnect(
-                        bridge: widget.controller.bridge as GmailSourceBridge,
-                        sourceId: s.id,
-                        label: s.label,
-                        onChanged: () => widget.controller.refresh(),
-                      ),
-                  ],
-                ),
-              ),
-          ],
-        );
-      case 2:
-        final list = store.visibleUnassigned(now);
-        final canAssign =
-            widget.assignmentEnabled &&
-            widget.controller.bridge is AssignmentBridge &&
-            store.entries.any((e) => e.manage);
-        if (list.isEmpty) {
-          return empty(
-            'Nothing waiting',
-            'Codes that need an account match show up here.',
-          );
-        }
-        return Column(
-          children: [
-            for (final c in list)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: codeTile(
-                  'Unassigned code',
-                  'Only you',
-                  c.value,
-                  () async {
-                    if (!widget.controller.canCopyPrivate(c)) return false;
-                    await widget.onCopyPrivate(c);
-                    return true;
-                  },
-                  true,
-                  false,
-                  canAssign
-                      ? IconButton(
-                          key: Key('assign-${c.eventId}'),
-                          tooltip: 'Assign to an entry',
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () => assign(c),
-                          icon: const Icon(Icons.drive_file_move_outline),
-                        )
-                      : null,
-                  null,
-                  null,
-                  null,
-                  null,
-                  null,
-                  false,
-                  'private/${c.sourceId}/${c.eventId}',
-                ),
-              ),
-          ],
-        );
-      default:
-        if (store.entries.isEmpty) {
-          return empty(
-            'No entries yet',
-            'Your services and accounts appear here.',
-          );
-        }
-        return Column(
-          children: [
-            for (final e in entries)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: codeTile(
-                  e.service,
-                  e.account,
-                  null,
-                  null,
-                  false,
-                  false,
-                  editable(e)
-                      ? IconButton(
-                          key: Key('edit-${e.id}'),
-                          tooltip: 'Edit entry',
-                          onPressed: () => editEntry(e),
-                          icon: const Icon(Icons.edit_outlined, size: 20),
-                        )
-                      : null,
-                  e.catalogId,
-                  e.issuer,
-                ),
-              ),
-          ],
-        );
-    }
+    return unifiedCodes(entries, codes, now);
   }
 
   /// Pick one owned entry, then hand the irreversible confirmation (with its
@@ -1426,6 +1526,7 @@ class _ProductShellState extends State<ProductShell>
     if (!widget.assignmentEnabled || raw is! AssignmentBridge) return;
     final AssignmentBridge bridge = raw as AssignmentBridge;
     final store = widget.controller.store;
+    final owner = store.ownerId;
     if (!code.active(widget.clock())) return;
     if (['unknown', 'pending', 'submitting'].contains(bridge.assignmentState)) {
       // A previous attempt is unresolved: reconcile it, send nothing new.
@@ -1440,7 +1541,7 @@ class _ProductShellState extends State<ProductShell>
         ),
       );
       if (done == true && mounted) {
-        widget.controller.refreshAfterMutation();
+        closeDetails();
       }
       return;
     }
@@ -1476,8 +1577,11 @@ class _ProductShellState extends State<ProductShell>
     );
     if (!mounted ||
         target == null ||
+        widget.controller.store.ownerId != owner ||
         !code.active(widget.clock()) ||
-        !store.visibleUnassigned(widget.clock()).contains(code) ||
+        !widget.controller.store
+            .visibleUnassigned(widget.clock())
+            .contains(code) ||
         !store.entries.any((e) => e.id == target && e.manage)) {
       return;
     }
@@ -1491,8 +1595,8 @@ class _ProductShellState extends State<ProductShell>
         entryId: target,
       ),
     );
-    if (done == true && mounted) {
-      widget.controller.refreshAfterMutation();
+    if (done == true && mounted && widget.controller.store.ownerId == owner) {
+      closeDetails();
     }
   }
 
@@ -1501,23 +1605,166 @@ class _ProductShellState extends State<ProductShell>
       e.manage &&
       widget.controller.bridge is EntryManagementBridge;
 
-  Future<void> editEntry(ManagedEntry e) async {
-    if (!editable(e)) return;
-    final changed = await showDialog<bool>(
-      context: context,
-      builder: (_) => EntryManageDialog(
-        bridge: widget.controller.bridge as EntryManagementBridge,
+  void editEntry(ManagedEntry e) => openDetails(accountDetailRoute(e.id));
+
+  Widget? routedDetails() {
+    final route = widget.navigation ?? localDetailRoute;
+    final detail = parseDetailRoute(route);
+    if (detail == null || phase != _Phase.loaded) return null;
+    final owner = widget.controller.store.ownerId;
+    detailOwner ??= owner;
+    bool current() =>
+        mounted &&
+        widget.controller.signedIn &&
+        widget.controller.store.ownerId == owner &&
+        detailOwner == owner;
+    void unavailable() {
+      if (widget.controller.loading || scheduledUnavailableRoute == route) {
+        return;
+      }
+      scheduledUnavailableRoute = route;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || (widget.navigation ?? localDetailRoute) != route) {
+          return;
+        }
+        closeDetails(refresh: false);
+      });
+    }
+
+    if (!current()) {
+      unavailable();
+      return const SizedBox.shrink();
+    }
+    if (detail.accountId != null) {
+      final matches = widget.controller.store.entries.where(
+        (e) => e.id == detail.accountId,
+      );
+      if (matches.isEmpty) {
+        unavailable();
+        return const SizedBox.shrink();
+      }
+      final e = matches.first;
+      final org = widget.organization;
+      Set<String> ids = {};
+      try {
+        ids = org?.preferencesFor(e.id).tagIds ?? {};
+      } catch (_) {}
+      return AccountDetailsPage(
+        key: ValueKey('details/$owner/${e.id}'),
         entry: e,
-        onConfirmed: ({service, account}) => widget.controller.applyEntryEdit(
-          e.id,
-          service: service,
-          account: account,
+        bridge: editable(e)
+            ? widget.controller.bridge as EntryManagementBridge
+            : null,
+        isCurrent: current,
+        organization: org,
+        editTags: org == null || widget.organizationBusy
+            ? null
+            : (draft) => editAccountTags({e.id}, staged: draft),
+        onOrganizationSaved: widget.saveOrganization,
+        onClose: closeDetails,
+        tags: [
+          for (final t in org?.tags ?? <PersonalTag>[])
+            if (ids.contains(t.id)) t.label,
+        ],
+        onTags: org == null || widget.organizationBusy
+            ? null
+            : () => editAccountTags({e.id}),
+        onConfirmed: ({service, account}) {
+          if (current()) {
+            widget.controller.applyEntryEdit(
+              e.id,
+              service: service,
+              account: account,
+            );
+          }
+        },
+      );
+    }
+    final now = widget.clock();
+    final reviews = widget.controller.contexts.where(
+      (r) =>
+          r.sourceId == detail.sourceId &&
+          r.eventId == detail.eventId &&
+          r.retained(now),
+    );
+    final codes = widget.controller.store
+        .visibleUnassigned(now)
+        .where(
+          (c) => c.sourceId == detail.sourceId && c.eventId == detail.eventId,
+        );
+    if (reviews.isEmpty && codes.isEmpty) {
+      unavailable();
+      return const SizedBox.shrink();
+    }
+    final review = reviews.isEmpty ? null : reviews.first;
+    final code = codes.isEmpty ? null : codes.first;
+    final sources = widget.controller.store.sources.where(
+      (s) => s.id == detail.sourceId,
+    );
+    return Scaffold(
+      key: const Key('unassigned-details'),
+      appBar: AppBar(
+        leading: IconButton(
+          tooltip: 'Back to codes',
+          onPressed: closeDetails,
+          icon: const Icon(Icons.arrow_back),
+        ),
+        title: const Text('Unassigned details'),
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              ListTile(
+                title: const Text('Source'),
+                subtitle: Text(
+                  review?.sourceLabel ??
+                      (sources.isEmpty ? 'Not available' : sources.first.label),
+                ),
+              ),
+              if (review != null) ...[
+                ListTile(
+                  title: const Text('From'),
+                  subtitle: Text(review.sender),
+                ),
+                ListTile(
+                  title: Text(review.contentLabel),
+                  subtitle: Text(
+                    review.redactedText ?? 'Message details unavailable.',
+                  ),
+                ),
+                if (review.truncated) const Text('Text shortened.'),
+              ],
+              ListTile(
+                title: const Text('Received'),
+                subtitle: Text(
+                  DateTime.fromMillisecondsSinceEpoch(
+                    review?.receivedAt ?? code!.receivedAt,
+                  ).toLocal().toString(),
+                ),
+              ),
+              if (code != null &&
+                  widget.assignmentEnabled &&
+                  widget.controller.bridge is AssignmentBridge)
+                FilledButton.icon(
+                  key: Key('assign-${code.eventId}'),
+                  onPressed: () {
+                    if (current()) assign(code);
+                  },
+                  icon: const Icon(Icons.drive_file_move_outline),
+                  label: const Text('Assign to an account'),
+                ),
+              if (code == null)
+                const Text(
+                  'This code has expired. Its redacted details are still available.',
+                ),
+            ],
+          ),
         ),
       ),
     );
-    if (changed == true && mounted) {
-      widget.controller.refreshAfterMutation();
-    }
   }
 
   Future<void> addAuthenticator() async {
@@ -1547,11 +1794,11 @@ class _ProductShellState extends State<ProductShell>
   Widget searchField(bool compact) => Semantics(
     label: 'Search services or accounts',
     child: TextField(
-      key: ValueKey('search-$tab'),
+      key: const ValueKey('search-codes'),
       controller: searchController,
       textInputAction: TextInputAction.search,
       decoration: InputDecoration(
-        hintText: compact ? 'Search' : 'Search services or accounts',
+        hintText: 'Search accounts',
         prefixIcon: const Icon(Icons.search, size: 20),
         suffixIcon: query.isEmpty
             ? null
@@ -1581,6 +1828,8 @@ class _ProductShellState extends State<ProductShell>
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, size) {
+      final detailPage = routedDetails();
+      if (detailPage != null && size.maxWidth <= 700) return detailPage;
       final desktop = size.maxWidth > 700;
       _showCopyButton = desktop;
       queueBatchSelection();
@@ -1596,10 +1845,14 @@ class _ProductShellState extends State<ProductShell>
         children: [
           if (!desktop &&
               _copyHint &&
-              (tab == 0 || tab == 2) &&
               phase == _Phase.loaded &&
               hasCopyableCard)
             copyTutorial(),
+          if (widget.organizationMessage.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(widget.organizationMessage),
+            ),
           body(),
           const SizedBox(height: 20),
           if (widget.controller.connectionLost) ...[
@@ -1638,30 +1891,30 @@ class _ProductShellState extends State<ProductShell>
         const CodeFilterChoice('shared', 'Shared'),
         for (final t in tags) CodeFilterChoice('tag/${t.id}', t.label),
       ];
-      final content = tab == 0
-          ? RevealedFilterList(
-              mobile: !desktop,
-              filters: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: CodeFilterRow(
-                        choices: filterChoices,
-                        selected: filters,
-                        onChanged: (value) => setState(() => filters = value),
-                      ),
-                    ),
-                    AccountSortButton(
-                      value: accountSort,
-                      onChanged: (value) => setState(() => accountSort = value),
-                    ),
-                  ],
+      final content = RevealedFilterList(
+        mobile: !desktop,
+        filters: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: CodeFilterRow(
+                  choices: filterChoices,
+                  selected: filters,
+                  matchAll: matchAllTags,
+                  onMatchAllChanged: (v) => setState(() => matchAllTags = v),
+                  onChanged: (value) => setState(() => filters = value),
                 ),
               ),
-              child: scrollContent,
-            )
-          : scrollContent;
+              AccountSortButton(
+                value: accountSort,
+                onChanged: (value) => setState(() => accountSort = value),
+              ),
+            ],
+          ),
+        ),
+        child: scrollContent,
+      );
       final accountButton = IconButton(
         tooltip: 'Account & security',
         onPressed: widget.onOpenAccount,
@@ -1684,7 +1937,7 @@ class _ProductShellState extends State<ProductShell>
                 size: 32,
               ),
       );
-      return Scaffold(
+      final workspacePage = Scaffold(
         floatingActionButton: _canAddTotp
             ? FloatingActionButton.extended(
                 tooltip: 'Add authenticator',
@@ -1729,7 +1982,7 @@ class _ProductShellState extends State<ProductShell>
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Image.memory(
-                                          ottyImage,
+                                          bareOttyImage,
                                           width: 42,
                                           height: 42,
                                         ),
@@ -1763,7 +2016,7 @@ class _ProductShellState extends State<ProductShell>
                       )
                     : Row(
                         children: [
-                          Image.memory(ottyImage, width: 42, height: 42),
+                          Image.memory(bareOttyImage, width: 42, height: 42),
                           const SizedBox(width: 10),
                           Expanded(
                             child: phase == _Phase.loaded && searchable
@@ -1786,6 +2039,18 @@ class _ProductShellState extends State<ProductShell>
             ],
           ),
         ),
+      );
+      if (detailPage == null) return workspacePage;
+      return Row(
+        key: const Key('details-right-panel'),
+        children: [
+          Expanded(child: workspacePage),
+          VerticalDivider(width: 1, color: context.pal.line),
+          SizedBox(
+            width: (size.maxWidth * 0.42).clamp(360.0, 520.0),
+            child: detailPage,
+          ),
+        ],
       );
     },
   );

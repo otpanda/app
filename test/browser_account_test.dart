@@ -9,7 +9,23 @@ import 'package:otpanda_client/browser_session_contract.dart';
 import 'package:otpanda_client/extension_connect.dart';
 import 'package:otpanda_client/session_contract.dart';
 
-class Bridge implements BrowserSessionBridge, SessionViewBridge {
+class Bridge
+    implements
+        BrowserSessionBridge,
+        SessionViewBridge,
+        RealtimeBridge,
+        EntryManagementBridge {
+  @override
+  Future<void> renameEntry(String id, String label) async {}
+  @override
+  Future<void> updateAccount(String id, String? account) async {}
+  void Function(String)? contentHint;
+  @override
+  void Function() realtimeSubscribe(void Function(String) listener) {
+    contentHint = listener;
+    return () => contentHint = null;
+  }
+
   @override
   int restoredView = 0;
   @override
@@ -19,13 +35,15 @@ class Bridge implements BrowserSessionBridge, SessionViewBridge {
 
   @override
   String status = 'idle';
+  final readPaths = <String>[];
   int reads = 0, prompts = 0, logouts = 0;
   bool denied = false;
   int? clockNow;
   int lifetime = 60000;
   int copyReceipts = 0, organizationWrites = 0, organizationReads = 0;
   Completer<SessionResponse>? pendingReceipt, pendingSession;
-  bool conflict = false, organizationDenied = false;
+  bool conflict = false, organizationDenied = false, organizationThrows = false;
+  int attemptedOrganizationWrites = 0;
   Map<String, dynamic> cloud = {
     'revision': 0,
     'tags': [],
@@ -60,6 +78,8 @@ class Bridge implements BrowserSessionBridge, SessionViewBridge {
     if (organizationDenied) return const SessionResponse(401, '{}');
     if (method == 'GET') organizationReads++;
     if (method == 'PUT') {
+      attemptedOrganizationWrites++;
+      if (organizationThrows) throw StateError('lost response after dispatch');
       if (conflict) return const SessionResponse(409, '{}');
       final data = jsonDecode(body) as Map<String, dynamic>;
       organizationWrites++;
@@ -82,6 +102,7 @@ class Bridge implements BrowserSessionBridge, SessionViewBridge {
   @override
   Future<SessionResponse> read(String path) async {
     reads++;
+    readPaths.add(path);
     if (path == '/v1/manage/session' && pendingSession != null) {
       return pendingSession!.future;
     }
@@ -129,7 +150,143 @@ class ExtensionBridge extends Bridge implements ExtensionConnectBridge {
   }
 }
 
+Future<void> signOut(WidgetTester t) async {
+  await t.tap(find.byTooltip('Account & security'));
+  await t.pumpAndSettle();
+  await t.scrollUntilVisible(
+    find.byKey(const Key('browser-sign-out')),
+    300,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await t.ensureVisible(find.byKey(const Key('browser-sign-out')));
+  await t.pumpAndSettle();
+  await t.tap(find.byKey(const Key('browser-sign-out')));
+}
+
+double readingOrder(WidgetTester t, Finder f) {
+  final p = t.getTopLeft(f);
+  return p.dy * 10000 + p.dx;
+}
+
 void main() {
+  for (final fails in [false, true]) {
+    testWidgets(
+      'dispatched cloud tag PUT with lost response stays unknown and cannot resend',
+      (t) async {
+        final b = Bridge()
+          ..status = 'restored'
+          ..clockNow = 100000
+          ..organizationThrows = true
+          ..entries = [
+            {
+              'entry_id': 'a',
+              'service_name': 'Account',
+              'capabilities': {'manage': true},
+            },
+          ]
+          ..cloud = {
+            'revision': 0,
+            'tags': [
+              {'id': 'work', 'label': 'Work'},
+            ],
+            'entries': [
+              {
+                'entryId': 'a',
+                'pinned': false,
+                'tagIds': ['work'],
+              },
+            ],
+            'ranking': [],
+          };
+        await t.pumpWidget(
+          MaterialApp(
+            home: BrowserAccountPage(
+              bridge: b,
+              accountOnly: true,
+              workspaceEnabled: true,
+              entryEditEnabled: true,
+              clock: () => 100000,
+              navigation: 'accounts/YQ',
+            ),
+          ),
+        );
+        await t.pumpAndSettle();
+        await t.tap(find.byKey(const Key('entry-edit')));
+        await t.pumpAndSettle();
+        await t.tap(find.byTooltip('Remove Work'));
+        await t.pumpAndSettle();
+        await t.tap(find.byKey(const Key('entry-save')));
+        await t.pumpAndSettle();
+        expect(find.textContaining('Could not confirm tags.'), findsWidgets);
+        expect(find.textContaining('Tags were not saved.'), findsNothing);
+        expect(b.attemptedOrganizationWrites, 1);
+        expect(
+          t.widget<FilledButton>(find.byKey(const Key('entry-save'))).onPressed,
+          isNull,
+        );
+        await t.pump(const Duration(seconds: 2));
+        expect(b.attemptedOrganizationWrites, 1);
+      },
+    );
+    testWidgets(
+      'real Details bottom Save awaits cloud organization persistence failure=$fails',
+      (t) async {
+        final b = Bridge()
+          ..status = 'restored'
+          ..clockNow = 100000
+          ..conflict = fails
+          ..entries = [
+            {
+              'entry_id': 'a',
+              'service_name': 'Account',
+              'capabilities': {'manage': true},
+            },
+          ]
+          ..cloud = {
+            'revision': 0,
+            'tags': [
+              {'id': 'work', 'label': 'Work'},
+            ],
+            'entries': [
+              {
+                'entryId': 'a',
+                'pinned': false,
+                'tagIds': ['work'],
+              },
+            ],
+            'ranking': [],
+          };
+        await t.pumpWidget(
+          MaterialApp(
+            home: BrowserAccountPage(
+              bridge: b,
+              accountOnly: true,
+              workspaceEnabled: true,
+              entryEditEnabled: true,
+              clock: () => 100000,
+              navigation: 'accounts/YQ',
+            ),
+          ),
+        );
+        await t.pumpAndSettle();
+        await t.tap(find.byKey(const Key('entry-edit')));
+        await t.pumpAndSettle();
+        await t.tap(find.byTooltip('Remove Work'));
+        await t.pumpAndSettle();
+        expect(b.organizationWrites, 0);
+        await t.tap(find.byKey(const Key('entry-save')));
+        await t.pumpAndSettle();
+        if (fails) {
+          expect(find.textContaining('Tags were not saved.'), findsOneWidget);
+          expect(b.organizationWrites, 0);
+          expect((b.cloud['entries'] as List).single['tagIds'], ['work']);
+        } else {
+          expect(b.organizationWrites, 1);
+          expect((b.cloud['entries'] as List).single['tagIds'], isEmpty);
+        }
+      },
+    );
+  }
   testWidgets('a pending extension intent needs one explicit Connect press', (
     t,
   ) async {
@@ -189,6 +346,7 @@ void main() {
           bridge: bridge,
           accountOnly: true,
           workspaceEnabled: true,
+          navigation: 'settings',
         ),
       ),
     );
@@ -197,7 +355,7 @@ void main() {
     expect(find.text('Temporary diagnostics'), findsNothing);
     await t.tap(find.byTooltip('Back to codes'));
     await t.pumpAndSettle();
-    expect(bridge.restoredView, 0);
+    expect(bridge.restoredView, 4); // obsolete view slot is no longer written
     expect(find.byKey(const Key('product-top-bar')), findsOneWidget);
     await t.pumpWidget(const SizedBox.shrink());
     expect(t.takeException(), isNull);
@@ -335,12 +493,20 @@ void main() {
   ) async {
     final b = Bridge()..status = 'signup-ready';
     await t.pumpWidget(
-      MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          workspaceEnabled: true,
+          navigation: 'codes',
+          loginEnabled: true,
+        ),
+      ),
     );
     await t.pumpAndSettle();
-    expect(find.text('Create passkey'), findsOneWidget);
+    expect(find.text('Create my passkey'), findsOneWidget);
     expect(b.prompts, 0);
-    await t.tap(find.text('Create passkey'));
+    await t.tap(find.text('Create my passkey'));
     await t.pumpAndSettle();
     expect(b.prompts, 1);
     await t.pumpWidget(const SizedBox());
@@ -365,7 +531,7 @@ void main() {
         find.textContaining(
           status == 'check-clock-or-restart'
               ? 'Check your device date'
-              : 'Passkey setup did not finish',
+              : 'Sign-in did not finish',
         ),
         findsOneWidget,
       );
@@ -376,34 +542,64 @@ void main() {
   testWidgets('disabled connection is separate and does not launch auth', (
     t,
   ) async {
-    await t.pumpWidget(MaterialApp(home: BrowserAccountPage(bridge: Bridge())));
+    final b = Bridge();
+    await t.pumpWidget(MaterialApp(home: BrowserAccountPage(bridge: b)));
     await t.pumpAndSettle();
     expect(find.textContaining('not enabled'), findsNothing);
     expect(find.textContaining('not available in this stage'), findsNothing);
-    expect(find.text('No active browser access.'), findsOneWidget);
+    expect(
+      find.text(
+        'Your codes, wherever you need them. Sign in or get started below.',
+      ),
+      findsOneWidget,
+    );
     expect(
       t
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Sign in with passkey'),
+          .widget<OutlinedButton>(
+            find.widgetWithText(OutlinedButton, 'Sign in with a passkey'),
           )
           .onPressed,
-      isNull,
+      isNotNull,
     );
+    expect(b.prompts, 0);
+    expect(b.reads, 0);
   });
   testWidgets(
-    'restored session loads once, refreshes automatically and signs out',
+    'restored workspace reads once, realtime hint refreshes and server signout clears',
     (t) async {
-      final b = Bridge()..status = 'restored';
+      var clock = 100000;
+      final b = Bridge()
+        ..status = 'restored'
+        ..clockNow = clock;
       await t.pumpWidget(
-        MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+        MaterialApp(
+          home: BrowserAccountPage(
+            bridge: b,
+            clock: () => clock,
+            accountOnly: true,
+            workspaceEnabled: true,
+            navigation: 'codes',
+            loginEnabled: true,
+          ),
+        ),
       );
       await t.pumpAndSettle();
-      expect(b.reads, 5);
+      expect(
+        b.readPaths.where((p) => p == '/v1/manage/active-codes').length,
+        1,
+      );
       expect(find.text('Refresh real codes'), findsNothing);
-      await t.pump(const Duration(seconds: 31));
+      clock += 31000;
+      await t.pump(const Duration(seconds: 1));
+      expect(b.contentHint, isNotNull);
+      b.contentHint!.call('changed');
+      await t.pump(const Duration(seconds: 1));
       await t.pumpAndSettle();
-      expect(b.reads, 10);
-      await t.tap(find.text('Sign out'));
+      expect(
+        b.readPaths.where((p) => p == '/v1/manage/active-codes').length,
+        2,
+      );
+      await signOut(t);
       await t.pumpAndSettle();
       expect(b.logouts, 1);
       expect(find.text('Clear local access'), findsNothing);
@@ -415,21 +611,37 @@ void main() {
   ) async {
     final b = Bridge()..status = 'passkey-ready';
     await t.pumpWidget(
-      MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          workspaceEnabled: true,
+          navigation: 'codes',
+          loginEnabled: true,
+        ),
+      ),
     );
     await t.pumpAndSettle();
-    await t.tap(find.text('Use passkey'));
+    await t.tap(find.text('Continue with passkey'));
     await t.pumpAndSettle();
     expect(b.prompts, 1);
     expect(b.reads, 0);
-    expect(find.textContaining('did not finish'), findsOneWidget);
+    expect(find.textContaining('Sign in'), findsWidgets);
   });
   testWidgets('401 stops real data load and updates status', (t) async {
     final b = Bridge()
       ..status = 'restored'
       ..denied = true;
     await t.pumpWidget(
-      MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          workspaceEnabled: true,
+          navigation: 'codes',
+          loginEnabled: true,
+        ),
+      ),
     );
     await t.pumpAndSettle();
     expect(b.reads, 1);
@@ -438,10 +650,18 @@ void main() {
   testWidgets('server signout is the only visible exit action', (t) async {
     final b = Bridge()..status = 'restored';
     await t.pumpWidget(
-      MaterialApp(home: BrowserAccountPage(bridge: b, loginEnabled: true)),
+      MaterialApp(
+        home: BrowserAccountPage(
+          bridge: b,
+          accountOnly: true,
+          workspaceEnabled: true,
+          navigation: 'codes',
+          loginEnabled: true,
+        ),
+      ),
     );
     await t.pumpAndSettle();
-    await t.tap(find.text('Sign out'));
+    await signOut(t);
     await t.pumpAndSettle();
     expect(b.logouts, 1);
     expect(b.status, 'idle');
@@ -470,16 +690,25 @@ void main() {
       final b = privateBridge(clock);
       await t.pumpWidget(
         MaterialApp(
-          home: BrowserAccountPage(bridge: b, clock: () => clock),
+          home: BrowserAccountPage(
+            bridge: b,
+            clock: () => clock,
+            accountOnly: true,
+            workspaceEnabled: true,
+          ),
         ),
       );
       await t.pumpAndSettle();
-      expect(find.text('654321'), findsOneWidget);
+      expect(find.text('654 321'), findsOneWidget);
+      expect(find.text('Only you'), findsOneWidget);
+      await t.tap(find.byTooltip('Details'));
+      await t.pumpAndSettle();
       expect(find.text('Personal phone'), findsOneWidget);
-      expect(find.textContaining('Only you can see'), findsOneWidget);
+      await t.tap(find.byTooltip('Back to codes'));
+      await t.pumpAndSettle();
       clock += 3000;
       await t.pump(const Duration(seconds: 1));
-      expect(find.text('654321'), findsNothing);
+      expect(find.text('654 321'), findsNothing);
       await t.pumpWidget(const SizedBox());
       await t.pump(const Duration(seconds: 2));
       expect(t.takeException(), isNull);
@@ -496,24 +725,24 @@ void main() {
             key: UniqueKey(),
             bridge: b,
             clock: () => 100000,
+            accountOnly: true,
+            workspaceEnabled: true,
             loginEnabled: true,
           ),
         ),
       );
       await t.pumpAndSettle();
-      expect(find.text('654321'), findsOneWidget);
+      expect(find.text('654 321'), findsOneWidget);
       if (action == 'background') {
         t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
         await t.pump();
         t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       } else {
-        await t.ensureVisible(find.text('Sign out'));
-        await t.pumpAndSettle();
-        await t.tap(find.text('Sign out'));
+        await signOut(t);
       }
       await t.pumpAndSettle();
       expect(
-        find.text('654321'),
+        find.text('654 321'),
         action == 'background' ? findsOneWidget : findsNothing,
       );
     }
@@ -531,14 +760,17 @@ void main() {
     final b = privateBridge(clock);
     await t.pumpWidget(
       MaterialApp(
-        home: BrowserAccountPage(bridge: b, clock: () => clock),
+        home: BrowserAccountPage(
+          bridge: b,
+          clock: () => clock,
+          accountOnly: true,
+          workspaceEnabled: true,
+        ),
       ),
     );
     await t.pumpAndSettle();
     final button = t.widget<IconButton>(
-      find.byWidgetPredicate(
-        (w) => w is IconButton && w.tooltip == 'Copy private code',
-      ),
+      find.byKey(const ValueKey('copy-button-private/phone/event')),
     );
     button.onPressed!();
     await t.pump();
@@ -557,14 +789,19 @@ void main() {
     final b = privateBridge(clock)..lifetime = 1000;
     await t.pumpWidget(
       MaterialApp(
-        home: BrowserAccountPage(bridge: b, clock: () => clock),
+        home: BrowserAccountPage(
+          bridge: b,
+          clock: () => clock,
+          accountOnly: true,
+          workspaceEnabled: true,
+        ),
       ),
     );
     await t.pumpAndSettle();
-    expect(find.text('654321'), findsOneWidget);
+    expect(find.text('654 321'), findsOneWidget);
     clock += 1000;
     await t.pump(const Duration(seconds: 1));
-    expect(find.text('654321'), findsNothing);
+    expect(find.text('654 321'), findsNothing);
     expect(find.text('Browser access expired. Sign in again.'), findsOneWidget);
   });
   testWidgets(
@@ -602,20 +839,24 @@ void main() {
       addTearDown(() => t.binding.setSurfaceSize(null));
       await t.pumpWidget(
         MaterialApp(
-          home: BrowserAccountPage(bridge: b, clock: () => clock),
+          home: BrowserAccountPage(
+            bridge: b,
+            clock: () => clock,
+            accountOnly: true,
+            workspaceEnabled: true,
+          ),
         ),
       );
       await t.pumpAndSettle();
-      expect(find.text('123456'), findsOneWidget);
-      expect(find.textContaining('Read-only · Source hidden'), findsOneWidget);
+      expect(find.text('123 456'), findsOneWidget);
+      expect(find.text('viewer'), findsWidgets);
+      expect(find.text('Only you'), findsOneWidget);
       expect(
-        t.getTopLeft(find.text('654321')).dy,
-        lessThan(t.getTopLeft(find.text('123456')).dy),
-      );
+        find.text('Personal phone'),
+        findsNothing,
+      ); // source only in private Details
       final button = t.widget<IconButton>(
-        find.byWidgetPredicate(
-          (w) => w is IconButton && w.tooltip == 'Copy entry code',
-        ),
+        find.byKey(const ValueKey('copy-button-entry/shared/99000')),
       );
       button.onPressed!();
       await t.pump();
@@ -627,7 +868,7 @@ void main() {
       await t.pump(const Duration(seconds: 1));
       expect(copied, '');
       expect(b.copyReceipts, 1);
-      expect(find.text('123456'), findsNothing);
+      expect(find.text('123 456'), findsNothing);
       expect(find.text('Shared service'), findsOneWidget);
       t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
@@ -677,6 +918,8 @@ void main() {
           home: BrowserAccountPage(
             bridge: b,
             clock: () => 100000,
+            accountOnly: true,
+            workspaceEnabled: true,
             loginEnabled: true,
           ),
         ),
@@ -685,19 +928,23 @@ void main() {
       expect(find.text('Reset copy counts'), findsNothing);
       expect(find.textContaining('confirmed copies'), findsNothing);
       expect(find.textContaining('Sort:'), findsNothing);
-      expect(find.text('Organize your entries'), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
       expect(
-        t.getTopLeft(find.text('Second')).dy,
-        lessThan(t.getTopLeft(find.text('First')).dy),
+        readingOrder(t, find.text('Second')),
+        lessThan(readingOrder(t, find.text('First'))),
       );
-      await t.tap(find.byTooltip('Unpin Second'));
+      await t.longPress(find.text('Second'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Unpin'));
+      await t.pumpAndSettle();
+      await t.tap(find.byTooltip('Clear selection'));
       await t.pumpAndSettle();
       expect(b.organizationWrites, 1);
       expect(
-        t.getTopLeft(find.text('First')).dy,
-        lessThan(t.getTopLeft(find.text('Second')).dy),
+        readingOrder(t, find.text('First')),
+        lessThan(readingOrder(t, find.text('Second'))),
       );
-      await t.tap(find.text('Sign out'));
+      await signOut(t);
       await t.pumpAndSettle();
       expect(find.text('Work'), findsNothing);
     },
@@ -733,15 +980,15 @@ void main() {
         home: BrowserAccountPage(
           bridge: b,
           clock: () => 100000,
+          accountOnly: true,
+          workspaceEnabled: true,
           loginEnabled: true,
         ),
       ),
     );
     await t.pumpAndSettle();
     final button = t.widget<IconButton>(
-      find.byWidgetPredicate(
-        (w) => w is IconButton && w.tooltip == 'Copy entry code',
-      ),
+      find.byKey(const ValueKey('copy-button-entry/e/99000')),
     );
     button.onPressed!();
     await t.pumpAndSettle();
@@ -790,6 +1037,8 @@ void main() {
         home: BrowserAccountPage(
           bridge: b,
           clock: () => 100000,
+          accountOnly: true,
+          workspaceEnabled: true,
           loginEnabled: true,
         ),
       ),
@@ -797,14 +1046,12 @@ void main() {
     await t.pumpAndSettle();
     final before = b.organizationReads;
     final button = t.widget<IconButton>(
-      find.byWidgetPredicate(
-        (w) => w is IconButton && w.tooltip == 'Copy entry code',
-      ),
+      find.byKey(const ValueKey('copy-button-entry/e/99000')),
     );
     button.onPressed!();
     await t.pump();
     expect(b.copyReceipts, 1);
-    await t.tap(find.text('Sign out'));
+    await signOut(t);
     await t.pumpAndSettle();
     pending.complete(const SessionResponse(200, '{"accepted":true}'));
     await t.pumpAndSettle();
@@ -818,12 +1065,14 @@ void main() {
         home: BrowserAccountPage(
           bridge: b,
           clock: () => 100000,
+          accountOnly: true,
+          workspaceEnabled: true,
           loginEnabled: true,
         ),
       ),
     );
     await t.pumpAndSettle();
-    expect(find.text('654321'), findsNothing);
+    expect(find.text('654 321'), findsNothing);
     expect(find.text('Organize your entries'), findsNothing);
   });
   testWidgets(
@@ -855,15 +1104,19 @@ void main() {
           home: BrowserAccountPage(
             bridge: b,
             clock: () => 100000,
+            accountOnly: true,
+            workspaceEnabled: true,
             loginEnabled: true,
           ),
         ),
       );
       await t.pumpAndSettle();
-      await t.tap(find.byTooltip('Pin Example'));
+      await t.longPress(find.text('Example'));
       await t.pumpAndSettle();
-      expect(find.byTooltip('Pin Example'), findsOneWidget);
-      expect(find.byTooltip('Unpin Example'), findsNothing);
+      await t.tap(find.text('Pin'));
+      await t.pumpAndSettle();
+      expect(find.text('Pin'), findsOneWidget);
+      expect(find.text('Unpin'), findsNothing);
       expect(find.textContaining('Organization was not saved'), findsOneWidget);
     },
   );
@@ -896,13 +1149,17 @@ void main() {
         home: BrowserAccountPage(
           bridge: b,
           clock: () => 100000,
+          accountOnly: true,
+          workspaceEnabled: true,
           loginEnabled: true,
         ),
       ),
     );
     await t.pumpAndSettle();
     expect(find.text('not-loaded'), findsNothing);
-    await t.tap(find.byTooltip('Pin Visible'));
+    await t.longPress(find.text('Visible'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Pin'));
     await t.pumpAndSettle();
     expect(b.organizationWrites, 1);
     expect(
