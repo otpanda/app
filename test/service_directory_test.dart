@@ -39,6 +39,13 @@ class MemStore implements DirectoryStore {
   ];
 }
 
+class HeldCatalogStore extends MemStore {
+  Completer<Uint8List?>? gate;
+  @override
+  Future<Uint8List?> read(String key) =>
+      key == 'catalog.json' && gate != null ? gate!.future : super.read(key);
+}
+
 const svg =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#e00"/></svg>';
 final catalog = jsonEncode([
@@ -145,6 +152,169 @@ void main() {
   });
 
   group('catalogue load and cache', () {
+    test('concurrent forced refreshes share one request', () async {
+      var calls = 0;
+      Completer<http.Response>? gate;
+      final store = MemStore();
+      final d = ServiceDirectory(
+        store: store,
+        bundledText: noBundle,
+        client: () => MockClient((_) async {
+          calls++;
+          return gate?.future ?? http.Response(catalog, 200);
+        }),
+      );
+      await d.ensureLoaded();
+      expect(calls, 1);
+      gate = Completer<http.Response>();
+      final first = d.refresh();
+      final second = d.refresh();
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        calls,
+        2,
+        reason: 'one initial request and one coalesced forced refresh',
+      );
+      gate.complete(http.Response(catalog, 200));
+      await Future.wait([first, second]);
+      d.dispose();
+    });
+    test('refresh during initial load joins it; later explicit refresh still fetches', () async {
+      var calls = 0;
+      final gate = Completer<http.Response>();
+      final d = ServiceDirectory(
+        useDefaultStore: false,
+        bundledText: noBundle,
+        client: () => MockClient((_) async {
+          calls++;
+          return calls == 1 ? gate.future : http.Response(catalog, 200);
+        }),
+      );
+      final initial = d.ensureLoaded();
+      final refresh = d.refresh();
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, 1);
+      gate.complete(http.Response(catalog, 200));
+      await Future.wait([initial, refresh]);
+      await d.ensureLoaded();
+      expect(calls, 1);
+      await d.refresh();
+      expect(calls, 2);
+      d.dispose();
+    });
+    test(
+      'failed forced refresh releases the slot for an explicit retry',
+      () async {
+        var calls = 0;
+        final d = ServiceDirectory(
+          useDefaultStore: false,
+          bundledText: noBundle,
+          client: () => MockClient((_) async {
+            calls++;
+            return http.Response(
+              calls == 2 ? 'unavailable' : catalog,
+              calls == 2 ? 503 : 200,
+            );
+          }),
+        );
+        await d.ensureLoaded();
+        await d.refresh();
+        expect(d.lookup('Github'), isNotNull);
+        await d.refresh();
+        expect(calls, 3);
+        d.dispose();
+      },
+    );
+    test(
+      'explicit refresh upgrades held fresh-cache load and coalesces its GET',
+      () async {
+        final store = HeldCatalogStore();
+        final now = DateTime.utc(2026, 1, 1);
+        final raw = Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'at': now.millisecondsSinceEpoch,
+              'etag': 'fresh',
+              'rows': [
+                {
+                  'n': 'Github',
+                  'd': ['github.com'],
+                  'i': 'github.com.svg',
+                },
+              ],
+            }),
+          ),
+        );
+        final cacheGate = Completer<Uint8List?>();
+        store.gate = cacheGate;
+        final networkGate = Completer<http.Response>();
+        var calls = 0;
+        final d = ServiceDirectory(
+          store: store,
+          now: () => now,
+          bundledText: noBundle,
+          client: () => MockClient((_) async {
+            calls++;
+            return networkGate.future;
+          }),
+        );
+        final initial = d.ensureLoaded();
+        final a = d.refresh();
+        final b = d.refresh();
+        cacheGate.complete(raw);
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          calls,
+          1,
+          reason: 'explicit refresh must not be swallowed by fresh cache',
+        );
+        final c = d.refresh();
+        expect(calls, 1);
+        networkGate.complete(http.Response(catalog, 200));
+        await Future.wait([initial, a, b, c]);
+        expect(calls, 1);
+        d.dispose();
+      },
+    );
+    test('refresh from final fresh-cache listener is not lost', () async {
+      final store = MemStore();
+      final now = DateTime.utc(2026, 1, 1);
+      await store.write(
+        'catalog.json',
+        Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'at': now.millisecondsSinceEpoch,
+              'rows': [
+                {
+                  'n': 'Github',
+                  'd': ['github.com'],
+                  'i': 'github.com.svg',
+                },
+              ],
+            }),
+          ),
+        ),
+      );
+      var calls = 0;
+      final d = ServiceDirectory(
+        store: store,
+        now: () => now,
+        bundledText: noBundle,
+        client: () => MockClient((_) async {
+          calls++;
+          return http.Response(catalog, 200);
+        }),
+      );
+      Future<void>? joined;
+      d.addListener(() {
+        if (d.loaded && joined == null) joined = d.refresh();
+      });
+      await d.ensureLoaded();
+      await joined;
+      expect(calls, 1);
+      d.dispose();
+    });
     test('network fills cache; fresh cache means no second request', () async {
       final store = MemStore();
       var calls = 0;

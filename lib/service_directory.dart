@@ -199,6 +199,8 @@ class ServiceDirectory extends ChangeNotifier {
   Map<String, DirectoryService?> _byHost = const {};
   bool _loaded = false;
   Future<void>? _loading;
+  Future<void>? _activeLoad;
+  bool _forceRequested = false, _fetchingCatalog = false;
   final _ready = Completer<void>();
   String source = 'none'; // cache | network | bundled | none
   int fetchedAtMs = 0;
@@ -209,7 +211,7 @@ class ServiceDirectory extends ChangeNotifier {
   bool get loaded => _loaded;
 
   /// Idempotent; safe to call from every avatar. Never throws.
-  Future<void> ensureLoaded() => _loading ??= _load();
+  Future<void> ensureLoaded() => _loading ??= _startLoad();
 
   /// Completes once the cache (or the bundled snapshot) is in place, without
   /// waiting for the network. UI that must not hang on a slow connection
@@ -220,8 +222,24 @@ class ServiceDirectory extends ChangeNotifier {
   }
 
   Future<void> refresh() {
-    _loading = _load(force: true);
+    // Upgrade a cache-read flight before its freshness decision. If its GET
+    // already started, join that GET instead of queuing another one.
+    if (_activeLoad != null && !_fetchingCatalog) _forceRequested = true;
+    _loading = _activeLoad ?? _startLoad(force: true);
     return _loading!;
+  }
+
+  Future<void> _startLoad({bool force = false}) {
+    late final Future<void> operation;
+    operation = _load(force: force).whenComplete(() {
+      if (identical(_activeLoad, operation)) {
+        _activeLoad = null;
+        _forceRequested = false;
+        _fetchingCatalog = false;
+      }
+    });
+    _activeLoad = operation;
+    return operation;
   }
 
   Future<void> _load({bool force = false}) async {
@@ -272,11 +290,22 @@ class ServiceDirectory extends ChangeNotifier {
         cached != null &&
         age >= 0 &&
         age < DirectoryLimits.catalogTtl.inMilliseconds;
-    if (!fresh || force) {
+    final fetch = !fresh || force || _forceRequested;
+    _forceRequested = false;
+    if (fetch) {
+      _fetchingCatalog = true;
       await _fetchCatalog(cached, etag);
     }
     _loaded = true;
     notifyListeners();
+    // A synchronous completion listener can explicitly request refresh after
+    // the freshness decision but before this flight has returned.
+    if (_forceRequested && !_fetchingCatalog) {
+      _forceRequested = false;
+      _fetchingCatalog = true;
+      await _fetchCatalog(cached, etag);
+      notifyListeners();
+    }
   }
 
   Future<void> _applyBundled() async {
