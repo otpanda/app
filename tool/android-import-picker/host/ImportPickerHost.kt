@@ -13,7 +13,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
 import org.otpanda.documentimport.ImportReply
-import org.otpanda.documentimport.ImportSession
+import org.otpanda.documentimport.ImportController
 import java.util.concurrent.Executors
 
 /**
@@ -31,8 +31,8 @@ class ImportPickerHost : FlutterPlugin, ActivityAware, PluginRegistry.ActivityRe
     private val worker = Executors.newSingleThreadExecutor()
     private var binding: ActivityPluginBinding? = null
     private var channel: MethodChannel? = null
-    private val session = ImportSession(
-        launch = ::startPicker,
+    private val session = ImportController(
+        startActivity = ::startPicker,
         worker = worker,
         post = { main.post(it) },
     )
@@ -68,13 +68,13 @@ class ImportPickerHost : FlutterPlugin, ActivityAware, PluginRegistry.ActivityRe
         }
     }
 
-    private fun startPicker(): Boolean {
+    private fun startPicker(code: Int): Boolean {
         val activity: Activity = binding?.activity ?: return false
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("*/*")
         return try {
-            activity.startActivityForResult(intent, REQUEST_CODE)
+            activity.startActivityForResult(intent, code)
             true
         } catch (_: ActivityNotFoundException) {
             false
@@ -84,23 +84,16 @@ class ImportPickerHost : FlutterPlugin, ActivityAware, PluginRegistry.ActivityRe
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
-        if (requestCode != REQUEST_CODE) return false
+        // Codes are per launch (see PickerRequests); a result from an older launch is consumed and dropped unread.
         val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
         val activity = binding?.activity
-        if (uri == null || activity == null) {
-            session.onPicked(null)
-        } else {
-            val resolver = activity.applicationContext.contentResolver
-            session.onPicked { resolver.openInputStream(uri) }
-        }
-        return true
+        if (uri == null || activity == null) return session.onResult(requestCode, null)
+        val resolver = activity.applicationContext.contentResolver
+        return session.onResult(requestCode) { resolver.openInputStream(uri) }
     }
 
     companion object {
         const val CHANNEL = "app.otpanda/import-file"
-        // Distinct from other request codes in the app (passkey and Google flows do not use startActivityForResult).
-        const val REQUEST_CODE = 0x07A1
-
         /** One line in MainActivity.configureFlutterEngine, after the other hosts. */
         fun register(engine: FlutterEngine) { engine.plugins.add(ImportPickerHost()) }
     }

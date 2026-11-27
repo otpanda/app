@@ -8,6 +8,7 @@ import java.nio.CharBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Flutter-free and Android-free core of the Android import file picker.
@@ -210,4 +211,75 @@ class ImportSession(private val launch: () -> Boolean, private val worker: Execu
 
     /** For tests: true while a system picker launched by this session has not delivered its result. */
     fun pickerOutstanding(): Boolean = synchronized(lock) { pickerOpen }
+}
+
+/**
+ * Attributes a system-picker result to the launch that asked for it. Each launch gets its own request code from a counter
+ * shared by the whole process ([ImportController.PROCESS_COUNTER]). Codes are never reused within the process: the counter
+ * only moves forward through a reserved block of [size] values inside the lower 16 bits (the legacy Activity and
+ * FlutterFragmentActivity request-code limit), so a result from a picker launched by an earlier engine, activity or request
+ * (after recreation or cancel) can never alias a later launch. When the block is used up, [issue] fails closed (returns
+ * [NONE]) and the request reports "unavailable" until the process restarts, which is the only point at which no stale
+ * result can still exist.
+ */
+class PickerRequests(private val counter: AtomicInteger, private val size: Int = SIZE) {
+    private val lock = Any()
+    private var outstanding = NONE
+
+    /** A fresh code, or [NONE] when the reserved block is exhausted (never wraps, never reuses). */
+    fun issue(): Int = synchronized(lock) {
+        outstanding = NONE
+        while (true) {
+            val n = counter.get()
+            if (n >= size) return NONE
+            if (counter.compareAndSet(n, n + 1)) { outstanding = BASE + n; return outstanding }
+        }
+        @Suppress("UNREACHABLE_CODE") NONE
+    }
+    fun forget() = synchronized(lock) { outstanding = NONE }
+    /** True when [code] is in this feature's block, whether or not it is the current launch. */
+    fun owns(code: Int): Boolean = code >= BASE && code < BASE + size
+    /** True exactly once, for the current launch's code. Any other owned code is stale. */
+    fun accept(code: Int): Boolean = synchronized(lock) { if (code != NONE && code == outstanding) { outstanding = NONE; true } else false }
+
+    companion object {
+        /** Reserved block 0x7800..0x7BFF: below 0x10000, 1024 launches per process. */
+        const val BASE = 0x7800
+        const val SIZE = 0x0400
+        const val NONE = -1
+    }
+}
+
+/**
+ * The host's decision logic without Android types: launch with a fresh request code, route results by code. [startActivity]
+ * returns false if the picker cannot be started. Stale or foreign results are dropped unread.
+ */
+class ImportController(
+    private val startActivity: (Int) -> Boolean,
+    worker: Executor,
+    post: (Runnable) -> Unit,
+    counter: AtomicInteger = PROCESS_COUNTER,
+    size: Int = PickerRequests.SIZE,
+) {
+    private val requests = PickerRequests(counter, size)
+    private val session = ImportSession({
+        val code = requests.issue()
+        val ok = code != PickerRequests.NONE && startActivity(code)
+        if (!ok) requests.forget()
+        ok
+    }, worker, post)
+
+    fun begin(r: ImportReply) = session.begin(r)
+    fun cancel() = session.cancel()
+    fun retire() { session.retire(); requests.forget() }
+    fun active(): Boolean = session.active()
+
+    /** Returns true when the code belongs to this feature (consumed, even if dropped); false leaves it to other listeners. */
+    fun onResult(code: Int, open: (() -> InputStream?)?): Boolean {
+        if (!requests.owns(code)) return false
+        if (requests.accept(code)) session.onPicked(open)
+        return true
+    }
+
+    companion object { val PROCESS_COUNTER = AtomicInteger() }
 }

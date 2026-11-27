@@ -237,6 +237,72 @@ fun main() {
         s2.onPicked { Tracked("after-background".toByteArray()) }
         check(b.events == listOf("text:after-background"), "selection after the app returns from the picker is delivered")
     }
+    // Controller: per-launch request codes, engine recreation, rotation, normal return.
+    run {
+        val counter = AtomicInteger()
+        val codes = ArrayList<Int>()
+        fun ctl(ok: Boolean = true) = ImportController({ codes.add(it); ok }, inline, post, counter)
+        // normal return
+        val a = ctl(); val la = Log(); a.begin(la)
+        check(a.onResult(codes.last(), { Tracked("ok".toByteArray()) }) && la.events == listOf("text:ok"), "normal picker return delivers once")
+        a.onResult(codes.last(), { Tracked("again".toByteArray()) })
+        check(la.events == listOf("text:ok"), "a second result for the same launch is not delivered")
+        // foreign request codes are left to other listeners
+        check(!a.onResult(1234, null) && !a.onResult(PickerRequests.BASE - 1, null) && !a.onResult(PickerRequests.BASE + PickerRequests.SIZE, null), "foreign codes not consumed")
+        // rotation: same controller, result arrives later with the launch's code
+        val r = ctl(); val lr = Log(); r.begin(lr); val rc = codes.last()
+        check(lr.events.isEmpty() && r.active(), "rotation keeps the request waiting")
+        check(r.onResult(rc, { Tracked("rotated".toByteArray()) }) && lr.events == listOf("text:rotated"), "result after rotation delivered")
+        // permanent recreation: old engine retired, new engine begins its own picker, then the OLD picker's result arrives
+        val oldEngine = ctl(); val lo = Log(); oldEngine.begin(lo); val oldCode = codes.last()
+        oldEngine.retire()
+        check(lo.events == listOf("cancelled"), "retired engine's request answered cancelled")
+        val newEngine = ctl(); val ln = Log(); newEngine.begin(ln); val newCode = codes.last()
+        check(oldCode != newCode, "new launch has a different request code than the old one")
+        var opened = 0
+        check(newEngine.onResult(oldCode, { opened++; Tracked("OLD".toByteArray()) }), "old result consumed")
+        check(opened == 0 && ln.events.isEmpty() && newEngine.active(), "old picker result after recreation never reaches the new request")
+        check(newEngine.onResult(newCode, { Tracked("NEW".toByteArray()) }) && ln.events == listOf("text:NEW"), "the new picker's own result is delivered")
+        // old result reaches a fresh engine that has not begun anything
+        val old2 = ctl(); old2.begin(Log()); val c2 = codes.last(); old2.retire()
+        val idle = ctl()
+        check(idle.onResult(c2, { opened++; Tracked("x".toByteArray()) }) && opened == 0, "old result to an idle engine dropped unread")
+        // cancel then new begin on same engine: busy, and the old result still cannot reach anyone
+        val c = ctl(); val lc = Log(); c.begin(lc); val cc = codes.last(); c.cancel()
+        val lb = Log(); c.begin(lb)
+        check(lb.events == listOf("error:busy") && codes.last() == cc, "begin after cancel with old picker open is busy, no new launch")
+        check(c.onResult(cc, { opened++; Tracked("c".toByteArray()) }) && opened == 0 && lc.events == listOf("cancelled"), "old result after cancel dropped")
+        // failed launch forgets the code
+        val f = ctl(false); val lf = Log(); f.begin(lf)
+        val failedCode = codes.last()
+        check(lf.events == listOf("error:unavailable"), "failed launch reports unavailable")
+        f.onResult(failedCode, { Tracked("z".toByteArray()) })
+        check(lf.events == listOf("error:unavailable"), "result for a failed launch is dropped")
+        check(PickerRequests.BASE >= 0 && PickerRequests.BASE + PickerRequests.SIZE <= 0x10000, "block fits the lower 16 bits")
+        // exhaustion fails closed and never reuses a code, even after retire and a new controller
+        val small = AtomicInteger(); val used = ArrayList<Int>()
+        fun sc() = ImportController({ used.add(it); true }, inline, post, small, 3)
+        val e1 = sc(); val l1 = Log(); e1.begin(l1); e1.onResult(used.last(), null)
+        val l2 = Log(); e1.begin(l2); e1.cancel(); e1.retire()
+        val e2 = sc(); val l3 = Log(); e2.begin(l3)
+        check(used == listOf(PickerRequests.BASE, PickerRequests.BASE + 1, PickerRequests.BASE + 2), "codes advance, none reused across controllers")
+        e2.onResult(used.last(), { Tracked("last".toByteArray()) })
+        val e3 = sc(); val l4 = Log(); e3.begin(l4)
+        check(l4.events == listOf("error:unavailable") && used.size == 3 && !e3.active(), "exhausted block fails closed with no launch")
+        val before = l4.events.size
+        check(!e3.onResult(PickerRequests.BASE + 3, { Tracked("q".toByteArray()) }) && l4.events.size == before, "code beyond the block is not owned")
+        for (c in used) { var o = 0; e3.onResult(c, { o++; Tracked("stale".toByteArray()) }); check(o == 0, "stale code $c cannot reach a later request") }
+        // counter never moves past the block, even under repeated exhausted begins
+        repeat(5) { sc().begin(Log()) }
+        check(small.get() == 3, "counter stops at the block size")
+        // concurrent issue: all distinct, none beyond the block
+        val big = AtomicInteger(); val seenCodes = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+        val ts = (1..8).map { Thread { val r = PickerRequests(big, 200); repeat(40) { val c = r.issue(); if (c != PickerRequests.NONE) check(seenCodes.add(c), "duplicate code") } } }
+        ts.forEach { it.start() }; ts.forEach { it.join() }
+        check(seenCodes.size == 200 && big.get() == 200, "concurrent issuers get 200 distinct codes and stop")
+        val seen = codes.toSet().size
+        check(seen == codes.size, "every launch in the process used a distinct code")
+    }
     // a slow read finishing after cancel and after a new begin is dropped
     run {
         val gate = CountDownLatch(1)
