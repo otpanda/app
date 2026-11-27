@@ -11,6 +11,14 @@ import '../offline_totp/android_wrapping_key_store.dart';
 import '../offline_totp/native_offline_workspace_runtime.dart';
 import 'native_workspace_admission.dart';
 import 'native_workspace_coordinator.dart';
+import 'native_offline_enrollment.dart';
+import 'native_offline_setting.dart';
+import '../offline_totp/seed_sync_channel.dart';
+import '../offline_totp/seed_enrollment_coordinator.dart';
+import '../offline_totp/seed_enrollment_http.dart';
+import '../offline_totp/seed_status_channel.dart';
+import '../offline_totp/seed_status_coordinator.dart';
+import '../offline_totp/seed_status_http.dart';
 import 'native_offline_workspace_page.dart';
 
 import 'dart:io' show Platform;
@@ -40,6 +48,10 @@ import 'native_session.dart';
 /// Native sign-in, entry editing and settings are supported product behavior.
 /// They do not depend on opt-in build flags. Device enrollment/step-up remains
 /// separately gated until its independent qualification is complete.
+// Staging switch until the matching server seed-sync routes are deployed and
+// authenticated enrollment is qualified. Local cold storage has its own host.
+const nativeSeedSyncEnabled = bool.fromEnvironment('NATIVE_SEED_SYNC_ENABLED');
+
 const String apiOrigin = String.fromEnvironment(
   'OTPANDA_API_ORIGIN',
   defaultValue: 'https://otpanda-api.abrahammurciano.workers.dev',
@@ -82,6 +94,16 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   late final NativeWorkspaceCoordinator workspace;
   late final NativeOfflineWorkspaceRuntime offlineRuntime;
   bool _admitting = false;
+  late final NativeOfflineEnrollment offlineEnrollment;
+  late final SeedStatusCoordinator offlineStatus;
+  String? _onlineOwner;
+  Future<bool> _currentOfflineOwner(String owner) async =>
+      mounted &&
+      _onlineOwner == owner &&
+      controller.phase == NativeSessionPhase.signedIn &&
+      localLock.ready &&
+      !localLock.locked &&
+      localLock.foreground;
   void _workspaceChanged() {
     if (mounted) setState(() {});
   }
@@ -113,6 +135,9 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
             controller.phase != NativeSessionPhase.signedIn) {
           return;
         }
+        _onlineOwner = owner;
+        offlineEnrollment.bindOwner(owner);
+        await offlineEnrollment.refresh();
         await workspace.admitAuthenticated(owner);
       }
     } catch (_) {
@@ -123,6 +148,8 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
 
   Future<void> _signOut() async {
     try {
+      _onlineOwner = null;
+      offlineEnrollment.bindOwner(null);
       await workspace.invalidate();
       await controller.signOut();
     } catch (_) {
@@ -212,6 +239,40 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
       locallyUnlocked: () =>
           localLock.ready && !localLock.locked && localLock.foreground,
     );
+    const seedChannel = MethodChannel('app.otpanda/seed-custody');
+    final seedNative = SeedSyncChannel(seedChannel);
+    final statusNative = SeedStatusChannel(seedChannel);
+    final statusTransport = SeedStatusHttp();
+    offlineStatus = SeedStatusCoordinator(statusTransport, statusNative);
+    final seedApi = SeedEnrollmentHttp(
+      post: bridge.seedEnrollmentPost,
+      statusTransport: statusTransport,
+      signStatus:
+          ({
+            required owner,
+            required keyId,
+            required challenge,
+            required expiresAt,
+          }) => statusNative.signStatus(
+            owner: owner,
+            askedKeyId: keyId,
+            challenge: challenge,
+            expiresAt: expiresAt,
+          ),
+    );
+    offlineEnrollment = NativeOfflineEnrollment(
+      enrollment: SeedEnrollmentCoordinator(
+        native: SeedEnrollmentNativeAdapter(seedNative),
+        api: seedApi,
+        passkey: SeedPasskeyStepUp(passkeys),
+        isCurrent: _currentOfflineOwner,
+      ),
+      custody: AndroidSeedCustody(),
+      sync: seedNative,
+      isCurrent: _currentOfflineOwner,
+      installId: () =>
+          SeedInstallId(SeedInstallIdChannelStore(seedChannel)).get(),
+    );
     workspace.addListener(_workspaceChanged);
     offlineRuntime.addListener(_workspaceChanged);
     _workspaceInitialized = true;
@@ -257,6 +318,10 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     }
     // Only a real sign-out or sign-in-required clears state and the retry
     // floor. unknown (starting) and offline are transient: nothing changes.
+    if (controller.phase != NativeSessionPhase.signedIn) {
+      _onlineOwner = null;
+      offlineEnrollment.bindOwner(null);
+    }
     switch (controller.phase) {
       case NativeSessionPhase.signedIn:
         unawaited(_admitWorkspace());
@@ -278,6 +343,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       bridge.realtimeSetForeground(true);
+      if (nativeSeedSyncEnabled) unawaited(offlineStatus.checkAll());
       workspace.localLockChanged();
       unawaited(_admitWorkspace());
     } else if (state != AppLifecycleState.inactive) {
@@ -295,6 +361,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     bridge.disposeRealtime();
     workspace.removeListener(_workspaceChanged);
     offlineRuntime.removeListener(_workspaceChanged);
+    offlineEnrollment.dispose();
     workspace.dispose();
     offlineRuntime.dispose();
     navigationHistory.dispose();
@@ -327,7 +394,13 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
                 bridge: bridge,
                 onWorkspaceReady: workspace.bind,
                 onWorkspaceClosed: workspace.unbind,
-                localSecuritySetting: LocalLockSetting(controller: localLock),
+                localSecuritySetting: Column(
+                  children: [
+                    LocalLockSetting(controller: localLock),
+                    if (nativeSeedSyncEnabled)
+                      NativeOfflineSetting(enrollment: offlineEnrollment),
+                  ],
+                ),
                 navigation: route,
                 onNavigate: navigate,
                 accountOnly: true,
