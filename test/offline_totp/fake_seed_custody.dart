@@ -22,6 +22,7 @@ final class FakeSeedCustody implements NativeSeedCustody {
 
   final CustodyProtection reportedProtection;
   List<int>? _key;
+  Future<void> Function()? afterGenerate;
   bool unavailable = false, locked = false;
 
   /// Simulates unreadable or unwritable durable metadata.
@@ -255,13 +256,15 @@ final class FakeSeedCustody implements NativeSeedCustody {
     if (r.version != seedVersion) {
       throw const CustodyException(CustodyError.versionConflict);
     }
-    return computeTotp(
+    final result = computeTotp(
       seed: r.seed,
       algorithm: r.algorithm,
       digits: r.digits,
       period: r.period,
       unixSeconds: unixSeconds,
     );
+    await afterGenerate?.call();
+    return result;
   }
 
   @override
