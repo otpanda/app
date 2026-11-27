@@ -1,17 +1,8 @@
-// UNRUN on a device by its author. Needs an Android emulator/device and the
-// API repo harness (tool/native-roundtrip-harness.mjs) via `adb reverse`.
-// Run with tool/android-signed-in-ui.sh.
-//
-// Signed-in UI acceptance for the SHARED page. Real AndroidKeystore and the
-// app's own NativeAuth sign in to the real auth-only Worker on real D1
-// (Miniflare), synthetic account only. Then the actual NativeSessionBridge and
-// the actual BrowserAccountPage (the page native_root_io mounts) read Codes
-// and Entries, copy a code to the real clipboard, and rename an entry through
-// routed Details Edit. D1 is read back directly. Screenshots are PNGs of the
-// rendered page, printed as SHOTPART lines and extracted by
-// tool/extract-shots.py. Doubles: the Custom Tab (harness mints the code) and
-// the in-memory device-id store, as in native_roundtrip_test.dart.
-// NOT covered: passkeys, Google, recovery, security, assignment, step-up.
+// Installed private rule qualification against real Worker/D1 with synthetic
+// account data. Real AndroidKeystore sign-in and NativeSessionBridge drive
+// Assign v3 and Resume v5, with direct D1 checks before and after confirmation.
+// Run with tool/android-rules-private.sh. The browser auth leg is synthetic.
+// Does not qualify shared rule OS proof, real providers, or physical devices.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -175,7 +166,8 @@ void main() {
       );
 
       final proof = ChannelDeviceProofSource();
-      Future<({String deviceId, String? keyId, String ownerId})> identity() async => (
+      Future<({String deviceId, String? keyId, String ownerId})>
+      identity() async => (
         ownerId: seed['ownerId'] as String,
         deviceId: controller.session!.deviceId,
         keyId: null as String?,

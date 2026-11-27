@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Signed-in shared-page acceptance on a device/emulator against the joined
-# harness (same setup as tool/android-roundtrip.sh). Screenshots land in
-# OUT/shots/*.png, extracted from the test log.
-#
-#   API_DIR=../api tool/android-signed-in-ui.sh [out-dir]
+# Installed private Assign/Resume against a synthetic real Worker/D1 harness.
+# API_DIR=../api tool/android-rules-private.sh [out-dir]
 set -euo pipefail
 API_DIR="${API_DIR:?path to the api repo checkout}"
 OUT="${1:-signed-in-ui-out}"
