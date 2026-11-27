@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'pull_to_refresh.dart';
+
 /// Observes real list scrolls without consuming a gesture or overscroll.
 /// Place below the fixed app bar and around the existing refresh wrapper.
 /// Desktop is always visible; mobile starts with no row space reserved.
@@ -9,9 +11,11 @@ class RevealedFilterList extends StatefulWidget {
     required this.mobile,
     required this.filters,
     required this.child,
+    this.onRefresh,
   });
   final bool mobile;
   final Widget filters, child;
+  final Future<void> Function()? onRefresh;
   @override
   State<RevealedFilterList> createState() => _RevealedFilterListState();
 }
@@ -52,7 +56,13 @@ class _RevealedFilterListState extends State<RevealedFilterList> {
             // RefreshIndicator and the scrollable still receive the notification.
             return false;
           },
-          child: widget.child,
+          child: widget.onRefresh == null
+              ? widget.child
+              : PullToRefresh(
+                  onRefresh: widget.onRefresh!,
+                  canStart: () => !widget.mobile || shown,
+                  child: widget.child,
+                ),
         ),
       ),
     ],
