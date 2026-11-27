@@ -103,7 +103,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   late final NativeSessionBridge bridge;
   late final NativeWorkspaceCoordinator workspace;
   late final NativeOfflineWorkspaceRuntime offlineRuntime;
-  bool _admitting = false;
+  bool _admitting = false, _admitAgain = false;
   late final NativeOfflineEnrollment offlineEnrollment;
   late final SeedStatusCoordinator offlineStatus;
   late final SeedSyncCoordinator offlinePull;
@@ -189,7 +189,11 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   }
 
   Future<void> _admitWorkspace() async {
-    if (_admitting ||
+    if (_admitting) {
+      _admitAgain = true;
+      return;
+    }
+    if (!mounted ||
         controller.phase != NativeSessionPhase.signedIn ||
         !localLock.ready ||
         localLock.locked) {
@@ -200,7 +204,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     try {
       final r = await bridge.read('/v1/manage/session');
       if (r.status != 200 ||
-          controller.session != session ||
+          !identical(controller.session, session) ||
           controller.phase != NativeSessionPhase.signedIn) {
         return;
       }
@@ -211,7 +215,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
             const MethodChannel('app.otpanda/seed-custody'),
           ),
         ).get();
-        if (controller.session != session ||
+        if (!identical(controller.session, session) ||
             controller.phase != NativeSessionPhase.signedIn) {
           return;
         }
@@ -231,6 +235,10 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     } catch (_) {
     } finally {
       _admitting = false;
+      if (_admitAgain) {
+        _admitAgain = false;
+        unawaited(_admitWorkspace());
+      }
     }
   }
 
