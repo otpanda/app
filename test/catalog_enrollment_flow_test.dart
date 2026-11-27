@@ -179,22 +179,41 @@ void main() {
     expect(gh.id, 'github.com');
   });
 
-  test('ManagedEntry.catalogId is consumed only for logo identity', () {
-    // The id is owner-asserted and untrusted. It may feed display and the
-    // exact fetched-catalogue lookup, never a service key, sender rule,
-    // assignment or grouping. Any new consumer fails here and needs review.
-    final users = <String>[];
-    for (final f in Directory('lib').listSync(recursive: true)) {
-      if (f is! File || !f.path.endsWith('.dart')) continue;
-      final n = f.path.replaceAll('\\', '/').split('/').last;
-      if (RegExp(r'\.catalogId\b').hasMatch(f.readAsStringSync())) users.add(n);
-    }
-    users.sort();
-    // Encrypted snapshot serialization preserves the exact cosmetic identity.
-    expect(users, [
-      'native_workspace_snapshot.dart',
-      'product_shell.dart',
-      'session_contract.dart',
-    ]);
-  });
+  test(
+    'catalogId consumers preserve cosmetic identity without authorization',
+    () {
+      // The id is owner-asserted and untrusted. It may feed display and the
+      // exact fetched-catalogue lookup, never a service key, sender rule,
+      // assignment or grouping. Any new consumer fails here and needs review.
+      final users = <String>[];
+      for (final f in Directory('lib').listSync(recursive: true)) {
+        if (f is! File || !f.path.endsWith('.dart')) continue;
+        final n = f.path.replaceAll('\\', '/').split('/').last;
+        if (RegExp(r'\.catalogId\b').hasMatch(f.readAsStringSync()))
+          users.add(n);
+      }
+      users.sort();
+      // Native cache and transfer preserve/authenticate the exact cosmetic id.
+      // Export only reports omission for external formats, never uses catalogId
+      // to select a seed, group, service key or sharing permission.
+      expect(users, [
+        'export_encoders.dart',
+        'export_entry.dart',
+        'export_seal.dart',
+        'native_workspace_snapshot.dart',
+        'product_shell.dart',
+        'sealed_export_source.dart',
+        'session_contract.dart',
+        'transfer_pages.dart',
+      ]);
+      final export = File('lib/transfer/export_encoders.dart')
+          .readAsStringSync();
+      expect(export, contains('ExportNotCarried.catalogId'));
+      final source = File('lib/transfer/sealed_export_source.dart')
+          .readAsStringSync();
+      expect(source, contains('catalog != a.catalogId'));
+      final seal = File('lib/transfer/export_seal.dart').readAsStringSync();
+      expect(seal, contains('f.catalogId'));
+    },
+  );
 }
