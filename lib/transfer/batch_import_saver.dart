@@ -46,6 +46,18 @@ class BatchImportSaver implements ImportSaver {
 
   @override
   Future<ImportSaveOutcome> save(List<OtpAccount> accounts) async {
+    if (_busy) return ImportSaveOutcome.notSaved;
+    final outcome = await _save(accounts);
+    if (!_unknown &&
+        (outcome == ImportSaveOutcome.notSaved ||
+            outcome == ImportSaveOutcome.cancelled)) {
+      _payload = null;
+      _nonce = null;
+    }
+    return outcome;
+  }
+
+  Future<ImportSaveOutcome> _save(List<OtpAccount> accounts) async {
     if (_busy || accounts.isEmpty || accounts.length > 50) {
       return ImportSaveOutcome.notSaved;
     }

@@ -57,8 +57,10 @@ class TransferCodesPage extends StatelessWidget {
     padding: const EdgeInsets.all(16),
     children: [
       _card(context, 'Import codes', [
-        const Text(
-          'Move accounts in from another app. Scan a Google Authenticator export or a normal setup QR code, or open a file. You review everything before anything is saved.',
+        Text(
+          onImportFile == null
+              ? 'Move accounts in from another app. Scan a Google Authenticator export or a normal setup QR code. You review everything before anything is saved.'
+              : 'Move accounts in from another app. Scan a Google Authenticator export or a normal setup QR code, or open a file. You review everything before anything is saved.',
         ),
         const SizedBox(height: 12),
         FilledButton.icon(
