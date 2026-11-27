@@ -1,3 +1,5 @@
+import 'rule_action_dialog.dart';
+
 import 'dart:async';
 
 import 'copy_hint.dart';
@@ -700,6 +702,47 @@ class _ProductShellState extends State<ProductShell>
       ),
     ),
   );
+
+  Future<void> ruleFromReview(UnassignedContext review) async {
+    final b = widget.controller.bridge;
+    if (b is! RuleBridge ||
+        !widget.controller.signedIn ||
+        !review.retained(widget.clock())) {
+      return;
+    }
+    final owned = widget.controller.store.entries
+        .where((e) => e.manage)
+        .toList();
+    final entry = await showDialog<ManagedEntry>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('Choose an owned account'),
+        children: [
+          for (final e in owned)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, e),
+              child: Text(
+                '${e.service}${e.account.isEmpty ? '' : ' · ${e.account}'}',
+              ),
+            ),
+        ],
+      ),
+    );
+    if (entry == null || !mounted || !review.retained(widget.clock())) return;
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => RuleActionDialog(
+        bridge: b as RuleBridge,
+        target: {
+          'operation': 'review',
+          'contextId': review.contextId,
+          'entryId': entry.id,
+        },
+      ),
+    );
+    if (mounted) widget.controller.refreshAfterMutation();
+  }
 
   void contextDetails(UnassignedContext review) =>
       openDetails(unassignedDetailRoute(review.sourceId, review.eventId));
@@ -1755,6 +1798,13 @@ class _ProductShellState extends State<ProductShell>
                   },
                   icon: const Icon(Icons.drive_file_move_outline),
                   label: const Text('Assign to an account'),
+                ),
+              if (review != null && widget.controller.bridge is RuleBridge)
+                OutlinedButton.icon(
+                  key: const Key('save-review-rule'),
+                  onPressed: () => ruleFromReview(review),
+                  icon: const Icon(Icons.rule),
+                  label: const Text('Save future matching rule'),
                 ),
               if (code == null)
                 const Text(

@@ -1,3 +1,5 @@
+import 'native_rule.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -60,6 +62,7 @@ class NativeSessionBridge
         FutureTotpBatchBridge,
         TotpCreationCapability,
         AssignmentBridge,
+        RuleBridge,
         EntryManagementBridge,
         EntryDomainsBridge,
         AuthEntryBridge,
@@ -72,6 +75,7 @@ class NativeSessionBridge
         RealtimeBridge {
   /// Set once after construction (the driver needs this bridge's transport).
   NativeAssignmentDriver? assignment;
+  NativeRuleDriver? rules;
 
   NativeSessionBridge(
     this.controller,
@@ -194,6 +198,7 @@ class NativeSessionBridge
     '/v1/manage/active-codes',
     '/v1/manage/sources',
     '/v1/manage/unassigned',
+    '/v1/manage/unassigned-context',
   };
 
   @override
@@ -480,6 +485,7 @@ class NativeSessionBridge
   @override
   void logout() {
     assignment?.clear();
+    rules?.clear();
     _resetDescribe();
     onLogout?.call();
   }
@@ -627,6 +633,70 @@ class NativeSessionBridge
     }
     return (status: r.status, body: parsed);
   }
+
+  Future<({int status, Map<String, dynamic>? body})> rulePost(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    if (!ruleRequestAllowed(path, body)) {
+      throw StateError('Rule request required');
+    }
+    final r = await _call('POST', path, body: jsonEncode(body));
+    final b = r.body.length <= 16384 ? jsonDecode(r.body) : null;
+    return (status: r.status, body: b is Map<String, dynamic> ? b : null);
+  }
+
+  @override
+  Future<String> readRules() async {
+    final rows = <dynamic>[], seen = <String>{};
+    String? cursor;
+    for (var page = 0; page < 10; page++) {
+      final r = await _call(
+        'GET',
+        '/v1/manage/entry/rules',
+        query: cursor == null ? null : {'cursor': cursor},
+      );
+      if (r.status != 200 || r.body.length > 65536) {
+        throw StateError('Rules unavailable');
+      }
+      final j = jsonDecode(r.body);
+      if (j is! Map || j['rules'] is! List) throw const FormatException();
+      rows.addAll(j['rules']);
+      if (j['next'] == null) return jsonEncode({'rules': rows});
+      final next = j['next'];
+      if (next is! String ||
+          !RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(next) ||
+          !seen.add(next)) {
+        throw const FormatException();
+      }
+      cursor = next;
+    }
+    throw StateError('Too many rules to load safely');
+  }
+
+  @override
+  Future<void> deleteRule(String ruleId) async {
+    if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(ruleId)) {
+      throw const FormatException();
+    }
+    final r = await _call(
+      'POST',
+      '/v1/manage/entry/rule/delete',
+      body: jsonEncode({'ruleId': ruleId}),
+    );
+    if (r.status != 200) throw StateError('Rule deletion unconfirmed');
+  }
+
+  @override
+  Future<String> rulePrepare(String target) => rules!.prepare(target);
+  @override
+  Future<String> ruleConfirm() => rules!.confirm();
+  @override
+  Future<String> ruleReconcile() => rules!.reconcile();
+  @override
+  String get ruleState => rules?.state ?? 'idle';
+  @override
+  void ruleDismiss() => rules!.dismiss();
 
   NativeAssignmentDriver get _assignment {
     final a = assignment;

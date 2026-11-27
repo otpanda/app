@@ -3,7 +3,8 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
-import 'browser_session_contract.dart' show RealtimeBridge;
+import 'browser_session_contract.dart' show RealtimeBridge, RuleBridge;
+import 'rule_action_dialog.dart';
 import 'session_contract.dart';
 
 /// A separate capability. Native clients do not inherit browser source consent.
@@ -14,7 +15,10 @@ abstract interface class GmailSourceBridge {
   /// One-time neutral result of returning from Google: 'connected', 'refused' or ''.
   /// Never carries a reason, mailbox or account detail.
   Future<String> takeGmailResult();
-  Future<GmailDisconnectResult> disconnectGmail(String sourceId);
+  Future<GmailDisconnectResult> disconnectGmail(
+    String sourceId, {
+    String rules = 'keep',
+  });
 }
 
 /// What the API reported for an owner disconnect. Only booleans are kept.
@@ -136,6 +140,52 @@ class _GmailSourceConnectState extends State<GmailSourceConnect>
       claim = true;
     }
     await check();
+    if (r == 'connected' && mounted && widget.bridge is RuleBridge) {
+      final bridge = widget.bridge as RuleBridge;
+      try {
+        final j = jsonDecode(await bridge.readRules());
+        final rows = (j['rules'] as List)
+            .whereType<Map<String, dynamic>>()
+            .where((r) => r['status'] == 'paused' && r['kind'] == 'gmail')
+            .toList();
+        if (rows.isEmpty || !mounted) return;
+        final review = await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Resume saved matching rules?'),
+            content: const Text(
+              'Your kept rules are still paused. Review each rule and its future recipients before resuming. You can leave all rules paused.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('Keep paused'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text('Review rules'),
+              ),
+            ],
+          ),
+        );
+        if (review != true || !mounted) return;
+        for (final row in rows) {
+          if (!mounted) return;
+          await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => RuleActionDialog(
+              bridge: bridge,
+              target: {
+                'operation': 'resume',
+                'entryId': row['entryId'],
+                'ruleId': row['ruleId'],
+              },
+            ),
+          );
+        }
+      } catch (_) {} // Rules remain paused if loading or review fails.
+    }
   }
 
   @override
@@ -358,12 +408,39 @@ class _GmailSourceDisconnectState extends State<GmailSourceDisconnect> {
       ),
     );
     if (yes != true || !mounted) return;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Delete saved matching rules?'),
+        content: const Text(
+          'Delete the rules for this Gmail connector, or keep them paused. Kept rules never resume automatically after reconnection.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, 'keep'),
+            child: const Text('Keep paused'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, 'delete'),
+            child: const Text('Delete rules'),
+          ),
+        ],
+      ),
+    );
+    if (choice == null || !mounted) return;
     setState(() {
       busy = true;
       error = '';
     });
     try {
-      final result = await widget.bridge.disconnectGmail(widget.sourceId);
+      final result = await widget.bridge.disconnectGmail(
+        widget.sourceId,
+        rules: choice,
+      );
       if (!mounted) return;
       setState(() => busy = false);
       await showDialog<void>(

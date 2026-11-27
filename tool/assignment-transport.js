@@ -1,12 +1,12 @@
 /* Inactive factory. Caller supplies the session closure, never stored bearer. */
 const API='https://otpanda-api.abrahammurciano.workers.dev';
-export function assignmentTransport({access,generation,fetchImpl=fetch,credentials=globalThis.navigator?.credentials}){
+export function assignmentTransport({access,generation,fetchImpl=fetch,credentials=globalThis.navigator?.credentials,rule=false}){
   const encode=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
   const decode=value=>{if(typeof value!=='string'||!/^[A-Za-z0-9_-]{2,1366}$/.test(value))throw Error('Invalid credential options');return Uint8Array.from(atob(value.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0));};
   async function request(operation,body){
     const token=access(),attempt=generation();if(!token)throw Error('Sign in required');
     const payload=JSON.stringify(body);if(new TextEncoder().encode(payload).byteLength>32768)throw Error('Request too large');
-    const r=await fetchImpl(API+'/v1/manage/assignment/'+operation,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:payload});
+    const r=await fetchImpl(API+(rule?'/v1/manage/rule-intent/':'/v1/manage/assignment/')+operation,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:payload});
     if(attempt!==generation())throw Error('Session changed');
     const reader=r.body?.getReader();if(!reader)throw Error('Readable response required');let size=0,text='';const decoder=new TextDecoder('utf-8',{fatal:true});
     try{for(;;){const{done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>32768)throw Error('Response too large');text+=decoder.decode(value,{stream:true});}text+=decoder.decode();}catch(e){try{await reader.cancel();}catch{}throw e;}finally{reader.releaseLock();}
@@ -15,7 +15,7 @@ export function assignmentTransport({access,generation,fetchImpl=fetch,credentia
     return JSON.parse(text);
   }
   return Object.freeze({
-    begin:({sourceId,eventId,entryId})=>request('begin',{sourceId,eventId,entryId}),
+    begin:target=>request('begin',rule?{operation:target.operation,entryId:target.entryId,...(target.operation==='review'?{contextId:target.contextId}:{ruleId:target.ruleId}),...(['review','edit'].includes(target.operation)?{phrase:target.phrase??null}:{})}:{sourceId:target.sourceId,eventId:target.eventId,entryId:target.entryId}),
     finish:({intentId,token,action,response})=>request('finish',{intentId,token,action,response}),
     status:({intentId})=>request('status',{intentId}),
     prove:async options=>{

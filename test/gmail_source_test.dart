@@ -44,7 +44,10 @@ class Bridge implements GmailSourceBridge {
   }
 
   @override
-  Future<GmailDisconnectResult> disconnectGmail(String id) async {
+  Future<GmailDisconnectResult> disconnectGmail(
+    String id, {
+    String rules = 'keep',
+  }) async {
     disconnects++;
     return result;
   }
@@ -197,6 +200,9 @@ void main() {
       await t.pumpAndSettle();
       await t.tap(find.text('Verify and disconnect'));
       await t.pumpAndSettle();
+      expect(find.text('Delete saved matching rules?'), findsOneWidget);
+      await t.tap(find.text('Keep paused'));
+      await t.pumpAndSettle();
       await t.tap(find.text('OK'));
       await t.pumpAndSettle();
       expect(changed, true);
@@ -276,6 +282,8 @@ void main() {
     await t.tap(find.text('Disconnect Gmail'));
     await t.pumpAndSettle();
     await t.tap(find.text('Verify and disconnect'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Keep paused'));
     await t.pumpAndSettle();
   }
 
