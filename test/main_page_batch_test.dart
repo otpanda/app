@@ -13,6 +13,7 @@ import 'package:otpanda_client/totp_batch_contract.dart';
 import 'package:otpanda_client/product_shell.dart';
 import 'package:otpanda_client/read_workspace_controller.dart';
 import 'package:otpanda_client/main.dart';
+import 'package:otpanda_client/branding.dart' show bareOttyImage;
 import 'package:material_ui/material_ui.dart';
 
 import 'product_shell_test.dart' show FakeTransport, TestCopyHint;
@@ -1574,6 +1575,15 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(390, 844));
       await tester.pump();
       if (Platform.isLinux) {
+        // Decode the memory mascot in real async time before pixel assertions.
+        // Fake-clock pumps do not guarantee an image codec has completed.
+        await tester.runAsync(() async {
+          await precacheImage(
+            MemoryImage(bareOttyImage),
+            tester.element(find.byType(ProductShell)),
+          );
+        });
+        await tester.pump();
         await expectLater(
           find.byType(ProductShell),
           matchesGoldenFile('goldens/batch-next-early-mobile.png'),
