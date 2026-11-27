@@ -42,7 +42,7 @@ final class NativeWorkspaceCodeReader {
           entry.seedVersion < entry.minAcceptedVersion ||
           entry.period < 1 ||
           entry.period > 86400 ||
-          ![6, 8].contains(entry.digits) ||
+          ![6, 7, 8].contains(entry.digits) ||
           catalog.pendingPurge.contains(entry.entryId)) {
         continue;
       }

@@ -43,6 +43,25 @@ void main() {
     expect(codes.single.expiresAt, 60000);
     expect(codes.single.active(60000), false);
   });
+  test(
+    'seven-digit custody codes retain leading zero and exact width',
+    () async {
+      await custody.provision(
+        ownerId: 'owner',
+        entryId: 'seven',
+        seedVersion: 1,
+        algorithm: OtpAlgorithm.sha1,
+        digits: 7,
+        period: 30,
+        seed: Uint8List.fromList('12345678901234567890'.codeUnits),
+        epoch: 0,
+      );
+      final codes = await reader.read([
+        const ManagedEntry('seven', 'E', 'A', true, true),
+      ]);
+      expect(codes.single.value, '4287082');
+    },
+  );
   test('only visible TOTP entries can generate', () async {
     expect(await reader.read([]), isEmpty);
     expect(
