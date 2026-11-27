@@ -1,0 +1,53 @@
+# Copy to .github/workflows/wrapping-key-runtime.yml (primary owns workflow files). Manual dispatch only, synthetic data only.
+name: Wrapping key Keystore emulator fixture (synthetic, manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [34]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verifier self-test
+        run: python3 tool/android-wrapping-key/runtime/verify_log_test.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Fetch hash-pinned Kotlin compiler and platform-35 jar
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/wk"; mkdir -p "$work"; cd "$work"
+          curl -fsSL --retry 3 -o kotlin.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.20/kotlin-compiler-2.0.20.zip
+          echo '5f5d2a8ad6a718a002acd0775b67a9e27035872fdbd4b0791e3cb3ea00095931  kotlin.zip' | sha256sum -c --quiet
+          curl -fsSL --retry 3 -o platform.zip https://dl.google.com/android/repository/platform-35_r02.zip
+          echo '0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0  platform.zip' | sha256sum -c --quiet
+          unzip -q kotlin.zip; unzip -q platform.zip 'android-35/android.jar'
+          mkdir lib; cp kotlinc/lib/*.jar lib/; cp kotlinc/lib/kotlin-stdlib.jar lib/kotlin-stdlib-2.0.20.jar
+          echo "KOTLIN_LIB=$work/lib" >> "$GITHUB_ENV"
+          echo "ANDROID_JAR=$work/android-35/android.jar" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
+      - name: Enable KVM on disposable emulator only
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: EXPECT_API=${{ matrix.api-level }} bash tool/android-wrapping-key/runtime/run-fixture.sh wrapping-key-runtime-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wrapping-key-runtime-api${{ matrix.api-level }}
+          path: wrapping-key-runtime-out
+          retention-days: 7

@@ -59,6 +59,42 @@ final class WorkspaceEdit {
   final Object value;
   final EditStamp stamp;
   String get _key => '$entryId/$incarnation/$field';
+  Map<String, Object?> toJson() => {
+    'owner': ownerId,
+    'entry': entryId,
+    'incarnation': incarnation,
+    'field': field,
+    'value': value,
+    'editedAt': stamp.editedAtMs,
+    'device': stamp.deviceId,
+    'operation': stamp.operationId,
+  };
+  factory WorkspaceEdit.fromJson(Map<String, Object?> value) {
+    if (value.length != 8 ||
+        value['owner'] is! String ||
+        value['entry'] is! String ||
+        value['incarnation'] is! String ||
+        value['field'] is! String ||
+        value['editedAt'] is! int ||
+        value['device'] is! String ||
+        value['operation'] is! String ||
+        value['value'] == null) {
+      throw const FormatException('Invalid stored workspace edit');
+    }
+    return WorkspaceEdit(
+      ownerId: value['owner'] as String,
+      entryId: value['entry'] as String,
+      incarnation: value['incarnation'] as String,
+      field: value['field'] as String,
+      value: value['value']!,
+      stamp: EditStamp(
+        value['editedAt'] as int,
+        value['device'] as String,
+        value['operation'] as String,
+      ),
+    );
+  }
+
   @override
   String toString() => 'WorkspaceEdit(redacted)';
 }
@@ -109,6 +145,12 @@ final class WorkspaceEditJournal {
     _latest
       ..clear()
       ..addAll(candidates);
+    if (!local) {
+      _pending.removeWhere((key, pending) {
+        final winner = _latest[key];
+        return winner != null && winner.stamp.compareTo(pending.stamp) > 0;
+      });
+    }
     if (local) {
       for (final e in batch) {
         if (identical(_latest[e._key], e)) _pending[e._key] = e;
@@ -126,6 +168,8 @@ final class WorkspaceEditJournal {
       (e) => e.field == 'deleted' || !deleted(e.entryId, e.incarnation),
     ),
   );
+
+  List<WorkspaceEdit> get latest => List.unmodifiable(_latest.values);
 
   /// An old server acknowledgment cannot erase a newer unsent local edit.
   void acknowledge(WorkspaceEdit edit) {

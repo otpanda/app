@@ -211,6 +211,26 @@ final class EncryptedWorkspaceDatabase {
     }
   }
 
+  Map<String, Map<String, Object?>> records(String kind) {
+    _ready();
+    if (!_kinds.contains(kind)) {
+      throw const FormatException('Invalid record kind');
+    }
+    final ids = _db.select(
+      'SELECT id FROM workspace_records WHERE kind=? ORDER BY id LIMIT 10001',
+      [kind],
+    );
+    if (ids.length > 10000) {
+      throw const WorkspaceDatabaseException(
+        WorkspaceDatabaseError.lockedOrCorrupt,
+      );
+    }
+    return Map.unmodifiable({
+      for (final row in ids)
+        row['id'] as String: read(kind, row['id'] as String)!,
+    });
+  }
+
   void remove(String kind, String id) {
     _ready();
     _record(kind, id);

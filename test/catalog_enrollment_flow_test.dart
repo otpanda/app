@@ -190,6 +190,11 @@ void main() {
       if (RegExp(r'\.catalogId\b').hasMatch(f.readAsStringSync())) users.add(n);
     }
     users.sort();
-    expect(users, ['product_shell.dart', 'session_contract.dart']);
+    // Encrypted snapshot serialization preserves the exact cosmetic identity.
+    expect(users, [
+      'native_workspace_snapshot.dart',
+      'product_shell.dart',
+      'session_contract.dart',
+    ]);
   });
 }

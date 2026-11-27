@@ -52,6 +52,8 @@ if 'productFlavors' not in s:
     p.write_text(s.replace('    buildTypes {',blk+'    buildTypes {',1))
 PY
 python3 tool/android_native_overlay.py
+# Android wrapping-key sources (copied, not registered; see tool/android_wrapping_key_overlay.py).
+python3 tool/android_wrapping_key_overlay.py
 # Manifest: camera (optional feature so devices without one can still use
 # manual entry), INTERNET (the debug/profile manifests add it, main does not),
 # and removal of audio/storage permissions the camera plugin would merge.
