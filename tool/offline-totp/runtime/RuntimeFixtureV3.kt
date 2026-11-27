@@ -158,10 +158,15 @@ class FixtureV3(private val ctx: Context, private val out: (String) -> Unit) {
             probe("java-link") { java.nio.file.Files.createLink(pl.toPath(), pt.toPath()) }
             pl.delete()
             probe("os-link") { android.system.Os.link(pt.path, pl.path) }
-            pl.delete(); pt.delete()
+            pl.delete()
+            probe("rename") { val rt = File(dir, "probe-rename-src"); rt.writeText("A"); java.nio.file.Files.move(rt.toPath(), File(dir, "probe-rename-dst").toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE) }
+            File(dir, "probe-rename-dst").delete()
+            probe("file-lock") { java.io.RandomAccessFile(File(dir, "probe-lock"), "rw").use { raf -> val l = raf.channel.tryLock(); check(l != null); l!!.release() } }
+            File(dir, "probe-lock").delete()
+            pt.delete()
             need(s.createIfAbsent(a) == (a to true), "create-only publish with the platform directory fsync works on this filesystem")
             need(InstallIdFile(dir, AndroidDirSync()).createIfAbsent(b) == (a to false), "a second creator gets the winner")
-            need(InstallIdFile(dir, AndroidDirSync()).read() == a && dir.list()!!.toList() == listOf("install-id"), "one id file and no temp file remains")
+            need(InstallIdFile(dir, AndroidDirSync()).read() == a && dir.list()!!.toSet() == setOf("install-id", "install-id.lock"), "one id file, the persistent lock file, and no temp file remains")
             File(dir, "install-id").writeText("bad")
             need(runCatching { InstallIdFile(dir, AndroidDirSync()).read() }.exceptionOrNull() is InstallIdFailure, "a malformed file is reported unreadable")
             need(File(dir, "install-id").readText() == "bad", "a malformed file is never overwritten")

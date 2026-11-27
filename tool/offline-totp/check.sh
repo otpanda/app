@@ -14,7 +14,7 @@ java -cp "$out/custody:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.totp.Se
 compile '' "$out/custody2" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/NativeCustodyTest.kt"
 java -cp "$out/custody2:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.totp.NativeCustodyTestKt
 # Seed-sync key lifecycle: deny-first erase state machine, JVM fakes, synthetic keys (not Keystore evidence).
-compile '' "$out/seedsync" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/SeedSyncKey.kt" "$root/SeedSyncWire.kt" "$root/SeedSyncHandle.kt" "$root/SeedSyncChannel.kt" "$root/InstallId.kt" "$root/SeedSyncKeyTest.kt" "$root/InstallIdTest.kt"
+compile '' "$out/seedsync" "$root/TotpCalculator.kt" "$root/SeedCustody.kt" "$root/NativeCustody.kt" "$root/NativeCustodyChannel.kt" "$root/SeedSyncKey.kt" "$root/SeedSyncWire.kt" "$root/SeedSyncHandle.kt" "$root/SeedSyncChannel.kt" "$root/InstallId.kt" "$root/SeedSyncKeyTest.kt" "$root/InstallIdTest.kt" "$root/InstallIdChild.kt"
 SEED_STATUS_FIXTURE_OUT="$out/native-status.json" java -cp "$out/seedsync:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.totp.SeedSyncKeyTestKt
 java -cp "$out/seedsync:$KOTLIN_LIB/kotlin-stdlib-2.0.20.jar" org.otpanda.totp.InstallIdTestKt
 cmp "$out/native-status.json" "$root/../../test/fixtures/seed_status_native_v10.json" || { echo 'FAIL native/Dart status fixture drift' >&2; exit 1; }

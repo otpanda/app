@@ -18,7 +18,7 @@ v2=$(grep -rIlE --include='*.kt' --include='*.java' --include='*.dart' --exclude
 if [ -n "$v2" ]; then printf 'FAIL release guard: native custody v2 constructed outside allowed files:\n%s\n' "$v2" >&2; exit 1; fi
 # The seed-sync core and its file store are likewise unwired until a reviewed host change adds an allowlist entry.
 ss=$(grep -rIlE --include='*.kt' --include='*.java' --include='*.dart' --exclude-dir=android --exclude-dir=.git --exclude-dir=build -- '(SeedSyncKeyCore|SeedSyncStateFileStore|SeedSyncChannelHandler|AndroidSyncKeyVault|InstallIdFile|NoBackupInstallIdStore)[[:space:]]*\(|SeedSyncBatchHandle[[:space:]]*[.(]|SeedSyncWire[[:space:]]*\.|signRawForTests|signBuilt|runIfActive|eraseIfActive|testHookBeforeGuard' "$root" \
-  | grep -v -E '/tool/offline-totp/(SeedSyncKey\.kt|SeedSyncWire\.kt|SeedSyncHandle\.kt|SeedSyncChannel\.kt|AndroidSyncKeyVault\.kt|SeedSyncKeyTest\.kt|SeedSyncStateFileStore\.kt|InstallId\.kt|AndroidInstallIdStore\.kt|InstallIdTest\.kt|runtime/RuntimeFixtureV3\.kt)$' || true)
+  | grep -v -E '/tool/offline-totp/(SeedSyncKey\.kt|SeedSyncWire\.kt|SeedSyncHandle\.kt|SeedSyncChannel\.kt|AndroidSyncKeyVault\.kt|SeedSyncKeyTest\.kt|SeedSyncStateFileStore\.kt|InstallId\.kt|AndroidInstallIdStore\.kt|InstallIdTest\.kt|InstallIdChild\.kt|runtime/RuntimeFixtureV3\.kt)$' || true)
 if [ -n "$ss" ]; then printf 'FAIL release guard: seed-sync core or store constructed outside allowed files:\n%s\n' "$ss" >&2; exit 1; fi
 # Unregistered host must remain unreferenced until a reviewed wiring change.
 hostrefs=$(grep -rIl --include='*.kt' --include='*.java' --include='*.dart' --exclude-dir=android --exclude-dir=.git --exclude-dir=build -- 'SeedCustodyHost' "$root" \
