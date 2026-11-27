@@ -119,7 +119,12 @@ Future<void> run() async {
       (await sync.skip(batch.handleId, 'entry')).isEmpty,
     );
     await sync.finish(batch.handleId);
-    await check('typed_batch_finish', true);
+    try {
+      await sync.signBatch(batch.handleId);
+      await check('typed_batch_finish', false);
+    } on SeedSyncFailure catch (e) {
+      await check('typed_batch_finish', e.kind == SeedSyncFailureKind.wire);
+    }
   } else {
     final saved =
         jsonDecode((await driver.invokeMethod<String>('load'))!) as Map;

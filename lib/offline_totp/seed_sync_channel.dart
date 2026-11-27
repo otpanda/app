@@ -89,6 +89,11 @@ final class SeedBatchStart {
 /// Inactive client boundary for the existing native contract. It constructs no
 /// platform host or session and has no network access. No seed/private key is an
 /// input or reply. Native owns proof bytes, clock, key binding and sealed open.
+/// After ANY uncertain batch mutation, abandon that handle locally. Finish is
+/// idempotent best-effort cleanup, not permission to replay sign/open. Unknown
+/// begin may occupy a native slot until its 150s TTL; BUSY is not an erase reason.
+/// After uncertain enroll/erase, reconcile durable owner/enrollment state and
+/// previously journaled intent. This wrapper stores no intent or confirmation.
 final class SeedSyncChannel {
   SeedSyncChannel(this.channel, {this.timeout = const Duration(seconds: 15)});
   final MethodChannel channel;
@@ -151,6 +156,26 @@ final class SeedSyncChannel {
               ? SeedSyncFailureKind.unknownOutcome
               : SeedSyncFailureKind.unavailable);
       throw SeedSyncFailure(kind);
+    } catch (_) {
+      throw SeedSyncFailure(
+        mutation
+            ? SeedSyncFailureKind.unknownOutcome
+            : SeedSyncFailureKind.unavailable,
+      );
+    }
+  }
+
+  /// Malformed mutation replies include failed echoes after a successful call.
+  /// None establish whether the side effect happened. Never replay blindly.
+  Future<T> _mutation<T>(Future<T> Function() run) async {
+    try {
+      return await run();
+    } on SeedSyncFailure catch (e) {
+      if (e.kind == SeedSyncFailureKind.malformedReply)
+        throw const SeedSyncFailure(SeedSyncFailureKind.unknownOutcome);
+      rethrow;
+    } catch (_) {
+      throw const SeedSyncFailure(SeedSyncFailureKind.unknownOutcome);
     }
   }
 
@@ -237,22 +262,24 @@ final class SeedSyncChannel {
     required String installId,
     required int generation,
   }) async {
-    _owner(owner);
-    _number(generation);
-    if (!_install.hasMatch(installId)) _input();
-    final m = _map(
-      await _call('syncEnroll', {
-        'owner': owner,
-        'installId': installId,
-        'generation': generation,
-      }, mutation: true),
-      {'keyId', 'publicKey', 'generation', 'installId'},
-    );
-    final key = _str(m['keyId'], _hex),
-        returnedInstall = _str(m['installId'], _install),
-        gen = _num(m['generation']);
-    if (returnedInstall != installId || gen != generation) _bad();
-    return SeedEnrollment(key, _point(m['publicKey']), gen, returnedInstall);
+    return _mutation(() async {
+      _owner(owner);
+      _number(generation);
+      if (!_install.hasMatch(installId)) _input();
+      final m = _map(
+        await _call('syncEnroll', {
+          'owner': owner,
+          'installId': installId,
+          'generation': generation,
+        }, mutation: true),
+        {'keyId', 'publicKey', 'generation', 'installId'},
+      );
+      final key = _str(m['keyId'], _hex),
+          returnedInstall = _str(m['installId'], _install),
+          gen = _num(m['generation']);
+      if (returnedInstall != installId || gen != generation) _bad();
+      return SeedEnrollment(key, _point(m['publicKey']), gen, returnedInstall);
+    });
   }
 
   Future<String> enrollProof({
@@ -326,24 +353,29 @@ final class SeedSyncChannel {
     required int epoch,
     required SeedEraseReason reason,
   }) async {
-    _owner(owner);
-    _number(epoch);
-    final trigger = switch (reason) {
-      SeedEraseReason.signOut => 'sign_out',
-      SeedEraseReason.disable => 'disable',
-      SeedEraseReason.ownerSwitch => 'owner_switch',
-    };
-    final m = _map(
-      await _call('syncErase', {
-        'owner': owner,
-        'epoch': epoch,
-        'trigger': trigger,
-      }, mutation: true),
-      {'seedsPurged', 'keyDeleted', 'epoch'},
-    );
-    final e = _num(m['epoch']);
-    if (e < epoch) _bad();
-    return SeedEraseResult(_bool(m['seedsPurged']), _bool(m['keyDeleted']), e);
+    return _mutation(() async {
+      _owner(owner);
+      _number(epoch);
+      final trigger = switch (reason) {
+        SeedEraseReason.signOut => 'sign_out',
+        SeedEraseReason.disable => 'disable',
+        SeedEraseReason.ownerSwitch => 'owner_switch',
+      };
+      final m = _map(
+        await _call('syncErase', {
+          'owner': owner,
+          'epoch': epoch,
+          'trigger': trigger,
+        }, mutation: true),
+        {'seedsPurged', 'keyDeleted', 'epoch'},
+      );
+      final e = _num(m['epoch']);
+      return SeedEraseResult(
+        _bool(m['seedsPurged']),
+        _bool(m['keyDeleted']),
+        e,
+      );
+    });
   }
 
   Future<SeedBatchStart> begin({
@@ -353,40 +385,42 @@ final class SeedSyncChannel {
     required int epoch,
     required List<SeedBatchEntry> entries,
   }) async {
-    _owner(owner);
-    _owner(deviceId);
-    _number(generation);
-    _number(epoch);
-    if (entries.isEmpty ||
-        entries.length > 3 ||
-        entries.map((e) => e.entryId).toSet().length != entries.length) {
-      _input();
-    }
-    for (final e in entries) {
-      _owner(e.entryId);
-      _number(e.seedVersion);
-      if (!{'SHA-1', 'SHA-256', 'SHA-512'}.contains(e.algorithm) ||
-          e.digits < 6 ||
-          e.digits > 8 ||
-          e.periodSeconds < 1 ||
-          e.periodSeconds > 86400) {
+    return _mutation(() async {
+      _owner(owner);
+      _owner(deviceId);
+      _number(generation);
+      _number(epoch);
+      if (entries.isEmpty ||
+          entries.length > 3 ||
+          entries.map((e) => e.entryId).toSet().length != entries.length) {
         _input();
       }
-    }
-    final m = _map(
-      await _call('syncBatchBegin', {
-        'owner': owner,
-        'deviceId': deviceId,
-        'generation': generation,
-        'epoch': epoch,
-        'entries': entries.map((e) => e.toWire()).toList(),
-      }, mutation: true),
-      {'handleId', 'ephemeralPublic'},
-    );
-    return SeedBatchStart(
-      _str(m['handleId'], _hex),
-      _publicText(m['ephemeralPublic']),
-    );
+      for (final e in entries) {
+        _owner(e.entryId);
+        _number(e.seedVersion);
+        if (!{'SHA-1', 'SHA-256', 'SHA-512'}.contains(e.algorithm) ||
+            e.digits < 6 ||
+            e.digits > 8 ||
+            e.periodSeconds < 1 ||
+            e.periodSeconds > 86400) {
+          _input();
+        }
+      }
+      final m = _map(
+        await _call('syncBatchBegin', {
+          'owner': owner,
+          'deviceId': deviceId,
+          'generation': generation,
+          'epoch': epoch,
+          'entries': entries.map((e) => e.toWire()).toList(),
+        }, mutation: true),
+        {'handleId', 'ephemeralPublic'},
+      );
+      return SeedBatchStart(
+        _str(m['handleId'], _hex),
+        _publicText(m['ephemeralPublic']),
+      );
+    });
   }
 
   Future<void> bind(
@@ -394,17 +428,19 @@ final class SeedSyncChannel {
     required String challenge,
     required int expiresAt,
   }) async {
-    _handle(handleId);
-    _number(expiresAt);
-    if (!RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(challenge)) _input();
-    if (await _call('syncBatchBind', {
-          'handleId': handleId,
-          'challenge': challenge,
-          'expiresAt': expiresAt,
-        }, mutation: true) !=
-        null) {
-      _bad();
-    }
+    return _mutation(() async {
+      _handle(handleId);
+      _number(expiresAt);
+      if (!RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(challenge)) _input();
+      if (await _call('syncBatchBind', {
+            'handleId': handleId,
+            'challenge': challenge,
+            'expiresAt': expiresAt,
+          }, mutation: true) !=
+          null) {
+        _bad();
+      }
+    });
   }
 
   void _handle(String handleId) {
@@ -412,16 +448,39 @@ final class SeedSyncChannel {
   }
 
   Future<String> signBatch(String handleId) async {
-    _handle(handleId);
-    return _signature(
-      await _call('syncBatchSign', {'handleId': handleId}, mutation: true),
-    );
+    return _mutation(() async {
+      _handle(handleId);
+      return _signature(
+        await _call('syncBatchSign', {'handleId': handleId}, mutation: true),
+      );
+    });
+  }
+
+  void _encodedInput(
+    String value, {
+    int? exact,
+    int min = 0,
+    int maxBytes = 144,
+  }) {
+    if (value.length > maxBytes * 2 ||
+        !RegExp(r'^[A-Za-z0-9_-]*$').hasMatch(value))
+      _input();
+    try {
+      final b = base64Url.decode(base64Url.normalize(value));
+      if ((exact != null && b.length != exact) ||
+          b.length < min ||
+          b.length > maxBytes ||
+          base64UrlEncode(b).replaceAll('=', '') != value)
+        _input();
+    } on FormatException {
+      _input();
+    }
   }
 
   List<String> _pending(Object? value) {
     final rows = _map(value, {'pending'})['pending'];
     if (rows is! List ||
-        rows.length > 5000 ||
+        rows.length > 3 ||
         rows.toSet().length != rows.length) {
       _bad();
     }
@@ -435,37 +494,46 @@ final class SeedSyncChannel {
     required String nonce,
     required String ciphertext,
   }) async {
-    _handle(handleId);
-    _owner(entryId);
-    return _pending(
-      await _call('syncBatchOpen', {
-        'handleId': handleId,
-        'entryId': entryId,
-        'serverPublicKey': serverPublicKey,
-        'nonce': nonce,
-        'ciphertext': ciphertext,
-      }, mutation: true),
-    );
+    return _mutation(() async {
+      _handle(handleId);
+      _owner(entryId);
+      _encodedInput(serverPublicKey, exact: 65, maxBytes: 65);
+      _encodedInput(nonce, exact: 12, maxBytes: 12);
+      _encodedInput(ciphertext, min: 26, maxBytes: 144);
+      return _pending(
+        await _call('syncBatchOpen', {
+          'handleId': handleId,
+          'entryId': entryId,
+          'serverPublicKey': serverPublicKey,
+          'nonce': nonce,
+          'ciphertext': ciphertext,
+        }, mutation: true),
+      );
+    });
   }
 
   Future<List<String>> skip(String handleId, String entryId) async {
-    _handle(handleId);
-    _owner(entryId);
-    return _pending(
-      await _call('syncBatchSkip', {
-        'handleId': handleId,
-        'entryId': entryId,
-      }, mutation: true),
-    );
+    return _mutation(() async {
+      _handle(handleId);
+      _owner(entryId);
+      return _pending(
+        await _call('syncBatchSkip', {
+          'handleId': handleId,
+          'entryId': entryId,
+        }, mutation: true),
+      );
+    });
   }
 
   Future<void> finish(String handleId) async {
-    _handle(handleId);
-    if (await _call('syncBatchFinish', {
-          'handleId': handleId,
-        }, mutation: true) !=
-        null) {
-      _bad();
-    }
+    return _mutation(() async {
+      _handle(handleId);
+      if (await _call('syncBatchFinish', {
+            'handleId': handleId,
+          }, mutation: true) !=
+          null) {
+        _bad();
+      }
+    });
   }
 }

@@ -156,7 +156,7 @@ void main() {
         };
         await expectLater(
           enroll(adapter()),
-          failure(SeedSyncFailureKind.malformedReply),
+          failure(SeedSyncFailureKind.unknownOutcome),
         );
         expect(calls.length, 1);
       },
@@ -199,22 +199,24 @@ void main() {
       );
     },
   );
-  test('erase stale or malformed result fails closed', () async {
-    handler = (_) async => {
-      'seedsPurged': true,
-      'keyDeleted': true,
-      'epoch': 0,
-    };
-    await expectLater(
-      adapter().erase(
-        owner: 'owner',
-        epoch: 1,
-        reason: SeedEraseReason.signOut,
-      ),
-      failure(SeedSyncFailureKind.malformedReply),
-    );
-    expect(calls.length, 1);
-  });
+  test(
+    'erase returns native effective epoch without guessed monotonic comparison',
+    () async {
+      handler = (_) async => {
+        'seedsPurged': true,
+        'keyDeleted': true,
+        'epoch': 0,
+      };
+      expect(
+        (await adapter().erase(
+          owner: 'owner',
+          epoch: 1,
+          reason: SeedEraseReason.signOut,
+        )).epoch,
+        0,
+      );
+    },
+  );
   test(
     'proofs forward only native contract fields and validate raw signature',
     () async {
@@ -291,9 +293,9 @@ void main() {
         await a.open(
           handle,
           entryId: 'entry',
-          serverPublicKey: 'public',
-          nonce: 'nonce',
-          ciphertext: 'sealed',
+          serverPublicKey: base64UrlEncode(pub).replaceAll('=', ''),
+          nonce: base64UrlEncode(List.filled(12, 1)).replaceAll('=', ''),
+          ciphertext: base64UrlEncode(List.filled(36, 1)).replaceAll('=', ''),
         ),
         isEmpty,
       );
@@ -315,7 +317,7 @@ void main() {
     };
     await expectLater(
       adapter().skip(handle, 'entry'),
-      failure(SeedSyncFailureKind.malformedReply),
+      failure(SeedSyncFailureKind.unknownOutcome),
     );
     expect(calls.length, 1);
   });
@@ -341,4 +343,100 @@ void main() {
     );
     expect(calls, isEmpty);
   });
+
+  final methods = <String, Future<Object?> Function(SeedSyncChannel)>{
+    'enroll': (a) => enroll(a),
+    'erase': (a) =>
+        a.erase(owner: 'owner', epoch: 0, reason: SeedEraseReason.disable),
+    'begin': (a) => a.begin(
+      owner: 'owner',
+      deviceId: 'device',
+      generation: 1,
+      epoch: 0,
+      entries: const [SeedBatchEntry('entry', 1, 'SHA-1', 6, 30)],
+    ),
+    'bind': (a) async {
+      await a.bind(handle, challenge: install, expiresAt: 1000);
+      return null;
+    },
+    'sign': (a) => a.signBatch(handle),
+    'open': (a) => a.open(
+      handle,
+      entryId: 'entry',
+      serverPublicKey: base64UrlEncode(pub).replaceAll('=', ''),
+      nonce: base64UrlEncode(List.filled(12, 1)).replaceAll('=', ''),
+      ciphertext: base64UrlEncode(List.filled(36, 1)).replaceAll('=', ''),
+    ),
+    'skip': (a) => a.skip(handle, 'entry'),
+    'finish': (a) async {
+      await a.finish(handle);
+      return null;
+    },
+  };
+  for (final entry in methods.entries) {
+    test(
+      '${entry.key} timeout, malformed reply, codec failure stay uncertain and do not replay',
+      () async {
+        for (final mode in ['timeout', 'malformed', 'codec']) {
+          calls.clear();
+          final held = Completer<Object?>();
+          if (mode == 'timeout') handler = (_) => held.future;
+          if (mode == 'malformed') handler = (_) async => 'malformed reply';
+          if (mode == 'codec') {
+            messenger.setMockMessageHandler(
+              channel.name,
+              (message) async =>
+                  ByteData.sublistView(Uint8List.fromList([255])),
+            );
+          }
+          await expectLater(
+            entry.value(adapter(timeout: const Duration(milliseconds: 10))),
+            failure(SeedSyncFailureKind.unknownOutcome),
+          );
+          if (mode != 'codec') expect(calls.length, 1);
+          messenger.setMockMethodCallHandler(channel, (c) {
+            calls.add(c);
+            return handler(c);
+          });
+          if (mode == 'timeout') held.complete(null);
+        }
+      },
+    );
+  }
+  test('erase incomplete is explicit non-purging failure, not retry', () async {
+    handler = (_) async => throw PlatformException(code: 'ERASE_INCOMPLETE');
+    await expectLater(
+      adapter().erase(
+        owner: 'owner',
+        epoch: 0,
+        reason: SeedEraseReason.disable,
+      ),
+      failure(SeedSyncFailureKind.eraseIncomplete),
+    );
+    expect(calls.length, 1);
+  });
+  test(
+    'pending beyond native batch cap and oversize sealed input refused',
+    () async {
+      handler = (_) async => {
+        'pending': ['a', 'b', 'c', 'd'],
+      };
+      await expectLater(
+        adapter().skip(handle, 'a'),
+        failure(SeedSyncFailureKind.unknownOutcome),
+      );
+      calls.clear();
+      await expectLater(
+        adapter().open(
+          handle,
+          entryId: 'a',
+          serverPublicKey: 'A' * 1000,
+          nonce: 'n',
+          ciphertext: 'c',
+        ),
+        failure(SeedSyncFailureKind.invalidInput),
+      );
+      expect(calls, isEmpty);
+    },
+  );
 }
