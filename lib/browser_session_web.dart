@@ -36,6 +36,14 @@ extension type _Session(JSObject _) implements JSObject {
     JSString value, [
     JSBoolean? clear,
   ]);
+  external JSPromise<JSString> rulesCapabilities();
+  external JSPromise<JSString> readRules();
+  external JSPromise<JSAny?> deleteRule(JSString ruleId);
+  external JSPromise<JSString> rulePrepare(JSString target);
+  external JSPromise<JSString> ruleConfirm();
+  external JSPromise<JSString> ruleReconcile();
+  external JSString ruleState();
+  external void ruleDismiss();
   external JSPromise<JSString> assignmentPrepare(JSString target);
   external JSPromise<JSString> assignmentConfirm();
   external JSPromise<JSString> assignmentReconcile();
@@ -97,7 +105,10 @@ extension type _Session(JSObject _) implements JSObject {
   external JSPromise<_ReadResponse> gmailSourceStatus();
   external JSPromise<JSAny?> connectGmail();
   external JSPromise<JSString> takeGmailResult();
-  external JSPromise<JSString> disconnectGmail(JSString sourceId);
+  external JSPromise<JSString> disconnectGmail(
+    JSString sourceId,
+    JSString rules,
+  );
   external JSPromise<JSString> addTotp(
     JSString label,
     JSString account,
@@ -134,6 +145,7 @@ class _Browser
         RealtimeBridge,
         ProtectionWatchBridge,
         AssignmentBridge,
+        RuleBridge,
         EntryManagementBridge,
         AuthEntryBridge,
         FirstPasskeyBridge,
@@ -214,10 +226,12 @@ class _Browser
       (await _session.takeGmailResult().toDart).toDart;
 
   @override
-  Future<GmailDisconnectResult> disconnectGmail(String id) async =>
-      GmailDisconnectResult.fromJson(
-        (await _session.disconnectGmail(id.toJS).toDart).toDart,
-      );
+  Future<GmailDisconnectResult> disconnectGmail(
+    String id, {
+    String rules = 'keep',
+  }) async => GmailDisconnectResult.fromJson(
+    (await _session.disconnectGmail(id.toJS, rules.toJS).toDart).toDart,
+  );
 
   @override
   Future<String> addTotp(
@@ -460,6 +474,30 @@ class _Browser
     }
   }
 
+  @override
+  Future<String> rulesCapabilities() async =>
+      (await _session.rulesCapabilities().toDart).toDart;
+  @override
+  Future<String> readRules() async =>
+      (await _session.readRules().toDart).toDart;
+  @override
+  Future<void> deleteRule(String ruleId) async {
+    await _session.deleteRule(ruleId.toJS).toDart;
+  }
+
+  @override
+  Future<String> rulePrepare(String target) async =>
+      (await _session.rulePrepare(target.toJS).toDart).toDart;
+  @override
+  Future<String> ruleConfirm() async =>
+      (await _session.ruleConfirm().toDart).toDart;
+  @override
+  Future<String> ruleReconcile() async =>
+      (await _session.ruleReconcile().toDart).toDart;
+  @override
+  String get ruleState => _session.ruleState().toDart;
+  @override
+  void ruleDismiss() => _session.ruleDismiss();
   @override
   Future<String> assignmentPrepare(String target) async =>
       (await _session.assignmentPrepare(target.toJS).toDart).toDart;

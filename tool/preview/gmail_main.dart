@@ -21,7 +21,10 @@ class Fake implements GmailSourceBridge {
   @override
   Future<void> connectGmail() async {}
   @override
-  Future<GmailDisconnectResult> disconnectGmail(String id) async => result;
+  Future<GmailDisconnectResult> disconnectGmail(
+    String id, {
+    String rules = 'keep',
+  }) async => result;
 }
 
 Element? findText(String text) {

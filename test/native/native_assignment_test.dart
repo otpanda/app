@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otpanda_client/assignment_rule_contract.dart';
 import 'package:otpanda_client/native/native_action_proof.dart';
 import 'package:otpanda_client/native/native_assignment.dart';
 import 'package:otpanda_client/native/native_device_proof.dart';
@@ -144,6 +145,81 @@ NativeAssignmentDriver _d(_Server s, _Src src, {Object? me = _me}) =>
     );
 
 void main() {
+  test('real native driver v4 signs exact action and shows future sharing after gesture only', () async {
+    final s = _Server(shared: true);
+    final a = s.actionList()..[1] = 4;
+    a.add(
+      jsonEncode([
+        'save',
+        'email_address',
+        'sender@x.io',
+        null,
+        'S',
+        'github',
+        null,
+        'v1:${'a' * 64}',
+      ]),
+    );
+    s.beginAction = jsonEncode(a);
+    s.beginEdit = (r) {
+      (r['summary'] as Map)['rule'] = {
+        'status': 'will_save',
+        'senderKind': 'email_address',
+        'sender': 'sender@x.io',
+        'phrase': null,
+        'basis': 'template',
+        'futureRecipients': 2,
+        'futureAutomations': 1,
+      };
+      return r;
+    };
+    final src = _Src(), d = _d(s, src);
+    final summary = jsonDecode(await d.prepare(_target));
+    expect(summary['rule']['basis'], 'template');
+    expect(src.signs, 0);
+    await d.confirm();
+    expect(src.signs, 1);
+    expect(src.text, contains('Future template matches from sender@x.io'));
+    expect(s.bodies.last['action'], jsonEncode(a));
+  });
+  test(
+    'real native driver refuses altered future sharing summary before signing',
+    () async {
+      for (final count in [0, 3]) {
+        final s = _Server(shared: true);
+        final a = s.actionList()..[1] = 4;
+        a.add(
+          jsonEncode([
+            'save',
+            'email_address',
+            'sender@x.io',
+            null,
+            'S',
+            'github',
+            null,
+            'v1:${'a' * 64}',
+          ]),
+        );
+        s.beginAction = jsonEncode(a);
+        s.beginEdit = (r) {
+          (r['summary'] as Map)['rule'] = {
+            'status': 'will_save',
+            'senderKind': 'email_address',
+            'sender': 'sender@x.io',
+            'phrase': null,
+            'basis': 'template',
+            'futureRecipients': count,
+            'futureAutomations': 1,
+          };
+          return r;
+        };
+        final src = _Src(), d = _d(s, src);
+        await expectLater(d.prepare(_target), throwsA(anything));
+        expect(src.signs, 0);
+        expect(s.calls.length, 1);
+      }
+    },
+  );
   test('allowlist: exact key sets only', () {
     expect(
       assignmentRequestAllowed('/v1/manage/assignment/begin', {
@@ -383,5 +459,41 @@ void main() {
     final d = _d(s, src);
     await d.prepare(_target);
     await expectLater(d.prepare(_target), throwsStateError);
+  });
+  Future<(_Server, _Src, NativeAssignmentDriver)> v4(String sender, String? address) async {
+    final s = _Server(shared: true);
+    final a = s.actionList()..[1] = 4;
+    a.add(jsonEncode(['save', 'email_address', sender, address, 'S', 'github', null, 'v1:${'a' * 64}']));
+    s.beginAction = jsonEncode(a);
+    s.beginEdit = (r) {
+      (r['summary'] as Map)['rule'] = {
+        'status': 'will_save',
+        'senderKind': 'email_address',
+        'sender': sender,
+        'phrase': null,
+        'basis': 'template',
+        'futureRecipients': 2,
+        'futureAutomations': 1,
+      };
+      return r;
+    };
+    final src = _Src();
+    return (s, src, _d(s, src));
+  }
+  test('disclosure carries signed connector and receiving-address scope', () async {
+    for (final addr in [null, 'me@x.io']) {
+      final (_, _, d) = await v4('sender@x.io', addr);
+      final rule = jsonDecode(await d.prepare(_target))['rule'];
+      expect(rule['connectorId'], 'S');
+      expect(rule['addressScope'], addr == null ? 'any-address-on-connector' : 'receiving-address');
+      expect(assignmentRuleDisclosure(rule), contains(addr == null ? 'All receiving addresses' : 'Only the original receiving address'));
+      expect(assignmentRuleDisclosure(rule), contains('connector S'));
+    }
+  });
+  test('256-char signed sender exceeds the OS prompt cap and is refused before any signing', () async {
+    final (s, src, d) = await v4('${'x' * 250}@x.io', null);
+    await expectLater(d.prepare(_target), throwsA(anything));
+    expect(src.signs, 0);
+    expect(s.calls.length, 1);
   });
 }

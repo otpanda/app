@@ -48,7 +48,7 @@
   const encode = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
   const random = () => encode(crypto.getRandomValues(new Uint8Array(32)));
   let realtime;const watchers=new Set();
-  const clear = () => { dropInvite(); for(const f of [...watchers])f();watchers.clear();realtime?.suspend();assignment?.clear();generation++; renewalRetryAt=0;signingKey=undefined;renewal=undefined;renewing=undefined;restoring=undefined;access = undefined; expires = 0; loginPending=undefined;enrollment=undefined;googlePending=undefined;protectionPending=undefined; };
+  const clear = () => { dropInvite(); for(const f of [...watchers])f();watchers.clear();realtime?.suspend();assignment?.clear();rules?.clear();generation++; renewalRetryAt=0;signingKey=undefined;renewal=undefined;renewing=undefined;restoring=undefined;access = undefined; expires = 0; loginPending=undefined;enrollment=undefined;googlePending=undefined;protectionPending=undefined; };
   // Bound bytes as they arrive. A post-buffer string length check is too late.
   const readBounded = async (response, limit) => {
     const advertised=response.headers?.get('content-length');
@@ -62,6 +62,7 @@
   // Factories are loaded before this closure only in a separately enabled host.
   // No bearer or ceremony is persisted or passed to Flutter.
   const assignment=typeof globalThis.OTPandaAssignmentController==='function'&&typeof globalThis.OTPandaAssignmentTransport==='function'?new globalThis.OTPandaAssignmentController(globalThis.OTPandaAssignmentTransport({access:()=>serverNow()<expires?access:undefined,generation:()=>generation,fetchImpl:(...args)=>fetch(...args),credentials:{get:options=>globalThis.navigator.credentials.get(options)}})):null;
+  const rules=typeof globalThis.OTPandaRuleController==='function'?new globalThis.OTPandaRuleController(globalThis.OTPandaAssignmentTransport({rule:true,access:()=>serverNow()<expires?access:undefined,generation:()=>generation,fetchImpl:(...args)=>fetch(...args),credentials:{get:options=>globalThis.navigator.credentials.get(options)}})):null;
   // Detail routes contain opaque record identifiers only, never a proof or return URL.
   const ROUTES=['codes','settings','settings/account-security','settings/devices','settings/sources','settings/display','settings/sharing','invite','settings/about','settings/account-security/passkeys','recovery','recovery/start','recovery/finish','demo'];
   const validDetailId=value=>{
@@ -392,6 +393,34 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
   Object.defineProperty(globalThis,'OTPandaSession',{value:Object.freeze({
     ready,
     recovery,
+    readRules:async()=>{
+      if(!await maintainSession(true))throw Error('Sign in required');const attempt=generation,token=access,rows=[],seen=new Set();let cursor='';
+      for(let page=0;page<10;page++){
+        const result=await boundedRead(API+'/v1/manage/entry/rules'+(cursor?'?cursor='+encodeURIComponent(cursor):''),{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},65536);
+        if(attempt!==generation||result.response.status!==200)throw Error('Rules unavailable');const j=JSON.parse(result.body);
+        if(!Array.isArray(j.rules))throw Error('Rules unavailable');rows.push(...j.rules);
+        if(!j.next)return JSON.stringify({rules:rows});
+        if(typeof j.next!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(j.next)||seen.has(j.next))throw Error('Invalid rule cursor');seen.add(j.next);cursor=j.next;
+      }
+      throw Error('Too many rules to load safely');
+    },
+    rulesCapabilities:async()=>{
+      if(!await maintainSession(true))throw Error('Sign in required');const attempt=generation,token=access;
+      const result=await boundedRead(API+'/v1/manage/rules/capabilities',{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},1024);
+      if(attempt!==generation||result.response.status!==200)throw Error('Rules capability unavailable');
+      JSON.parse(result.body);return result.body;
+    },
+    deleteRule:async ruleId=>{
+      if(typeof ruleId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(ruleId))throw Error('Rule required');
+      if(!await maintainSession(true))throw Error('Sign in required');const attempt=generation,token=access;
+      const r=await fetch(API+'/v1/manage/entry/rule/delete',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({ruleId})});
+      if(attempt!==generation||r.status!==200)throw Error('Rule deletion unconfirmed');
+    },
+    rulePrepare:async target=>JSON.stringify(await rules.prepare(JSON.parse(target))),
+    ruleConfirm:()=>rules.confirm(),
+    ruleReconcile:()=>rules.reconcile(),
+    ruleState:()=>rules?.state??'idle',
+    ruleDismiss:()=>rules.dismiss(),
     assignmentPrepare:async target=>{if(!assignment)throw Error('Assignment unavailable');return JSON.stringify(await assignment.prepare(JSON.parse(target)));},
     assignmentConfirm:async()=>{if(!assignment)throw Error('Assignment unavailable');return assignment.confirm();},
     assignmentReconcile:async()=>{if(!assignment)throw Error('Assignment unavailable');return assignment.reconcile();},
@@ -459,7 +488,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     clear:()=>{if(access)dropHandoffIntents();showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}},
     logout:()=>{dropHandoffIntents();showRoute('codes',true);resetReadRestore();forgetView();forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}clear();status='idle';try{sessionStorage.removeItem(KEY);}catch{}location.assign(API+'/auth/device/logout');},
     read:async path=>{
-      if(!['/v1/manage/account','/v1/manage/session','/v1/manage/session?view=cache-v1','/v1/manage/entries','/v1/manage/active-codes','/v1/manage/sources','/v1/manage/unassigned'].includes(path))throw Error('Read path required');
+      if(!['/v1/manage/account','/v1/manage/session','/v1/manage/session?view=cache-v1','/v1/manage/entries','/v1/manage/active-codes','/v1/manage/sources','/v1/manage/unassigned','/v1/manage/unassigned-context'].includes(path))throw Error('Read path required');
       if(!await maintainSession(true))return {status:access||status==='restoring'||status==='session-paused'?503:401,body:'{}'};
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)return {status:401,body:'{}'};
       const result=await boundedRead(API+path,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},524288);const r=result.response,body=result.body;
@@ -677,12 +706,13 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       if(u.origin!=='https://accounts.google.com'||u.pathname!=='/o/oauth2/v2/auth'||u.username||u.password||u.hash||!sameScopes(u.searchParams.get('scope'))||u.searchParams.get('redirect_uri')!==API+'/sources/gmail/oauth/callback'||u.searchParams.get('client_id')!=='367143149550-cu61adcdqclntipnl84e096kp35vduvk.apps.googleusercontent.com'||u.searchParams.get('response_type')!=='code'||u.searchParams.get('code_challenge_method')!=='S256'||!/^[0-9a-f]{64}$/.test(u.searchParams.get('state')??'')||!/^[A-Za-z0-9_-]{43}$/.test(u.searchParams.get('code_challenge')??''))throw Error('Invalid Google authorization');
       if(attempt!==generation)throw Error('Cancelled');location.assign(u.href);
     },
-    disconnectGmail:async sourceId=>{
+    disconnectGmail:async (sourceId,rules='keep')=>{
+      if(!['keep','delete'].includes(rules))throw Error('Rule choice required');
       if(typeof sourceId!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(sourceId))throw Error('Source required');
       if(!await maintainSession(true))throw Error('Sign in again');
       const attempt=generation,token=serverNow()<expires?access:undefined;if(!token)throw Error('Sign in again');
       const post=async(suffix,value)=>{const r=await fetch(API+'/v1/manage/gmail-source'+suffix,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(value)});const v=JSON.parse(await readBounded(r,16384));if(!r.ok||attempt!==generation)throw Error('Gmail was not disconnected');return v;};
-      const value={action:'disconnect',sourceId},c=await post('/begin',value),response=await assertion(c);if(attempt!==generation)throw Error('Cancelled');const r=await post('',{...value,token:c.token,response});
+      const value={action:'disconnect',sourceId,rules},c=await post('/begin',value),response=await assertion(c);if(attempt!==generation)throw Error('Cancelled');const r=await post('',{...value,token:c.token,response});
       if(r.disconnected!==true&&!(r.disconnected===false&&r.lifecycleBlocked===true))throw Error('Gmail was not disconnected');
       return JSON.stringify({disconnected:r.disconnected===true,googlePermissionRemains:r.googlePermissionRemains!==false,lifecycleBlocked:r.lifecycleBlocked===true,...(typeof r.artifactsRemoved==='boolean'?{artifactsRemoved:r.artifactsRemoved}:{})});
     },

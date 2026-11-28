@@ -8,6 +8,7 @@ import 'package:otpanda_client/browser_session_contract.dart';
 class Bridge implements AssignmentBridge {
   int pendingFor = 0;
   bool private = false;
+  Map<String, dynamic>? rule;
   int prompts = 0, checks = 0, prepares = 0;
   String outcome = 'assigned';
   @override
@@ -16,6 +17,7 @@ class Bridge implements AssignmentBridge {
   Future<String> assignmentPrepare(String target) async {
     prepares++;
     return jsonEncode({
+      if (rule != null) 'rule': rule,
       'entryId': 'entry',
       'label': 'Northstar work',
       'accountName': 'work@example.test',
@@ -47,6 +49,55 @@ class Bridge implements AssignmentBridge {
 }
 
 void main() {
+  testWidgets(
+    'future template rule sharing is visible before deliberate confirmation',
+    (t) async {
+      final b = Bridge()
+        ..rule = {
+          'status': 'will_save',
+          'sender': 'sender@example.test',
+          'connectorId': 'source',
+          'addressScope': 'receiving-address',
+          'basis': 'template',
+          'phrase': null,
+          'futureRecipients': 2,
+          'futureAutomations': 1,
+        };
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AssignmentDialog(
+              bridge: b,
+              sourceId: 'source',
+              eventId: 'event',
+              entryId: 'entry',
+            ),
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(
+        find.textContaining(
+          'Future matching codes will be shared with 2 recipients / 1 automations.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('on connector source'), findsOneWidget);
+      expect(
+        find.textContaining('Only the original receiving address is covered.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Match: message template'), findsOneWidget);
+      expect(
+        find.textContaining('This does not assign future messages.'),
+        findsNothing,
+      );
+      expect(b.prompts, 0);
+      await t.tap(find.text('Confirm with passkey'));
+      await t.pumpAndSettle();
+      expect(b.prompts, 1);
+    },
+  );
   testWidgets(
     'definitive negative receipt is distinct from unknown and has no resubmit',
     (tester) async {
@@ -223,5 +274,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(b.prompts, 1);
     expect(find.text('Assignment confirmed.'), findsOneWidget);
+  });
+  testWidgets('will_save rule without verified connector and address scope cannot be confirmed and never claims broad scope', (t) async {
+    for (final extra in [
+      <String, dynamic>{},
+      {'connectorId': 'source'},
+      {'connectorId': 'source', 'addressScope': 'anything'},
+      {'addressScope': 'any-address-on-connector'},
+    ]) {
+      final b = Bridge()
+        ..rule = {
+          'status': 'will_save',
+          'sender': 'sender@example.test',
+          'basis': 'template',
+          'phrase': null,
+          'futureRecipients': 2,
+          'futureAutomations': 1,
+          ...extra,
+        };
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AssignmentDialog(
+              bridge: b,
+              sourceId: 'source',
+              eventId: 'event',
+              entryId: 'entry',
+            ),
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(find.textContaining('could not be verified'), findsOneWidget);
+      expect(find.textContaining('All receiving addresses'), findsNothing);
+      expect(find.textContaining('connector null'), findsNothing);
+      final button = t.widget<FilledButton>(find.byType(FilledButton).first);
+      expect(button.onPressed, isNull);
+      expect(b.prompts, 0);
+    }
   });
 }

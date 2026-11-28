@@ -124,6 +124,38 @@ void main() {
   });
 
   test(
+    'rules capability response from a replaced native session is rejected',
+    () async {
+      final c = await signedIn();
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      final bridge = NativeSessionBridge(c, (
+        m,
+        p, {
+        body,
+        query,
+        required bearer,
+      }) async {
+        expect(p, '/v1/manage/rules/capabilities');
+        entered.complete();
+        await release.future;
+        return const SessionResponse(
+          200,
+          '{"version":1,"rules":{"available":true,"managementAvailable":true,"disconnectPolicy":true}}',
+        );
+      });
+      final pending = bridge.rulesCapabilities();
+      final check = expectLater(pending, throwsStateError);
+      await entered.future;
+      final before = c.session;
+      await c.forceRenew();
+      expect(identical(c.session, before), isFalse);
+      release.complete();
+      await check;
+    },
+  );
+
+  test(
     'sharing successful same-device renewal sends once with stable epoch',
     () async {
       final original = await signedIn();

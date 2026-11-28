@@ -2,10 +2,25 @@ import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'rules_capability_helpers.dart';
+import 'package:otpanda_client/browser_session_contract.dart' show RuleBridge;
 import 'package:otpanda_client/gmail_source.dart';
 import 'package:otpanda_client/session_contract.dart';
 
-class Bridge implements GmailSourceBridge {
+class Bridge implements GmailSourceBridge, RuleBridge {
+  String capability = rulesAvailableJson;
+  bool capabilityThrows = false;
+  int probes = 0;
+  @override
+  Future<String> rulesCapabilities() async {
+    probes++;
+    if (capabilityThrows) throw StateError('offline');
+    return capability;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+
   bool ready = false, passkey = false;
   bool blocked = false;
   int connects = 0, checks = 0, pending = 0, skipped = 0, leftover = 0;
@@ -13,6 +28,7 @@ class Bridge implements GmailSourceBridge {
     disconnected: true,
   );
   int disconnects = 0;
+  String? rulesChoice;
   @override
   Future<SessionResponse> gmailSourceStatus() async {
     checks++;
@@ -44,7 +60,11 @@ class Bridge implements GmailSourceBridge {
   }
 
   @override
-  Future<GmailDisconnectResult> disconnectGmail(String id) async {
+  Future<GmailDisconnectResult> disconnectGmail(
+    String id, {
+    String rules = 'keep',
+  }) async {
+    rulesChoice = rules;
     disconnects++;
     return result;
   }
@@ -197,6 +217,9 @@ void main() {
       await t.pumpAndSettle();
       await t.tap(find.text('Verify and disconnect'));
       await t.pumpAndSettle();
+      expect(find.text('Delete saved matching rules?'), findsOneWidget);
+      await t.tap(find.text('Keep paused'));
+      await t.pumpAndSettle();
       await t.tap(find.text('OK'));
       await t.pumpAndSettle();
       expect(changed, true);
@@ -258,6 +281,39 @@ void main() {
     await t.pumpWidget(const MaterialApp(home: SizedBox()));
   });
 
+  testWidgets(
+    'delete choice is explicit and cancel leaves connector untouched',
+    (t) async {
+      final b = Bridge();
+      await t.pumpWidget(
+        host(
+          GmailSourceDisconnect(
+            bridge: b,
+            sourceId: 'source',
+            label: 'Synthetic',
+            onChanged: () {},
+          ),
+        ),
+      );
+      await t.tap(find.text('Disconnect Gmail'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Verify and disconnect'));
+      await t.pumpAndSettle();
+      expect(b.disconnects, 0);
+      await t.tap(find.text('Cancel'));
+      await t.pumpAndSettle();
+      expect(b.disconnects, 0);
+      await t.tap(find.text('Disconnect Gmail'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Verify and disconnect'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Delete rules'));
+      await t.pumpAndSettle();
+      expect(b.disconnects, 1);
+      expect(b.rulesChoice, 'delete');
+    },
+  );
+
   Future<void> runDisconnect(
     WidgetTester t,
     Bridge b,
@@ -276,6 +332,8 @@ void main() {
     await t.tap(find.text('Disconnect Gmail'));
     await t.pumpAndSettle();
     await t.tap(find.text('Verify and disconnect'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Keep paused'));
     await t.pumpAndSettle();
   }
 
@@ -469,5 +527,64 @@ void main() {
     expect(find.text(connectedText), findsNothing);
     expect(find.textContaining('was not connected'), findsNothing);
     expect(find.text('Connect Gmail'), findsOneWidget);
+  });
+
+  testWidgets('disconnect needs an explicit capability answer; unknown keeps the connector and sends nothing', (t) async {
+    for (final bad in [
+      'throw',
+      'not json',
+      '{}',
+      '{"version":1,"rules":{"available":true,"disconnectPolicy":true}}',
+      '{"version":1,"rules":{"available":true,"managementAvailable":true,"disconnectPolicy":"true"}}',
+      '{"version":2,"rules":{"available":true,"managementAvailable":true,"disconnectPolicy":true}}',
+      '{"version":1,"rules":{"available":true,"managementAvailable":true,"disconnectPolicy":true},"x":1}',
+      // explicit disconnectPolicy false never permits the signed choice
+      '{"version":1,"rules":{"available":true,"managementAvailable":true,"disconnectPolicy":false}}',
+    ]) {
+      final b = Bridge();
+      if (bad == 'throw') {
+        b.capabilityThrows = true;
+      } else {
+        b.capability = bad;
+      }
+      await t.pumpWidget(
+        host(
+          GmailSourceDisconnect(
+            bridge: b,
+            sourceId: 'source',
+            label: 'Synthetic',
+            onChanged: () {},
+          ),
+        ),
+      );
+      await t.tap(find.text('Disconnect Gmail'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Verify and disconnect'));
+      await t.pumpAndSettle();
+      expect(find.text('Delete rules'), findsNothing, reason: bad);
+      expect(find.textContaining('Gmail is still connected'), findsOneWidget);
+      expect(b.disconnects, 0, reason: bad);
+    }
+  });
+  testWidgets('rules unavailable but disconnectPolicy true still asks keep or delete and never downgrades delete', (t) async {
+    final b = Bridge()..capability = rulesUnavailableJson;
+    await t.pumpWidget(
+      host(
+        GmailSourceDisconnect(
+          bridge: b,
+          sourceId: 'source',
+          label: 'Synthetic',
+          onChanged: () {},
+        ),
+      ),
+    );
+    await t.tap(find.text('Disconnect Gmail'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Verify and disconnect'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Delete rules'));
+    await t.pumpAndSettle();
+    expect(b.disconnects, 1);
+    expect(b.rulesChoice, 'delete');
   });
 }
