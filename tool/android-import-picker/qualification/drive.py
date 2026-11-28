@@ -88,15 +88,19 @@ class Run:
                     taps[kind] += 1
                     if taps[kind] > 4:
                         raise Harness(f'{self.name}: {kind} tap did not progress toward {label}')
+                before_log=logcat()
                 shell(f'input tap {x} {y}')
                 self.note(f'HARNESS tap {kind}')
                 if kind == 'doc':
                     # A tap is not selection proof, especially during config relayout.
                     for _wait in range(5):
                         time.sleep(1)
-                        if not uinav.focus_is_picker(shell('dumpsys window')):
+                        if (re.search(r'OPEN '+re.escape(label)+r' \d+', logcat()[len(before_log):]) or 'ACT create' in logcat()[len(before_log):] or not uinav.focus_is_picker(shell('dumpsys window'))):
                             self.note(f'HARNESS selected {label}')
                             return
+                    progress=logcat()[len(before_log):]
+                    if re.search(r'\b(?:OPEN|MARK|CHECK)\b',progress):
+                        raise Harness(f'{self.name}: app progressed after document tap without selection confirmation; refusing retap')
                     self.note('HARNESS document tap did not dismiss picker; refresh layout')
             time.sleep(1)
         raise Harness(f'{self.name}: document {label} never appeared in the picker')
@@ -155,10 +159,7 @@ def sc_rotation(r):
     r.wait_for(r'MARK picker_open', what='picker_open'); r.picker_focused()
     shell('settings put system accelerometer_rotation 0'); shell('settings put system user_rotation 1')
     r.note('HARNESS rotated landscape'); time.sleep(3)
-    try:
-        r.select('fixture-a.txt', 'a')
-    finally:
-        shell('settings put system user_rotation 0'); shell('settings put system accelerometer_rotation 1')
+    r.select('fixture-a.txt', 'a')
     complete(r)
 
 
@@ -169,10 +170,7 @@ def sc_recreate(r):
     # recreate() is requested by the fixture driver from Dart after pick; here the harness uses the OS equivalent:
     # a configuration change (font scale) delivers a real recreation to the app behind the picker.
     shell('settings put system font_scale 1.3'); r.note('HARNESS config change font_scale'); time.sleep(3)
-    try:
-        r.select('fixture-a.txt', 'a')
-    finally:
-        shell('settings put system font_scale 1.0')
+    r.select('fixture-a.txt', 'a')
     complete(r)
 
 
