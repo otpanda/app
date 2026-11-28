@@ -13,6 +13,8 @@ for i in range(240):
    (out/f'focus-{i}.txt').write_text(adb('shell','dumpsys','window','windows'))
    print('OS_DRIVER_UI',i,[(n.get('package'),n.get('text'),n.get('resource-id'),n.get('class')) for n in root.iter('node') if n.get('text') or 'EditText' in n.get('class','')],flush=True)
    adb('shell','screencap','-p',f'/sdcard/rule-diag-{i}.png');subprocess.run(['adb','pull',f'/sdcard/rule-diag-{i}.png',str(out/f'ui-{i}.png')],capture_output=True)
+  for shot in out.glob('*.png'):
+   if shot.stat().st_size==0:shot.unlink();print('SECURE_CAPTURE_UNAVAILABLE',shot.name,flush=True)
   systemEditors=[n for n in root.iter('node') if n.get('package') in ['com.android.systemui','com.android.settings','com.google.android.permissioncontroller'] and ('EditText' in n.get('class','') or any(v in n.get('resource-id','').lower() for v in ['pinentry','passwordentry','pin_entry','password_entry']))]
   # Only system credential entry, never a Flutter text field or any account prompt.
   if systemEditors:
