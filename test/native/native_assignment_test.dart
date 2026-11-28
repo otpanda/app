@@ -144,6 +144,81 @@ NativeAssignmentDriver _d(_Server s, _Src src, {Object? me = _me}) =>
     );
 
 void main() {
+  test('real native driver v4 signs exact action and shows future sharing after gesture only', () async {
+    final s = _Server(shared: true);
+    final a = s.actionList()..[1] = 4;
+    a.add(
+      jsonEncode([
+        'save',
+        'email_address',
+        'sender@x.io',
+        null,
+        'S',
+        'github',
+        null,
+        'v1:${'a' * 64}',
+      ]),
+    );
+    s.beginAction = jsonEncode(a);
+    s.beginEdit = (r) {
+      (r['summary'] as Map)['rule'] = {
+        'status': 'will_save',
+        'senderKind': 'email_address',
+        'sender': 'sender@x.io',
+        'phrase': null,
+        'basis': 'template',
+        'futureRecipients': 2,
+        'futureAutomations': 1,
+      };
+      return r;
+    };
+    final src = _Src(), d = _d(s, src);
+    final summary = jsonDecode(await d.prepare(_target));
+    expect(summary['rule']['basis'], 'template');
+    expect(src.signs, 0);
+    await d.confirm();
+    expect(src.signs, 1);
+    expect(src.text, contains('Future template matches from sender@x.io'));
+    expect(s.bodies.last['action'], jsonEncode(a));
+  });
+  test(
+    'real native driver refuses altered future sharing summary before signing',
+    () async {
+      for (final count in [0, 3]) {
+        final s = _Server(shared: true);
+        final a = s.actionList()..[1] = 4;
+        a.add(
+          jsonEncode([
+            'save',
+            'email_address',
+            'sender@x.io',
+            null,
+            'S',
+            'github',
+            null,
+            'v1:${'a' * 64}',
+          ]),
+        );
+        s.beginAction = jsonEncode(a);
+        s.beginEdit = (r) {
+          (r['summary'] as Map)['rule'] = {
+            'status': 'will_save',
+            'senderKind': 'email_address',
+            'sender': 'sender@x.io',
+            'phrase': null,
+            'basis': 'template',
+            'futureRecipients': count,
+            'futureAutomations': 1,
+          };
+          return r;
+        };
+        final src = _Src(), d = _d(s, src);
+        await expectLater(d.prepare(_target), throwsA(anything));
+        expect(src.signs, 0);
+        expect(s.calls.length, 1);
+      }
+    },
+  );
   test('allowlist: exact key sets only', () {
     expect(
       assignmentRequestAllowed('/v1/manage/assignment/begin', {

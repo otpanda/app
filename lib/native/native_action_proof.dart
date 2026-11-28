@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../assignment_rule_contract.dart';
+
 import 'package:crypto/crypto.dart' as crypto;
 
 /// Validation of a server-built assignment action string (v8 action v2) before
@@ -22,15 +24,22 @@ class ValidatedAssignmentAction {
     required this.serviceId,
     required this.recipients,
     required this.automations,
+    this.rule,
   });
   final String entryLabel, accountName, serviceId;
   final int recipients, automations;
+  final Map<String, dynamic>? rule;
 
   /// The readable prompt text (parsed fields only).
   String get prompt =>
       'Assign this code to $entryLabel ($accountName). Shared with '
       '$recipients ${recipients == 1 ? 'person' : 'people'}, $automations '
-      '${automations == 1 ? 'automation' : 'automations'}. Cannot be undone.';
+      '${automations == 1 ? 'automation' : 'automations'}. Cannot be undone.'
+      '${rule == null
+          ? ''
+          : rule!['status'] != 'will_save'
+          ? ' No future rule will be saved.'
+          : ' Future ${rule!['basis']} matches from ${rule!['sender']} go here, shared with $recipients people / $automations automations.'}';
 }
 
 /// Returns null when any check fails: the caller must not prompt.
@@ -61,11 +70,16 @@ ValidatedAssignmentAction? validateAssignmentActionV2(
   } on FormatException {
     return null;
   }
-  if (v is! List || v.length != 19) return null;
+  if (v is! List ||
+      !((v.length == 19 && v[1] == 2) || (v.length == 20 && v[1] == 4))) {
+    return null;
+  }
   bool ok(Object? x, bool Function(Object?) f) => f(x);
   bool str(Object? x) => x is String && x.isNotEmpty;
   bool nonNeg(Object? x) => x is int && x >= 0;
-  if (v[0] != 'otpanda-assignment' || v[1] is! int || v[1] != 2) return null;
+  if (v[0] != 'otpanda-assignment' || v[1] is! int || !{2, 4}.contains(v[1])) {
+    return null;
+  }
   if (v[2] != intentId || v[3] != ownerId || v[4] != deviceId) return null;
   if (v[5] is! int || v[5] != generation) return null;
   if (v[8] != entryId) return null;
@@ -88,7 +102,14 @@ ValidatedAssignmentAction? validateAssignmentActionV2(
   if (bad.hasMatch(label) || bad.hasMatch(account) || bad.hasMatch(service)) {
     return null;
   }
+  Map<String, dynamic>? rule;
+  try {
+    rule = checkedAssignmentRule(v, null);
+  } catch (_) {
+    return null;
+  }
   return ValidatedAssignmentAction(
+    rule: rule,
     entryLabel: label,
     accountName: account,
     serviceId: service,

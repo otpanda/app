@@ -1,3 +1,5 @@
+import 'native_rule.dart';
+
 import 'dart:convert';
 import 'dart:io' show Platform;
 
@@ -137,6 +139,25 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     );
     bridge.assignment = NativeAssignmentDriver(
       post: bridge.assignmentPost,
+      source: proof,
+      identity: assignmentIdentity(
+        readSession: () async {
+          try {
+            final r = await bridge.read('/v1/manage/session');
+            if (r.status != 200) return null;
+            final j = jsonDecode(r.body);
+            return j is Map<String, dynamic> ? j : null;
+          } catch (_) {
+            return null;
+          }
+        },
+        deviceId: () => controller.session?.deviceId,
+        source: proof,
+        post: bridge.deviceKeyPost,
+      ),
+    );
+    bridge.rules = NativeRuleDriver(
+      post: bridge.rulePost,
       source: proof,
       identity: assignmentIdentity(
         readSession: () async {

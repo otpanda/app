@@ -34,12 +34,19 @@ jobs:
       - run: bash tool/bootstrap.sh
       - run: python3 tool/check_supported_native.py
       - run: python3 tool/test_service_catalog.py
-      - run: node --test test/assignment*.mjs test/session_bootstrap_test.cjs test/realtime*.cjs
+      - run: node --test test/assignment*.mjs test/rule-controller.test.mjs test/session_bootstrap_test.cjs test/realtime*.cjs
       - run: flutter analyze
       - name: Check formatting (advisory until a one-time reformat lands after the App53 merge)
         continue-on-error: true
         run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter test
+      - name: Preserve synthetic rule layout pixels
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rule-widget-layout
+          path: build/rules-visual
+          if-no-files-found: ignore
       - run: flutter build web --base-href /app/ --no-wasm-dry-run --dart-define=APP_VERSION=dev-${{ github.sha }}
       - run: python3 tool/check_generated_web.py
       - uses: actions/upload-artifact@v4

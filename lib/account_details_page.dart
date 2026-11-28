@@ -1,3 +1,5 @@
+import 'entry_rule_sources.dart';
+
 import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
@@ -422,17 +424,23 @@ class _AccountDetailsPageState extends State<AccountDetailsPage> {
                                   : widget.entry.account,
                             ),
                     ),
-                    if (widget.entry.totp) ...[
+                    if (widget.entry.totp || widget.bridge is RuleBridge) ...[
                       Divider(height: 1, color: context.pal.line),
                       info(
                         'Sources',
-                        const Wrap(
-                          spacing: 6,
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Chip(
-                              avatar: Icon(Icons.shield_outlined, size: 16),
-                              label: Text('Authenticator codes'),
-                            ),
+                            if (widget.entry.totp)
+                              const Chip(
+                                avatar: Icon(Icons.shield_outlined, size: 16),
+                                label: Text('Authenticator codes'),
+                              ),
+                            if (widget.bridge is RuleBridge)
+                              EntryRuleSources(
+                                bridge: widget.bridge as RuleBridge,
+                                entryId: widget.entry.id,
+                              ),
                           ],
                         ),
                       ),

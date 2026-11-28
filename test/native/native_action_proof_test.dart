@@ -48,6 +48,75 @@ ValidatedAssignmentAction? _run(
 );
 
 void main() {
+  test('v4 exact20 binds future template disclosure into native OS prompt', () {
+    final a = _arr(v: 4)
+      ..add(
+        jsonEncode([
+          'save',
+          'email_address',
+          'sender@example.test',
+          null,
+          'S',
+          'svc',
+          null,
+          'v1:${'a' * 64}',
+        ]),
+      );
+    final r = _run(jsonEncode(a))!;
+    expect(r.rule?['basis'], 'template');
+    expect(
+      r.prompt,
+      contains(
+        'Future template matches from sender@example.test go here, shared with 3 people / 1 automations.',
+      ),
+    );
+    expect(
+      _run(jsonEncode(a..[1] = 2)),
+      isNull,
+      reason: 'legacy parser never accepts extra field',
+    );
+  });
+  test('v4 skew and invalid descriptor never reaches native prompt', () {
+    for (final version in [1, 2, 3, 5]) {
+      final a = _arr(v: version)
+        ..add(jsonEncode(['none', 'template_unavailable']));
+      expect(_run(jsonEncode(a)), isNull);
+    }
+    for (final d in [
+      [
+        'save',
+        'email_address',
+        'sender@example.test',
+        null,
+        'WRONG',
+        'svc',
+        null,
+        'v1:${'a' * 64}',
+      ],
+      [
+        'save',
+        'email_address',
+        'sender@example.test',
+        null,
+        'S',
+        'WRONG',
+        null,
+        'v1:${'a' * 64}',
+      ],
+      [
+        'save',
+        'email_address',
+        'sender@example.test',
+        null,
+        'S',
+        'svc',
+        null,
+        null,
+      ],
+    ]) {
+      expect(_run(jsonEncode(_arr(v: 4)..add(jsonEncode(d)))), isNull);
+    }
+  });
   test('valid v2 action yields the readable text from parsed fields only', () {
     final a = jsonEncode(_arr());
     final r = _run(a)!;

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otpanda_client/gmail_source.dart';
+import 'package:otpanda_client/browser_session_contract.dart';
 import 'package:otpanda_client/session_contract.dart';
 
 class Bridge implements GmailSourceBridge {
@@ -13,6 +14,7 @@ class Bridge implements GmailSourceBridge {
     disconnected: true,
   );
   int disconnects = 0;
+  String? rulesChoice;
   @override
   Future<SessionResponse> gmailSourceStatus() async {
     checks++;
@@ -44,13 +46,127 @@ class Bridge implements GmailSourceBridge {
   }
 
   @override
-  Future<GmailDisconnectResult> disconnectGmail(String id) async {
+  Future<GmailDisconnectResult> disconnectGmail(
+    String id, {
+    String rules = 'keep',
+  }) async {
+    rulesChoice = rules;
     disconnects++;
     return result;
   }
 }
 
+class RuleReconnectBridge extends Bridge implements RuleBridge {
+  int begins = 0, sends = 0;
+  @override
+  Future<String> readRules() async => jsonEncode({
+    'rules': [
+      {
+        'status': 'paused',
+        'kind': 'gmail',
+        'ruleId': 'kept',
+        'entryId': 'owned',
+      },
+      {
+        'status': 'active',
+        'kind': 'gmail',
+        'ruleId': 'active',
+        'entryId': 'owned',
+      },
+      {'status': 'paused', 'kind': 'sms', 'ruleId': 'sms', 'entryId': 'owned'},
+    ],
+  });
+  @override
+  Future<void> deleteRule(String id) async =>
+      throw StateError('unexpected delete');
+  @override
+  Future<String> rulePrepare(String target) async {
+    begins++;
+    final t = jsonDecode(target);
+    if (t['ruleId'] != 'kept' || t['operation'] != 'resume') {
+      throw StateError('wrong target');
+    }
+    return jsonEncode({
+      'operation': 'rule-resume',
+      'entryId': 'owned',
+      'label': 'Bank',
+      'accountName': 'person@example.test',
+      'sender': 'bank@example.test',
+      'senderKind': 'email_address',
+      'sourceId': 'source',
+      'serviceId': 'bank',
+      'basis': 'phrase',
+      'phrase': 'bank',
+      'futureRecipients': 0,
+      'futureAutomations': 0,
+      'otherAccountRules': 0,
+      'resumesPausedRule': true,
+      'irreversible': false,
+      'proofRequired': false,
+    });
+  }
+
+  @override
+  Future<String> ruleConfirm() async {
+    sends++;
+    return 'applied';
+  }
+
+  @override
+  Future<String> ruleReconcile() async => 'confirm';
+  @override
+  String get ruleState => 'confirm';
+  @override
+  void ruleDismiss() {}
+}
+
 void main() {
+  testWidgets('reconnect keep paused never starts or sends a resume', (
+    t,
+  ) async {
+    final b = RuleReconnectBridge()
+      ..returned = 'connected'
+      ..ready = true;
+    await t.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: GmailSourceConnect(bridge: b, hasGmailSource: true),
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(find.text('Resume saved matching rules?'), findsOneWidget);
+    expect(b.begins, 0);
+    expect(b.sends, 0);
+    await t.tap(find.text('Keep paused'));
+    await t.pumpAndSettle();
+    expect(b.begins, 0);
+    expect(b.sends, 0);
+  });
+  testWidgets(
+    'reconnect reviews paused Gmail only, still waits for confirmation',
+    (t) async {
+      final b = RuleReconnectBridge()
+        ..returned = 'connected'
+        ..ready = true;
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GmailSourceConnect(bridge: b, hasGmailSource: true),
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      await t.tap(find.text('Review rules'));
+      await t.pumpAndSettle();
+      expect(b.begins, 1);
+      expect(b.sends, 0);
+      expect(find.text('Confirm'), findsOneWidget);
+      await t.tap(find.text('Close'));
+      await t.pumpAndSettle();
+      expect(b.sends, 0);
+    },
+  );
   testWidgets('pending and skipped status uses singular and plural grammar', (
     t,
   ) async {
@@ -197,6 +313,9 @@ void main() {
       await t.pumpAndSettle();
       await t.tap(find.text('Verify and disconnect'));
       await t.pumpAndSettle();
+      expect(find.text('Delete saved matching rules?'), findsOneWidget);
+      await t.tap(find.text('Keep paused'));
+      await t.pumpAndSettle();
       await t.tap(find.text('OK'));
       await t.pumpAndSettle();
       expect(changed, true);
@@ -258,6 +377,39 @@ void main() {
     await t.pumpWidget(const MaterialApp(home: SizedBox()));
   });
 
+  testWidgets(
+    'delete choice is explicit and cancel leaves connector untouched',
+    (t) async {
+      final b = Bridge();
+      await t.pumpWidget(
+        host(
+          GmailSourceDisconnect(
+            bridge: b,
+            sourceId: 'source',
+            label: 'Synthetic',
+            onChanged: () {},
+          ),
+        ),
+      );
+      await t.tap(find.text('Disconnect Gmail'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Verify and disconnect'));
+      await t.pumpAndSettle();
+      expect(b.disconnects, 0);
+      await t.tap(find.text('Cancel'));
+      await t.pumpAndSettle();
+      expect(b.disconnects, 0);
+      await t.tap(find.text('Disconnect Gmail'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Verify and disconnect'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Delete rules'));
+      await t.pumpAndSettle();
+      expect(b.disconnects, 1);
+      expect(b.rulesChoice, 'delete');
+    },
+  );
+
   Future<void> runDisconnect(
     WidgetTester t,
     Bridge b,
@@ -276,6 +428,8 @@ void main() {
     await t.tap(find.text('Disconnect Gmail'));
     await t.pumpAndSettle();
     await t.tap(find.text('Verify and disconnect'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Keep paused'));
     await t.pumpAndSettle();
   }
 

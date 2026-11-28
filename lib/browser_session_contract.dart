@@ -21,6 +21,17 @@ abstract interface class AssignmentBridge {
   void assignmentDismiss();
 }
 
+/// Lasting sender rule actions, separate from one-code assignment.
+abstract interface class RuleBridge {
+  Future<String> readRules();
+  Future<void> deleteRule(String ruleId);
+  Future<String> rulePrepare(String target);
+  Future<String> ruleConfirm();
+  Future<String> ruleReconcile();
+  String get ruleState;
+  void ruleDismiss();
+}
+
 /// App-owned email entry, separate from access/session authority.
 abstract interface class AuthEntryBridge {
   String get email;
