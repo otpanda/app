@@ -18,7 +18,7 @@
   // Another tab ended or replaced the sign-in: this tab stops using and showing
   // the cached identity until it starts a sign-in itself.
   let profileRevoked=false;const revokeListeners=new Set();
-  const revokeProfile=()=>{if(profileRevoked)return;profileRevoked=true;forgetProfile();for(const f of [...revokeListeners]){try{f();}catch{}}};
+  const revokeProfile=()=>{if(profileRevoked)return;profileRevoked=true;dropInvite();forgetProfile();for(const f of [...revokeListeners]){try{f();}catch{}}};
   try{globalThis.addEventListener?.('storage',e=>{if(e.key===null||(e.key==='otpanda-session-present'&&e.newValue!=='yes')||(e.key===PROFILE_KEY&&e.newValue===null))revokeProfile();});}catch{}
   const resetReadRestore=()=>{try{sessionStorage.removeItem(READ_RESTORE_KEY);}catch{}};
   const VIEW_KEY = 'otpanda.view.tab.v1';
@@ -33,10 +33,22 @@
   let signingKey, renewal, renewing, restoring, serverOffset=0, renewalRetryAt=0;
   const serverNow=()=>Date.now()+serverOffset;
   let linkResult, access, expires = 0, status = 'idle', generation = 0, loginPending, entryEmail='',enrollment,googlePending,protectionPending,protectionDone,protectionFlight;
+  // Tab-only invite secret. Capture before routing, pending callback handling or any await.
+  let inviteToken,inviteBound,inviteIdentity;
+  const sharingEnabled=globalThis.OTPandaSharingEnabled===true;
+  const dropInvite=()=>{inviteToken=undefined;inviteBound=undefined;inviteIdentity=undefined;};
+  const captureInvite=()=>{
+    if(!location.hash.startsWith('#/invite/'))return false;
+    const m=/^#\/invite\/([A-Za-z0-9_-]{32,512})$/.exec(location.hash);
+    history.replaceState(null,'',location.pathname+location.search+'#/invite');
+    dropInvite();if(m){inviteToken=m[1];if(access)inviteBound=generation;}
+    return true;
+  };
+  captureInvite();
   const encode = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
   const random = () => encode(crypto.getRandomValues(new Uint8Array(32)));
   let realtime;const watchers=new Set();
-  const clear = () => { for(const f of [...watchers])f();watchers.clear();realtime?.suspend();assignment?.clear();generation++; renewalRetryAt=0;signingKey=undefined;renewal=undefined;renewing=undefined;restoring=undefined;access = undefined; expires = 0; loginPending=undefined;enrollment=undefined;googlePending=undefined;protectionPending=undefined; };
+  const clear = () => { dropInvite(); for(const f of [...watchers])f();watchers.clear();realtime?.suspend();assignment?.clear();generation++; renewalRetryAt=0;signingKey=undefined;renewal=undefined;renewing=undefined;restoring=undefined;access = undefined; expires = 0; loginPending=undefined;enrollment=undefined;googlePending=undefined;protectionPending=undefined; };
   // Bound bytes as they arrive. A post-buffer string length check is too late.
   const readBounded = async (response, limit) => {
     const advertised=response.headers?.get('content-length');
@@ -51,7 +63,7 @@
   // No bearer or ceremony is persisted or passed to Flutter.
   const assignment=typeof globalThis.OTPandaAssignmentController==='function'&&typeof globalThis.OTPandaAssignmentTransport==='function'?new globalThis.OTPandaAssignmentController(globalThis.OTPandaAssignmentTransport({access:()=>serverNow()<expires?access:undefined,generation:()=>generation,fetchImpl:(...args)=>fetch(...args),credentials:{get:options=>globalThis.navigator.credentials.get(options)}})):null;
   // Detail routes contain opaque record identifiers only, never a proof or return URL.
-  const ROUTES=['codes','settings','settings/account-security','settings/devices','settings/sources','settings/display','settings/about','settings/account-security/passkeys','recovery','recovery/start','recovery/finish','demo'];
+  const ROUTES=['codes','settings','settings/account-security','settings/devices','settings/sources','settings/display','settings/sharing','invite','settings/about','settings/account-security/passkeys','recovery','recovery/start','recovery/finish','demo'];
   const validDetailId=value=>{
     if(!/^[A-Za-z0-9_-]{2,1366}$/.test(value))return false;
     try{const bytes=Uint8Array.from(atob(value.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0));const id=new TextDecoder('utf-8',{fatal:true}).decode(bytes);return id.length>0&&id.length<=1024&&!/[\x00-\x1f\x7f]/.test(id)&&encode(bytes)===value;}catch{return false;}
@@ -59,7 +71,7 @@
   const validDetailRoute=r=>{if(typeof r!=='string')return false;const p=r.split('/');return p.length===2&&p[0]==='accounts'&&validDetailId(p[1])||p.length===3&&p[0]==='unassigned-details'&&validDetailId(p[1])&&validDetailId(p[2]);};
   const ROUTE_KEY='otpanda.route.tab.v1',validRoute=r=>ROUTES.includes(r)||validDetailRoute(r);
   let route;const routeListeners=new Set();
-  const persistentRoute=r=>validRoute(r)&&!r.startsWith('recovery')&&r!=='demo';
+  const persistentRoute=r=>validRoute(r)&&!r.startsWith('recovery')&&r!=='demo'&&r!=='invite';
   try{const r=sessionStorage.getItem(ROUTE_KEY);if(persistentRoute(r))route=r;}catch{}
   // One-time, neutral Gmail return marker set by the API callback redirect (?gmail=connected|refused). It carries no account,
   // mailbox or reason. It is stripped from the URL immediately, kept in memory only, and read once by takeGmailResult.
@@ -69,8 +81,8 @@
   if(routeHash)route=validRoute(location.hash.slice(2))?location.hash.slice(2):'codes';
   const saveRoute=()=>{try{if(persistentRoute(route))sessionStorage.setItem(ROUTE_KEY,route);else sessionStorage.removeItem(ROUTE_KEY);}catch{}};
   const routeChanged=()=>{saveRoute();for(const f of routeListeners)f();};
-  const showRoute=(r,replace=false)=>{if(!validRoute(r))throw Error('Known route required');route=r;const hash='#/'+r;if(location.hash!==hash)history[replace?'replaceState':'pushState'](null,'',location.pathname+location.search+hash);routeChanged();};
-  const receiveRoute=()=>{if(!location.hash.startsWith('#/'))return;const r=location.hash.slice(2),next=validRoute(r)?r:'codes';if(route!==next||location.hash!=='#/'+next){const wasPublic=route?.startsWith('recovery')||route==='demo';showRoute(next,true);if(wasPublic&&persistentRoute(next)&&status==='idle'){let hint=false;try{hint=localStorage.getItem('otpanda-session-present')==='yes';}catch{}if(hint)Promise.resolve().then(()=>globalThis.OTPandaSession.start('restore'));}}};
+  const showRoute=(r,replace=false)=>{if(route==='invite'&&r!=='invite')dropInvite();if(!validRoute(r))throw Error('Known route required');route=r;const hash='#/'+r;if(location.hash!==hash)history[replace?'replaceState':'pushState'](null,'',location.pathname+location.search+hash);routeChanged();};
+  const receiveRoute=()=>{captureInvite();if(!location.hash.startsWith('#/'))return;const r=location.hash.slice(2),next=validRoute(r)?r:'codes';if(route!==next||location.hash!=='#/'+next){const wasPublic=route?.startsWith('recovery')||route==='demo';showRoute(next,true);if(wasPublic&&persistentRoute(next)&&status==='idle'){let hint=false;try{hint=localStorage.getItem('otpanda-session-present')==='yes';}catch{}if(hint)Promise.resolve().then(()=>globalThis.OTPandaSession.start('restore'));}}};
   globalThis.addEventListener?.('popstate',receiveRoute);globalThis.addEventListener?.('hashchange',receiveRoute);
   Object.defineProperty(globalThis,'OTPandaNavigation',{value:Object.freeze({current:()=>route??(view===4?'settings':'codes'),go:r=>{const wasPublic=route?.startsWith('recovery')||route==='demo';showRoute(r);if(wasPublic&&persistentRoute(r)&&status==='idle'){let hint=false;try{hint=localStorage.getItem('otpanda-session-present')==='yes';}catch{}if(hint)Promise.resolve().then(()=>globalThis.OTPandaSession.start('restore'));}},listen:f=>routeListeners.add(f),unlisten:f=>routeListeners.delete(f)}),writable:false,configurable:false});
   if(routeHash){saveRoute();if(location.hash!=='#/'+route)showRoute(route,true);}
@@ -140,8 +152,8 @@
     const verifier=random(),state=random(),attempt=generation;status='restoring';
     const challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
     if(attempt!==generation)return;
-    sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),...(LINK_NOTICES.includes(notice)?{linkNotice:notice}:{})}));
-    location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));
+    sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route&&route!=='invite'?{route}:{}),created:Date.now(),...(LINK_NOTICES.includes(notice)?{linkNotice:notice}:{})}));
+    dropInvite();location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));
   };
   // A link return counts only with a live marker whose state matches. Anything
   // else returns false and goes through the ordinary (strict) parsing.
@@ -177,7 +189,7 @@
     if (!pending) {
       // This hint describes an active session, not remembered-device recognition.
       let sessionPresent=false;try{sessionPresent=localStorage.getItem('otpanda-session-present')==='yes';}catch{}
-      if(sessionPresent&&!route?.startsWith('recovery')&&route!=='demo'){const verifier=random(),state=random(),attempt=generation;status='restoring';const challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now()}));location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));}
+      if(sessionPresent&&!route?.startsWith('recovery')&&route!=='demo'){const verifier=random(),state=random(),attempt=generation;status='restoring';const challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route&&route!=='invite'?{route}:{}),created:Date.now()}));dropInvite();location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));}
       if(!sessionPresent&&!route?.startsWith('recovery')&&route!=='demo'&&await nativeGoogleAutostart())return;
       return;
     }
@@ -201,8 +213,8 @@
           if(attempt!==generation)return;
           const verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
           if(attempt!==generation)return;
-          sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),view,restoreRetried:true,...(p.linkNotice?{linkNotice:p.linkNotice}:{})}));
-          location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));return;
+          sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route&&route!=='invite'?{route}:{}),created:Date.now(),view,restoreRetried:true,...(p.linkNotice?{linkNotice:p.linkNotice}:{})}));
+          dropInvite();location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));return;
         }
         if(['restart','retry','sign-in'].includes(value)){forgetProfile();try{localStorage.removeItem('otpanda-session-present');}catch{}}
         status=value==='email-sent'?'email-code':value==='sign-in'?'sign-in-required':value;
@@ -298,8 +310,8 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
         }
         if(attempt!==generation)return false;
         try{localStorage.setItem(leaseKey,JSON.stringify({owner,until:Date.now()+3000}));}catch{}
-        sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),view}));
-        location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));
+        sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route&&route!=='invite'?{route}:{}),created:Date.now(),view}));
+        dropInvite();location.assign(API+'/auth/restore?'+new URLSearchParams({challenge,state,redirect_uri:REDIRECT}));
         if(typeof globalThis.setTimeout==='function')setTimeout(()=>{if(attempt===generation&&status==='restoring'){restoring=undefined;renewalRetryAt=Date.now()+10000;status=serverNow()<expires?'restored':access?'session-paused':'sign-in-required';}},8000);
         return false;
       };
@@ -385,7 +397,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     assignmentReconcile:async()=>{if(!assignment)throw Error('Assignment unavailable');return assignment.reconcile();},
     assignmentState:()=>assignment?.state??'unsupported',
     assignmentDismiss:()=>assignment?.dismiss(),
-    status:()=>status,
+    status:()=>{if(['sign-in-required','session-paused'].includes(status))dropInvite();return status;},
     realtimeState:()=>realtime?.state()??'unsupported',
     realtimeConnection:()=>realtime?.connection()??Object.freeze({status:'ok',reason:undefined,retrying:false,since:0}),
     realtimeConnectionSubscribe:listener=>{if(typeof listener!=='function')throw Error('Listener required');connectionListeners.add(listener);return()=>{connectionListeners.delete(listener);};},
@@ -440,7 +452,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
     signupEmail:async(email,proof='')=>{
       if(location.origin+location.pathname!==REDIRECT||location.search||typeof email!=='string'||email.length>254||typeof proof!=='string'||(proof&&!/^otpda_[A-Za-z0-9_-]{55}$/.test(proof)&&! /^[A-HJ-NP-Z2-9]{8}$/i.test(proof.replaceAll(' ','').replaceAll('-',''))))throw Error('Valid signup details required');
       clear();const attempt=generation,verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));if(attempt!==generation)return;
-      sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),email}));
+      sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route&&route!=='invite'?{route}:{}),created:Date.now(),email}));
       const u=new URL(API+'/auth/signup/app');u.search=new URLSearchParams({challenge,state,redirect_uri:REDIRECT});u.hash=new URLSearchParams({action:proof?'begin':'email',email,...(proof?{email_token:proof}:{})});location.assign(u.href);
     },
     access:()=>{if(access!==undefined&&serverNow()>=expires){status='session-paused';return undefined;}return access;},
@@ -453,6 +465,9 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const result=await boundedRead(API+path,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token}},524288);const r=result.response,body=result.body;
       if(attempt!==generation)return {status:401,body:'{}'};
       if(r.status===401){await restoreAfterUnauthorized();return {status:503,body:'{}'};}
+      if(inviteToken&&path==='/v1/manage/session?view=cache-v1'&&r.status===200){
+        try{const v=JSON.parse(body),id=v.ownerId+'\n'+v.sessionId;if(typeof v.ownerId!=='string'||typeof v.sessionId!=='string')dropInvite();else if(inviteIdentity!==undefined&&inviteIdentity!==id)dropInvite();else{inviteIdentity=id;inviteBound=generation;}}catch{dropInvite();}
+      }
       const raw=r.headers?.get('Retry-After');
       let retryAfterSeconds=null;
       if(raw){
@@ -478,6 +493,38 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       const r=await fetch(API+'/v1/manage/organization-copy',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({entryId,receiptId,createdAt})});
       const body=await readBounded(r,4096);if(attempt!==generation)return {status:401,body:'{}'};
       if(r.status===401){await restoreAfterUnauthorized();return {status:503,body:'{}'};}return {status:r.status,body};
+    },
+    sharingAvailable:()=>sharingEnabled,
+    sharingEpoch:()=>generation,
+    sharingPost:async(path,bodyJson,epoch)=>{
+      const paths=['/v1/manage/machine/entries/list', '/v1/manage/machine/profile/create', '/v1/manage/machine/profile/revoke', '/v1/manage/machine/profiles/list', '/v1/manage/machine/token/create', '/v1/manage/machine/token/revoke', '/v1/manage/sharing/contacts/list', '/v1/manage/sharing/contacts/remove', '/v1/manage/sharing/grant/create', '/v1/manage/sharing/grant/revoke', '/v1/manage/sharing/grant/update', '/v1/manage/sharing/invite/create', '/v1/manage/sharing/invite/list', '/v1/manage/sharing/invite/revoke'];
+      if(!sharingEnabled||!paths.includes(path)||typeof bodyJson!=='string'||new TextEncoder().encode(bodyJson).byteLength>4096)throw Error('Sharing request required');
+      const value=JSON.parse(bodyJson);if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Sharing request required');
+      const attempt=generation;if(epoch!==attempt)return {status:503,body:'{}'};
+      if(!await maintainSession(true)||attempt!==generation)return {status:503,body:'{}'};
+      const bearer=serverNow()<expires?access:undefined;if(!bearer)return {status:401,body:'{}'};
+      let result;try{result=await boundedRead(API+path,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+bearer,'Content-Type':'application/json'},body:bodyJson},65536);}catch{return {status:503,body:'{}'};}
+      if(attempt!==generation)return {status:503,body:'{}'};
+      if(result.response.status===401){await restoreAfterUnauthorized();return {status:503,body:'{}'};}
+      return {status:result.response.status,body:result.body};
+    },
+    invitePending:()=>{
+      if(!sharingEnabled)return false;
+      if(status==='sign-in-required'||status==='session-paused'){dropInvite();return false;}
+      if(inviteToken&&status==='restored'){if(inviteBound===undefined)inviteBound=generation;else if(inviteBound!==generation)dropInvite();}
+      return Boolean(inviteToken);
+    },
+    inviteDismiss:()=>{dropInvite();},
+    inviteAccept:async()=>{
+      if(!sharingEnabled||!inviteToken||status!=='restored'||(inviteBound!==undefined&&inviteBound!==generation)) {dropInvite();return {status:404,body:'{}'};}
+      const secret=inviteToken,attempt=generation;dropInvite(); // consumed before any await or send
+      if(!await maintainSession(true)||attempt!==generation)return {status:503,body:'{}'};
+      const bearer=serverNow()<expires?access:undefined;if(!bearer)return {status:401,body:'{}'};
+      let result;
+      try{result=await boundedRead(API+'/v1/manage/sharing/invite/accept',{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',headers:{Authorization:'Bearer '+bearer,'Content-Type':'application/json'},body:JSON.stringify({token:secret})},4096);}catch{return {status:503,body:'{}'};}
+      const r=result.response,body=result.body;if(attempt!==generation)return {status:503,body:'{}'};
+      if(r.status===401){await restoreAfterUnauthorized();return {status:503,body:'{}'};}
+      return {status:r.status,body};
     },
     entryEdit:async(kind,entryId,value,clear)=>{
       // Exact-field, bearer-only. Never retried: the server may have committed.
@@ -723,7 +770,7 @@ const o=c.options;if(!o||Object.keys(o).some(k=>!['rpId','challenge','timeout','
       if(mode!=='restore'){forgetView();forgetProfile();profileRevoked=false;}
       clear();const attempt=generation,verifier=random(),state=random(),challenge=encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
       if(attempt!==generation)return;
-      sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route?{route}:{}),created:Date.now(),...(mode==='restore'?{view}:{})}));
+      sessionStorage.setItem(KEY,JSON.stringify({verifier,state,...(route&&route!=='invite'?{route}:{}),created:Date.now(),...(mode==='restore'?{view}:{})}));
       const url=new URL(API+(mode==='google'?'/auth/google/start':mode==='signup'?'/auth/signup/start':mode==='login'?'/auth/login/start':'/auth/restore'));url.search=new URLSearchParams({challenge,state,redirect_uri:REDIRECT,...(mode==='google'?{remember:remember?'yes':'no'}:{})});location.assign(url.href);
     },
   }),writable:false,configurable:false});

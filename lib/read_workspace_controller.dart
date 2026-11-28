@@ -40,6 +40,8 @@ class ReadWorkspaceController extends ChangeNotifier {
   void Function()? _unsubscribeRealtime;
   Timer? _hintTimer;
   bool _hintPending = false;
+  bool mutationUpdating = false;
+  int _mutationRevision = 0;
   ReadWorkspaceController({required this.bridge, int Function()? clock})
     : clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -168,8 +170,13 @@ class ReadWorkspaceController extends ChangeNotifier {
   }
 
   /// Explicit local mutation invalidation, coalesced behind the existing gate.
-  void refreshAfterMutation() {
+  void refreshAfterMutation({bool showUpdating = false}) {
     if (_disposed || suspended || !signedIn) return;
+    if (showUpdating) {
+      _mutationRevision++;
+      mutationUpdating = true;
+      _notify();
+    }
     _hintPending = true;
     _drainHint();
   }
@@ -182,6 +189,7 @@ class ReadWorkspaceController extends ChangeNotifier {
     if (!canRefresh || _disposed) return;
     _readRetryTimer?.cancel();
     _readRetryTimer = null;
+    final mutationRevision = _mutationRevision;
     final epoch = ++_epoch;
     _nextRefreshAt = clock() + 15000;
     loading = true;
@@ -263,6 +271,7 @@ class ReadWorkspaceController extends ChangeNotifier {
     } finally {
       if (!_disposed && epoch == _epoch) {
         loading = false;
+        if (mutationRevision == _mutationRevision) mutationUpdating = false;
         _notify();
         _drainHint();
       }
@@ -295,6 +304,7 @@ class ReadWorkspaceController extends ChangeNotifier {
   }
 
   void clear() {
+    mutationUpdating = false;
     ++_epoch;
     loading = false;
     hasLoaded = false;
@@ -338,6 +348,10 @@ class ReadWorkspaceController extends ChangeNotifier {
     }
     if (!signedIn) clear();
     _ensureRealtime();
+    if (mutationUpdating) {
+      _hintPending = true;
+      _drainHint();
+    }
     _notify();
   }
 

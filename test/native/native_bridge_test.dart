@@ -52,6 +52,21 @@ class _G implements GoogleIdTokenSource {
   Future<String?> idToken({required String nonce}) async => null;
 }
 
+class _TokenBoundaryController extends NativeSessionController {
+  _TokenBoundaryController(super.auth);
+  bool cross = false;
+  Future<void> Function()? boundary;
+  @override
+  Future<String?> accessToken() async {
+    final token = await super.accessToken();
+    if (cross) {
+      await forceRenew();
+    }
+    await boundary?.call();
+    return token;
+  }
+}
+
 void main() {
   late int renews;
   late int renewStatus;
@@ -106,6 +121,118 @@ void main() {
     renewStatus = 200;
     seenBearers = [];
     apiStatuses = [];
+  });
+
+  test(
+    'sharing successful same-device renewal sends once with stable epoch',
+    () async {
+      final original = await signedIn();
+      final c = _TokenBoundaryController(original.auth);
+      await c.start();
+      final epoch = c.identityEpoch;
+      c.cross = true;
+      var calls = 0;
+      final bridge = NativeSessionBridge(c, (
+        m,
+        p, {
+        body,
+        query,
+        required bearer,
+      }) async {
+        calls++;
+        return const SessionResponse(200, '{}');
+      });
+      final r = await bridge.sharingPost(
+        '/v1/manage/sharing/contacts/list',
+        {},
+      );
+      expect(r.status, 200);
+      expect(calls, 1);
+      expect(c.identityEpoch, epoch);
+      expect(c.session?.deviceId, 'DEV');
+    },
+  );
+
+  test(
+    'sharing device retirement during token await refuses captured bearer',
+    () async {
+      final store = _St();
+      // Native sessions carry no account id. A server-issued device id is bound
+      // to one owner; a different device id is the supported account boundary.
+      final auth = NativeAuth(
+        post: (p, b) async => p == '/auth/native/challenge'
+            ? (
+                status: 200,
+                body: {
+                  'device_id': b['device_id'],
+                  'nonce': 'n',
+                  'expires_at': 5,
+                },
+              )
+            : (
+                status: 200,
+                body: {'access': 'fixture', 'access_expires_at': 9999999999999},
+              ),
+        keystore: _Ks(),
+        browser: _Br(),
+        google: _G(),
+        store: store,
+        apiOrigin: 'https://api.example',
+        launchUrl: (c, s) => Uri.parse('https://x/#$c$s'),
+      );
+      final c = _TokenBoundaryController(auth);
+      await c.start();
+      final epoch = c.identityEpoch;
+      c.boundary = () async {
+        store.id = 'OTHER_DEVICE';
+        await c.forceRenew();
+      };
+      var calls = 0;
+      final bridge = NativeSessionBridge(c, (
+        m,
+        p, {
+        body,
+        query,
+        required bearer,
+      }) async {
+        calls++;
+        return const SessionResponse(200, '{}');
+      });
+      final r = await bridge.sharingPost(
+        '/v1/manage/sharing/contacts/list',
+        {},
+      );
+      expect(r.status, 503);
+      expect(calls, 0);
+      expect(c.identityEpoch, greaterThan(epoch));
+      expect(c.session?.deviceId, 'OTHER_DEVICE');
+    },
+  );
+
+  test('sharing token await crossing identity sends no request', () async {
+    final original = await signedIn();
+    final c = _TokenBoundaryController(original.auth);
+    await c.start();
+    final epoch = c.identityEpoch;
+    c.cross = true;
+    renewStatus = 401;
+    var calls = 0;
+    final bridge = NativeSessionBridge(c, (
+      m,
+      p, {
+      body,
+      query,
+      required bearer,
+    }) async {
+      calls++;
+      return const SessionResponse(200, '{}');
+    });
+    final r = await bridge.sharingPost('/v1/manage/sharing/contacts/list', {
+      'token': 'A' * 32,
+    });
+    expect(r.status, 503);
+    expect(calls, 0);
+    expect(c.identityEpoch, greaterThan(epoch));
   });
 
   test('entry edit: exact bodies, typed ok only, no repeat on failure', () async {

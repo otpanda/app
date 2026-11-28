@@ -43,6 +43,16 @@ extension type _Session(JSObject _) implements JSObject {
   external void assignmentDismiss();
   external JSPromise<JSAny?> get ready;
   external JSString status();
+  external JSBoolean sharingAvailable();
+  external JSNumber sharingEpoch();
+  external JSPromise<_ReadResponse> sharingPost(
+    JSString path,
+    JSString body,
+    JSNumber epoch,
+  );
+  external JSBoolean invitePending();
+  external JSPromise<_ReadResponse> inviteAccept();
+  external void inviteDismiss();
   external JSNumber view();
   external JSPromise<JSAny?> maintain();
   external JSNumber accessExpiresAt();
@@ -137,7 +147,35 @@ class _Browser
         GoogleLinkBridge,
         GoogleConnectBridge,
         ExtensionConnectBridge,
-        ExtensionPopupBridge {
+        ExtensionPopupBridge,
+        SharingInviteBridge,
+        SharingManagementBridge {
+  @override
+  bool get sharingAvailable => _session.sharingAvailable().toDart;
+  @override
+  int get sharingEpoch => _session.sharingEpoch().toDartInt;
+  @override
+  Future<SessionResponse> sharingPost(
+    String path,
+    Map<String, Object?> body,
+    int epoch,
+  ) async {
+    final r = await _session
+        .sharingPost(path.toJS, jsonEncode(body).toJS, epoch.toJS)
+        .toDart;
+    return SessionResponse(r.status.toDartInt, r.body.toDart);
+  }
+
+  @override
+  bool get invitePending => _session.invitePending().toDart;
+  @override
+  void dismissInvite() => _session.inviteDismiss();
+  @override
+  Future<SessionResponse> acceptPendingInvite() async {
+    final r = await _session.inviteAccept().toDart;
+    return SessionResponse(r.status.toDartInt, r.body.toDart);
+  }
+
   @override
   bool get extensionPopup => _session.extensionPopup != null;
   @override

@@ -1,3 +1,8 @@
+import 'sharing_transport.dart';
+import 'management_contract.dart' show MutationUnconfirmed;
+import 'sharing_contract.dart';
+import 'sharing_page.dart';
+import 'sharing_accept_page.dart';
 import 'branding.dart';
 import 'display_settings.dart';
 import 'source_settings.dart';
@@ -64,6 +69,8 @@ class BrowserAccountPage extends StatefulWidget {
   final bool workspaceEnabled;
   final int Function()? clock;
   final Widget? localSecuritySetting;
+  final SharingClient? sharingClient;
+  final Object? sharingIdentity;
 
   /// Unified codes or an allowed settings/recovery route. Unknown routes go home.
   final String? navigation;
@@ -83,6 +90,8 @@ class BrowserAccountPage extends StatefulWidget {
     this.workspaceEnabled = false,
     this.clock,
     this.localSecuritySetting,
+    this.sharingClient,
+    this.sharingIdentity,
     this.navigation,
     this.onNavigate,
   });
@@ -95,6 +104,35 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
   late final BrowserSessionBridge bridge;
   late final CodeStore store;
   late final ReadWorkspaceController workspace;
+  SharingClient? get sharingClient {
+    if (widget.sharingClient != null) return widget.sharingClient;
+    if (!const bool.fromEnvironment('SHARING_ENABLED') ||
+        bridge is! SharingManagementBridge) {
+      return null;
+    }
+    final host = bridge as SharingManagementBridge;
+    if (!host.sharingAvailable || status != 'restored') return null;
+    final epoch = host.sharingEpoch;
+    return SharingClient(
+      BoundSharingTransport(
+        current: () async =>
+            host.sharingAvailable &&
+            host.sharingEpoch == epoch &&
+            bridge.status == 'restored',
+        send: (p, b) => host.sharingPost(p, b, epoch),
+      ),
+    );
+  }
+
+  Object? get sharingIdentity =>
+      widget.sharingIdentity ??
+      (
+        sessionOwner,
+        sessionKey,
+        bridge is SharingManagementBridge
+            ? (bridge as SharingManagementBridge).sharingEpoch
+            : null,
+      );
   bool accountOpen = false;
   SettingsCategory? settingsCategory;
   bool passkeysOpen = false;
@@ -1734,7 +1772,10 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                 ),
               Expanded(
                 child: SettingsHub(
-                  fillPages: const {SettingsCategory.devices},
+                  fillPages: const {
+                    SettingsCategory.devices,
+                    SettingsCategory.sharing,
+                  },
                   footer: settingsFooter(),
                   email: overview?['email'] as String? ?? cachedProfile?.email,
                   emailLoading:
@@ -1803,6 +1844,14 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                       preference: tileDisplay,
                     ),
                     SettingsCategory.about: const AboutPage(),
+                    if (sharingClient != null)
+                      SettingsCategory.sharing: SharingPage(
+                        key: ValueKey(sharingIdentity),
+                        client: sharingClient!,
+                        entries: workspace.store.entries
+                            .where((e) => e.manage)
+                            .toList(),
+                      ),
                   },
                 ),
               ),
@@ -1835,6 +1884,42 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         initialStage: stage,
         onNavigate: widget.onNavigate,
         onExit: widget.onNavigate == null ? null : () => navigated('codes'),
+      );
+    }
+    if (const bool.fromEnvironment('SHARING_ENABLED') &&
+        widget.navigation == 'invite' &&
+        bridge is SharingInviteBridge &&
+        status == 'restored') {
+      final host = bridge as SharingInviteBridge;
+      return Scaffold(
+        body: SharingAcceptPage(
+          key: ValueKey((sessionOwner, sessionKey, 'host-invite')),
+          pending: host.invitePending,
+          consumeOnce: true,
+          acceptPending: () async {
+            final r = await host.acceptPendingInvite();
+            if ([400, 401, 403, 404, 429].contains(r.status)) {
+              throw ClientFailure(r.status);
+            }
+            if (r.status != 200) throw const MutationUnconfirmed();
+            final v = jsonDecode(r.body);
+            if (v is! Map || v['ok'] != true || v['canDelegate'] is! bool) {
+              throw const MutationUnconfirmed();
+            }
+            final mode = AccessMode.values
+                .where((m) => m.name == v['mode'])
+                .firstOrNull;
+            if (mode == null) throw const MutationUnconfirmed();
+            return InviteAccepted(mode, v['canDelegate'] as bool);
+          },
+          onOpenCodes: () {
+            host.dismissInvite();
+            setState(() => applyRoute('codes'));
+            workspace.resume();
+            workspace.refreshAfterMutation(showUpdating: true);
+            navigated('codes');
+          },
+        ),
       );
     }
     if (isExtensionPopup(bridge)) {

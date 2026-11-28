@@ -1,7 +1,7 @@
 function streaming(r){if(r&&typeof r.text==='function'&&!r.body){r.body={getReader(){let sent=false;return {async read(){if(sent)return {done:true};sent=true;return {done:false,value:new TextEncoder().encode(await r.text())};},async cancel(){},releaseLock(){}};}};}return r;}
 const {test}=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');const fs=require('node:fs');const script=fs.readFileSync('tool/session-bootstrap.js','utf8');
 const NOW=1800000000000,token='otpda_'+'a'.repeat(55),state='s'.repeat(43);
-function env({hash='',saved,now=NOW,response={access:token,accessExpiresAt:NOW+300000},hint,navigator,fetchImpl,sessionValues=new Map(),events,lib,path='/app/',query=''}={}){let stored=saved,cleaned=false,calls=0;const location={origin:'https://otpanda.github.io',pathname:path,search:query,hash,assign(url){location.assigned=url;}};const hints=new Map(hint?[['otpanda-session-present','yes']]:[]);const context={AbortController,setTimeout,clearTimeout,localStorage:{getItem:k=>hints.get(k),setItem:(k,v)=>hints.set(k,v),removeItem:k=>hints.delete(k)},location,history:{replaceState(_s,_t,url){cleaned=true;location.hash=typeof url==='string'&&url.includes('#')?url.slice(url.indexOf('#')):'';}},sessionStorage:{getItem(k){return k==='otpanda.restore.tab.v1'?stored:sessionValues.get(k)??null;},removeItem(k){if(k==='otpanda.restore.tab.v1')stored=undefined;else sessionValues.delete(k);},setItem(k,v){if(k==='otpanda.restore.tab.v1')stored=v;else sessionValues.set(k,v);}},fetch:async(url,options)=>{assert.ok(cleaned);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');calls++;return {ok:true,text:async()=>JSON.stringify(response)};},URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),crypto:require('node:crypto').webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Date:class extends Date{static now(){return now;}}};if(navigator)context.navigator=navigator;if(fetchImpl)context.fetch=fetchImpl;let fetchValue=context.fetch;Object.defineProperty(context,'fetch',{get(){return async(...args)=>streaming(await fetchValue(...args));},set(v){fetchValue=v;},enumerable:true,configurable:true});if(events)context.addEventListener=(n,f)=>{events[n]=f;};vm.createContext(context);if(lib){vm.runInContext(fs.readFileSync('tool/native-launch-intent.js','utf8'),context);vm.runInContext(fs.readFileSync('tool/extension-launch-intent.js','utf8'),context);}vm.runInContext(script,context);return {context,get cleaned(){return cleaned;},get stored(){return stored;},get calls(){return calls;}};}
+function env({sharing=false,hash='',saved,now=NOW,response={access:token,accessExpiresAt:NOW+300000},hint,navigator,fetchImpl,sessionValues=new Map(),events,lib,path='/app/',query=''}={}){let stored=saved,cleaned=false,calls=0;const location={origin:'https://otpanda.github.io',pathname:path,search:query,hash,assign(url){location.assigned=url;}};const hints=new Map(hint?[['otpanda-session-present','yes']]:[]);const context={OTPandaSharingEnabled:sharing,AbortController,setTimeout,clearTimeout,localStorage:{getItem:k=>hints.get(k),setItem:(k,v)=>hints.set(k,v),removeItem:k=>hints.delete(k)},location,history:{replaceState(_s,_t,url){cleaned=true;location.hash=typeof url==='string'&&url.includes('#')?url.slice(url.indexOf('#')):'';}},sessionStorage:{getItem(k){return k==='otpanda.restore.tab.v1'?stored:sessionValues.get(k)??null;},removeItem(k){if(k==='otpanda.restore.tab.v1')stored=undefined;else sessionValues.delete(k);},setItem(k,v){if(k==='otpanda.restore.tab.v1')stored=v;else sessionValues.set(k,v);}},fetch:async(url,options)=>{assert.ok(cleaned);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');calls++;return {ok:true,text:async()=>JSON.stringify(response)};},URL,URLSearchParams,TextEncoder,TextDecoder,Uint8Array,atob:s=>Buffer.from(s,'base64').toString('binary'),crypto:require('node:crypto').webcrypto,btoa:s=>Buffer.from(s,'binary').toString('base64'),Date:class extends Date{static now(){return now;}}};if(navigator)context.navigator=navigator;if(fetchImpl)context.fetch=fetchImpl;let fetchValue=context.fetch;Object.defineProperty(context,'fetch',{get(){return async(...args)=>streaming(await fetchValue(...args));},set(v){fetchValue=v;},enumerable:true,configurable:true});if(events)context.addEventListener=(n,f)=>{events[n]=f;};vm.createContext(context);if(lib){vm.runInContext(fs.readFileSync('tool/native-launch-intent.js','utf8'),context);vm.runInContext(fs.readFileSync('tool/extension-launch-intent.js','utf8'),context);}vm.runInContext(script,context);return {context,get cleaned(){return cleaned;},get stored(){return stored;},get calls(){return calls;}};}
 test('callback cleans synchronously before exchange; state consumed and memory access returned',async()=>{const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(e.calls,1);assert.equal(e.stored,undefined);assert.equal(e.context.OTPandaSession.status(),'restored');assert.equal(e.context.OTPandaSession.access(),token);e.context.OTPandaSession.clear();assert.equal(e.context.OTPandaSession.access(),undefined);});
 test('wrong state duplicates missing pending and future/expired state never exchange',async()=>{for(const change of [{saved:undefined},{hash:'#code='+token+'&state=wrong'},{hash:'#code='+token+'&state='+state+'&state='+state},{now:NOW+300001},{now:NOW-1}]){const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),...change});assert.ok(e.cleaned);await e.context.OTPandaSession.ready;assert.equal(e.calls,0);assert.equal(e.context.OTPandaSession.status(),'sign-in-required');}});
 test('invalid response never becomes access; secrets absent from storage',async()=>{const e=env({hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW}),response:{access:token,refresh:'bad',accessExpiresAt:NOW+300000}});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaSession.access(),undefined);assert.equal(e.stored,undefined);});
@@ -779,4 +779,67 @@ test('superseded and unknown routes normalize home without legacy views', async(
 test('stable Details routes restore and malformed IDs normalize home',async()=>{
  for(const r of ['accounts/YQ','unassigned-details/c3Jj/ZXZlbnQ']){const e=env({hash:'#/'+r});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaNavigation.current(),r);}
  for(const r of ['accounts/AA','accounts/YQ==','accounts/_w','accounts/YR','unassigned-details/YQ']){const e=env({hash:'#/'+r});await e.context.OTPandaSession.ready;assert.equal(e.context.OTPandaNavigation.current(),'codes');assert.equal(e.context.location.hash,'#/codes');}
+});
+
+// Invite secrets stay in the host closure, never the route or storage.
+test('invite capture strips synchronously, pending is boolean, token never persisted',async()=>{
+ const secret='A'.repeat(43),storage=new Map(),e=env({sharing:true,hash:'#/invite/'+secret,sessionValues:storage});
+ assert.equal(e.context.location.hash,'#/invite');assert.equal(e.context.OTPandaNavigation.current(),'invite');
+ assert.equal(e.context.OTPandaSession.invitePending(),true);assert.equal(e.calls,0);
+ assert.ok(!JSON.stringify([...storage]).includes(secret));assert.equal(storage.has('otpanda.route.tab.v1'),false);
+ e.context.OTPandaSession.inviteDismiss();assert.equal(e.context.OTPandaSession.invitePending(),false);
+});
+test('malformed invite stripped and disabled capability refuses without sending',async()=>{
+ for(const secret of ['short','A'.repeat(513),'A'.repeat(32)+'?x=1']){const e=env({sharing:true,hash:'#/invite/'+secret});assert.equal(e.context.location.hash,'#/invite');assert.equal(e.context.OTPandaSession.invitePending(),false);assert.equal((await e.context.OTPandaSession.inviteAccept()).status,404);assert.equal(e.calls,0);}
+ const e=env({hash:'#/invite/'+'A'.repeat(43)});assert.equal(e.context.OTPandaSession.invitePending(),false);assert.equal((await e.context.OTPandaSession.inviteAccept()).status,404);
+});
+test('authenticated invite accepts once, clears before send, drops late response on logout',async()=>{
+ const events={},e=env({sharing:true,events,hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});await e.context.OTPandaSession.ready;
+ e.context.location.hash='#/invite/'+'B'.repeat(43);events.hashchange();assert.equal(e.context.OTPandaSession.invitePending(),true);
+ let sends=0,release;e.context.fetch=async(url,o)=>{sends++;assert.equal(e.context.OTPandaSession.invitePending(),false);assert.equal(url,'https://otpanda-api.abrahammurciano.workers.dev/v1/manage/sharing/invite/accept');assert.equal(o.credentials,'omit');assert.equal(o.redirect,'error');assert.equal(o.headers.Authorization,'Bearer '+token);assert.equal(JSON.parse(o.body).token,'B'.repeat(43));return new Promise(r=>release=()=>r({status:200,text:async()=>'{}'}));};
+ const pending=e.context.OTPandaSession.inviteAccept();while(!release)await new Promise(r=>setImmediate(r));assert.equal((await e.context.OTPandaSession.inviteAccept()).status,404);e.context.OTPandaSession.clear();release();assert.equal((await pending).body,'{}');assert.equal(sends,1);
+});
+
+test('invite is lost on external restore redirect and is not in its state record',async()=>{
+ const secret='C'.repeat(43),e=env({sharing:true,hash:'#/invite/'+secret,hint:true});await e.context.OTPandaSession.ready;
+ assert.equal(e.context.OTPandaSession.invitePending(),false);assert.ok(!e.stored.includes(secret));assert.ok(!e.context.location.assigned.includes(secret));
+});
+test('invite bound session identity change clears without accepting',async()=>{
+ const events={},e=env({sharing:true,events,hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});await e.context.OTPandaSession.ready;e.context.location.hash='#/invite/'+'D'.repeat(43);events.hashchange();let n=0;
+ e.context.fetch=async()=>({status:200,text:async()=>JSON.stringify({ownerId:++n===1?'owner1':'owner2',sessionId:'a'.repeat(64)})});
+ await e.context.OTPandaSession.read('/v1/manage/session?view=cache-v1');assert.equal(e.context.OTPandaSession.invitePending(),true);
+ await e.context.OTPandaSession.read('/v1/manage/session?view=cache-v1');assert.equal(e.context.OTPandaSession.invitePending(),false);
+});
+
+test('hung acceptance times out with unknown result, consumed token cannot resend',async()=>{
+ const events={},e=env({sharing:true,events,hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});await e.context.OTPandaSession.ready;e.context.location.hash='#/invite/'+'E'.repeat(43);events.hashchange();let aborted=false;
+ e.context.setTimeout=f=>setImmediate(f);e.context.clearTimeout=clearImmediate;
+ e.context.fetch=async(u,o)=>{o.signal.addEventListener('abort',()=>aborted=true);return new Promise(()=>{});};
+ assert.equal((await e.context.OTPandaSession.inviteAccept()).status,503);assert.equal(aborted,true);assert.equal(e.context.OTPandaSession.invitePending(),false);assert.equal((await e.context.OTPandaSession.inviteAccept()).status,404);
+});
+
+test('browser owner management uses bounded host bearer and epoch, never accept or machine reader',async()=>{
+ const e=env({sharing:true,hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});await e.context.OTPandaSession.ready;const host=e.context.OTPandaSession,epoch=host.sharingEpoch();let n=0;
+ e.context.fetch=async(url,o)=>{n++;assert.equal(url,'https://otpanda-api.abrahammurciano.workers.dev/v1/manage/sharing/invite/list');assert.equal(o.headers.Authorization,'Bearer '+token);assert.equal(o.credentials,'omit');assert.equal(o.redirect,'error');assert.equal(o.method,'POST');return {status:200,text:async()=>' {"invites":[]}' };};
+ assert.equal((await host.sharingPost('/v1/manage/sharing/invite/list','{}',epoch)).status,200);
+ for(const path of ['/v1/manage/sharing/invite/accept','/v1/machine/code'])await assert.rejects(host.sharingPost(path,'{}',epoch));
+ assert.equal((await host.sharingPost('/v1/manage/sharing/invite/list','{}',epoch+1)).status,503);assert.equal(n,1);
+ let release;e.context.fetch=()=>new Promise(r=>release=()=>r({status:200,text:async()=>' {"token":"synthetic"}'}));
+ const result=host.sharingPost('/v1/manage/sharing/invite/create','{}',epoch);while(!release)await new Promise(r=>setImmediate(r));host.clear();release();assert.equal((await result).body,'{}');
+});
+test('browser owner sharing is unavailable when host flag disabled',async()=>{
+ const e=env();assert.equal(e.context.OTPandaSession.sharingAvailable(),false);await assert.rejects(e.context.OTPandaSession.sharingPost('/v1/manage/sharing/invite/list','{}',0));assert.equal(e.calls,0);
+});
+test('actual browser host management calls opt-in identity runtime for lost invite recovery', {skip:!process.env.SHARING_RUNTIME_FIXTURE},async()=>{
+ const {spawn}=require('node:child_process'),{createInterface}=require('node:readline');
+ const child=spawn('node',[process.env.SHARING_RUNTIME_FIXTURE]),lines=createInterface({input:child.stdout})[Symbol.asyncIterator]();let stderr='';child.stderr.on('data',x=>stderr+=x);
+ const e=env({sharing:true,hash:'#code='+token+'&state='+state,saved:JSON.stringify({state,verifier:'v'.repeat(43),created:NOW})});await e.context.OTPandaSession.ready;
+ e.context.fetch=async(url,o)=>{child.stdin.write(JSON.stringify({actor:'owner',path:new URL(url).pathname,body:JSON.parse(o.body)})+'\n');const x=await lines.next();if(x.done)throw Error(stderr);const r=JSON.parse(x.value);return {status:r.status,text:async()=>r.body};};
+ try{
+  const host=e.context.OTPandaSession,epoch=host.sharingEpoch(),call=(p,b)=>host.sharingPost('/v1/manage/sharing/'+p,JSON.stringify(b),epoch);
+  assert.equal((await call('invite/create',{mode:'all',entryIds:[],canDelegate:false,ttlSeconds:86400})).status,200); // discard token
+  const pending=JSON.parse((await call('invite/list',{})).body).invites;assert.equal(pending.length,1);assert.equal('token' in pending[0],false);
+  assert.equal((await call('invite/revoke',{inviteId:pending[0].inviteId})).status,200);
+  assert.equal(JSON.parse((await call('invite/list',{})).body).invites.length,0);
+ }finally{child.stdin.end();await new Promise(r=>child.on('exit',r));}
 });

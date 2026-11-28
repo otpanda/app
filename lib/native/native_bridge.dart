@@ -1,3 +1,5 @@
+import '../sharing_transport.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -665,6 +667,32 @@ class NativeSessionBridge
       parsed = null;
     }
     return (status: r.status, body: parsed);
+  }
+
+  /// Sharing writes are never replayed. Identity is captured before token await.
+  Future<SessionResponse> sharingPost(
+    String path,
+    Map<String, Object?> body,
+  ) async {
+    if (!BoundSharingTransport.paths.contains(path)) {
+      throw StateError('Sharing request required');
+    }
+    final epoch = controller.identityEpoch,
+        device = controller.session?.deviceId;
+    bool valid() =>
+        controller.identityEpoch == epoch &&
+        controller.session?.deviceId == device &&
+        controller.phase == NativeSessionPhase.signedIn;
+    final token = await controller.accessToken();
+    if (!valid()) return const SessionResponse(503, '{}');
+    if (token == null) return const SessionResponse(401, '{}');
+    final r = await _request(
+      'POST',
+      path,
+      body: jsonEncode(body),
+      bearer: token,
+    );
+    return valid() ? r : const SessionResponse(503, '{}');
   }
 
   @override
