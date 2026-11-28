@@ -38,6 +38,7 @@ def isolate():
     shell('settings put system font_scale 1.0')
     shell(f'am force-stop {PKG}')
     shell('am force-stop com.android.documentsui')
+    shell('am force-stop com.google.android.apps.nexuslauncher')
     shell('input keyevent KEYCODE_WAKEUP'); shell('wm dismiss-keyguard'); shell('input keyevent KEYCODE_HOME')
     time.sleep(3)
 
@@ -78,7 +79,7 @@ class Run:
     def select(self, doc, label):
         """Navigate the real picker to the synthetic provider and tap the document. A document that never appears is a harness failure."""
         self.picker_focused()
-        taps = {'root': 0, 'menu': 0}
+        taps = {'root': 0, 'menu': 0, 'doc': 0}
         for _ in range(40):
             act = uinav.next_action(self.dump(f'select-{label}'), doc)
             if act:
@@ -90,8 +91,13 @@ class Run:
                 shell(f'input tap {x} {y}')
                 self.note(f'HARNESS tap {kind}')
                 if kind == 'doc':
-                    self.note(f'HARNESS selected {label}')
-                    return
+                    # A tap is not selection proof, especially during config relayout.
+                    for _wait in range(5):
+                        time.sleep(1)
+                        if not uinav.focus_is_picker(shell('dumpsys window')):
+                            self.note(f'HARNESS selected {label}')
+                            return
+                    self.note('HARNESS document tap did not dismiss picker; refresh layout')
             time.sleep(1)
         raise Harness(f'{self.name}: document {label} never appeared in the picker')
 
@@ -106,7 +112,7 @@ class Run:
         scenario = self.name.split("@")[0]
         for attempt in (1, 2):
             adb('logcat', '-c')
-            shell(f'am start -n {ACT} --es scenario {scenario} --ez fresh true')
+            self.note(shell(f'am start -W -n {ACT} --es scenario {scenario} --ez fresh true').strip())
             self.note(f'HARNESS started attempt {attempt}')
             end = time.time() + 30
             while time.time() < end:

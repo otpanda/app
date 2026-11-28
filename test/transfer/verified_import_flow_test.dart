@@ -80,7 +80,9 @@ void main() {
       );
       final image = await boundary.toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('/downloads/import-recovery-terminal-390.png')
+      final output = Directory('build/test-evidence')
+        ..createSync(recursive: true);
+      await File('${output.path}/import-recovery-terminal-390.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
     });

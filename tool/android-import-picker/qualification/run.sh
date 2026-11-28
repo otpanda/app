@@ -9,8 +9,6 @@ python3 "$q/install.py"
 flutter build apk --debug --flavor google -t "$q/fixture_main.dart" > "$out/build.log" 2>&1
 adb install -t build/app/outputs/flutter-apk/app-google-debug.apk > "$out/install.txt" 2>&1
 trap 'adb uninstall app.otpanda.importfixture || true' EXIT
-python3 "$q/drive.py" "$out"
-python3 "$q/verify.py" "$out"
 # Actual journal filesystem tests, then a hard process boundary after durable pending claim.
 for phase in checks prepare resume;do
  adb shell am force-stop app.otpanda.importfixture
@@ -27,3 +25,6 @@ for phase in checks prepare resume;do
   [[ -z "$(adb shell pidof app.otpanda.importfixture | tr -d '\r')" ]]
  fi
 done
+
+python3 "$q/drive.py" "$out"
+python3 "$q/verify.py" "$out"
