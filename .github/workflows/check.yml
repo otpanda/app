@@ -38,6 +38,33 @@ jobs:
       - name: Qualify enabled native import root with synthetic channels
         if: github.ref == 'refs/heads/qualification/import-v2-current-sharing-ci'
         run: flutter test --dart-define=TOTP_IMPORT_ENABLED=true test/native/import_current_root_qualification_test.dart
+      - name: Node22 for local runtime qualification
+        if: github.ref == 'refs/heads/qualification/import-joined-runtime-v2'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Checkout exact public local-runtime qualification fixture
+        if: github.ref == 'refs/heads/qualification/import-joined-runtime-v2'
+        uses: actions/checkout@v4
+        with:
+          repository: otpanda/api
+          ref: 3730e55cbfb252264a36b1cabd2471b8b2ff6dc4
+          path: _qualification_api
+          persist-credentials: false
+      - name: Qualify joined UI and runtime on SQLite and local workerd storage
+        if: github.ref == 'refs/heads/qualification/import-joined-runtime-v2'
+        run: |
+          cd _qualification_api
+          npm ci
+          cd ..
+          export IMPORT_API_ROOT="$GITHUB_WORKSPACE/_qualification_api"
+          sha256sum test/native/import_joined_runtime_qualification_test.dart "$IMPORT_API_ROOT/tool/local-import-joined-stdio.mjs"
+          for backend in 0 1; do
+            echo "IMPORT_JOINED_BACKEND=$backend (0=SQLite,1=Node API with local workerd D1 storage)"
+            export IMPORT_LOCAL_D1="$backend"
+            echo 'flutter test --dart-define=TOTP_IMPORT_ENABLED=true --dart-define=IMPORT_JOINED_RUNTIME=true test/native/import_joined_runtime_qualification_test.dart'
+            flutter test --dart-define=TOTP_IMPORT_ENABLED=true --dart-define=IMPORT_JOINED_RUNTIME=true test/native/import_joined_runtime_qualification_test.dart
+          done
       - run: flutter analyze
       - name: Check formatting (advisory until a one-time reformat lands after the App53 merge)
         continue-on-error: true
