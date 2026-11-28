@@ -1,3 +1,6 @@
+import 'entry_rule_sources.dart';
+import 'rules_capability.dart';
+
 import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
@@ -44,6 +47,7 @@ class AccountDetailsPage extends StatefulWidget {
 class _AccountDetailsPageState extends State<AccountDetailsPage> {
   late final name = TextEditingController(text: widget.entry.service);
   late final account = TextEditingController(text: widget.entry.account);
+  bool? ruleContent;
   bool busy = false, changed = false, uncertain = false, editing = false;
   String error = '';
   OrganizationStore? draft;
@@ -228,6 +232,53 @@ class _AccountDetailsPageState extends State<AccountDetailsPage> {
       draft = null;
       openingOrganization = null;
     });
+  }
+
+  /// Authenticator chip for TOTP entries; saved matching rules (any entry kind)
+  /// when the server says rules are available or manageable. Delete only when
+  /// creation is not ready.
+  Widget sourcesRow(BuildContext context, RulesCapability? cap) {
+    final showRules = cap?.showsRules == true;
+    if (!widget.entry.totp && !showRules) return const SizedBox.shrink();
+    final mgmtOnly = cap?.available != true;
+    // Management-only with nothing to manage: no empty Sources row, except the
+    // Authenticator chip for TOTP entries.
+    final hide =
+        showRules && mgmtOnly && !widget.entry.totp && ruleContent != true;
+    return Visibility(
+      visible: !hide,
+      maintainState: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Divider(height: 1, color: context.pal.line),
+          info(
+            'Sources',
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (widget.entry.totp)
+                  const Chip(
+                    avatar: Icon(Icons.shield_outlined, size: 16),
+                    label: Text('Authenticator codes'),
+                  ),
+                if (showRules)
+                  EntryRuleSources(
+                    bridge: widget.bridge as RuleBridge,
+                    entryId: widget.entry.id,
+                    managementOnly: mgmtOnly,
+                    onHasContent: (v) {
+                      if (mounted && ruleContent != v) {
+                        setState(() => ruleContent = v);
+                      }
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget info(String label, Widget value) => Padding(
@@ -422,21 +473,13 @@ class _AccountDetailsPageState extends State<AccountDetailsPage> {
                                   : widget.entry.account,
                             ),
                     ),
-                    if (widget.entry.totp) ...[
-                      Divider(height: 1, color: context.pal.line),
-                      info(
-                        'Sources',
-                        const Wrap(
-                          spacing: 6,
-                          children: [
-                            Chip(
-                              avatar: Icon(Icons.shield_outlined, size: 16),
-                              label: Text('Authenticator codes'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                    if (widget.bridge is RuleBridge)
+                      RulesCapable(
+                        bridge: widget.bridge as RuleBridge,
+                        builder: (context, cap) => sourcesRow(context, cap),
+                      )
+                    else
+                      sourcesRow(context, null),
                     if (widget.entry.issuer != null) ...[
                       Divider(height: 1, color: context.pal.line),
                       info('Issuer', Text(widget.entry.issuer!)),

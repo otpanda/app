@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:material_ui/material_ui.dart';
 
 import 'browser_session_contract.dart';
+import 'assignment_rule_contract.dart';
 
 /// Call only from an explicitly enabled real-account surface, never fixtures.
 class AssignmentDialog extends StatefulWidget {
@@ -159,11 +160,17 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
                     'Automation access grants: ${s['automationRecipients']}',
                   ),
                 ],
+                if (s['rule'] is Map<String, dynamic>) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    assignmentRuleDisclosure(s['rule'] as Map<String, dynamic>),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Text(
                   proof
-                      ? 'This releases this code to the selected entry. Recipients may read or save it immediately. Revoking access later cannot undo that. This does not assign future messages.'
-                      : 'This moves this code into the selected entry. It cannot be undone. This does not assign future messages.',
+                      ? 'This releases this code to the selected entry. Recipients may read or save it immediately. Revoking access later cannot undo that. ${s['rule'] is Map && s['rule']['status'] == 'will_save' ? 'The future rule takes effect after confirmation.' : 'This does not assign future messages.'}'
+                      : 'This moves this code into the selected entry. It cannot be undone. ${s['rule'] is Map && s['rule']['status'] == 'will_save' ? 'The future rule takes effect after confirmation.' : 'This does not assign future messages.'}',
                 ),
               ],
               const SizedBox(height: 12),
@@ -179,6 +186,9 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
                       ? 'Complete the passkey prompt. Do not submit again.'
                       : 'Assigning. Do not submit again.',
                 'assigned' => 'Assignment confirmed.',
+                'assigned-paused' => 'Code assigned. The matching rule is still paused. Resume it separately in account Details.',
+                'assigned-no-rule' =>
+                  'Code assigned, but no future matching rule was saved.',
                 'not-assigned' => 'Server confirmed this assignment did not happen. Close to choose an entry and start a new confirmation.',
                 'pending' => 'Assignment is still pending. No new assignment has been sent.',
                 'unknown' => 'Could not confirm the outcome. It may have happened. Check status or sign in again and review the entry before trying a new assignment.',
@@ -193,7 +203,14 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
         actions: [
           if (state == 'confirm')
             FilledButton(
-              onPressed: busy ? null : confirm,
+              onPressed:
+                  busy ||
+                      (s?['rule'] is Map<String, dynamic> &&
+                          !assignmentRuleScopeVerified(
+                            s?['rule'] as Map<String, dynamic>,
+                          ))
+                  ? null
+                  : confirm,
               child: Text(proof ? 'Confirm with passkey' : 'Confirm'),
             ),
           if (uncertain)
@@ -214,9 +231,9 @@ class _AssignmentDialogState extends State<AssignmentDialog> {
                       try {
                         widget.bridge.assignmentDismiss();
                       } catch (_) {}
-                      Navigator.pop(context, state == 'assigned');
+                      Navigator.pop(context, state.startsWith('assigned'));
                     },
-              child: Text(state == 'assigned' ? 'Done' : 'Close'),
+              child: Text(state.startsWith('assigned') ? 'Done' : 'Close'),
             ),
         ],
       ),

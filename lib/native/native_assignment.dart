@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'native_action_proof.dart';
+import '../assignment_rule_contract.dart';
 import 'native_device_proof.dart';
 import 'native_device_routes.dart';
 
@@ -184,9 +185,11 @@ class NativeAssignmentDriver {
     }
     final Object? a = jsonDecode(action);
     if (a is! List) throw const FormatException();
+    final rule = checkedAssignmentRule(a, s);
     final recipients = s['activeRecipients'] as int;
     final automations = s['automationRecipients'] as int;
     final summary = <String, dynamic>{
+      'rule': ?rule,
       'operation': 'assign-code',
       'entryId': entryId,
       'label': s['label'],
@@ -205,9 +208,8 @@ class NativeAssignmentDriver {
           b.containsKey('options') ||
           recipients != 0 ||
           automations != 0 ||
-          a.length != 16 ||
+          !((a.length == 16 && a[1] == 1) || (a.length == 17 && a[1] == 3)) ||
           a[0] != 'otpanda-assignment' ||
-          a[1] != 1 ||
           a[2] != intentId ||
           a[3] != me.ownerId ||
           a[4] != me.deviceId ||
@@ -265,13 +267,17 @@ class NativeAssignmentDriver {
         v.prompt.length > maxPromptTextLength) {
       throw const FormatException();
     }
+    final promptText = rule?['status'] == 'already_saved_paused'
+        ? 'Assign this code to ${v.entryLabel} (${v.accountName}), shared with ${v.recipients} people and ${v.automations} automations. The matching rule stays paused. Resume it separately.'
+        : v.prompt;
+    if (promptText.length > maxPromptTextLength) throw const FormatException();
     return (
       _Pending(
         intentId: intentId,
         action: action,
         token: token,
         challenge: c,
-        prompt: v.prompt,
+        prompt: promptText,
         expiresAt: exp,
       ),
       summary,
@@ -337,7 +343,11 @@ class NativeAssignmentDriver {
       if (attempt != _generation) return _state;
       final st = r.status == 200 ? (r.body?['status']) : null;
       if (st == 'assigned' || st == 'not-assigned') {
-        _state = st as String;
+        _state = st == 'assigned' && r.body?['rule']?['status'] == 'paused'
+            ? 'assigned-paused'
+            : st == 'assigned' && r.body?['rule']?['status'] == 'unavailable'
+            ? 'assigned-no-rule'
+            : st as String;
         _pending = null;
         return _state;
       }
@@ -373,7 +383,11 @@ class NativeAssignmentDriver {
         if (attempt != _generation) return _state;
         final st = r.status == 200 ? (r.body?['status']) : null;
         if (st == 'assigned' || st == 'not-assigned') {
-          _state = st as String;
+          _state = st == 'assigned' && r.body?['rule']?['status'] == 'paused'
+              ? 'assigned-paused'
+              : st == 'assigned' && r.body?['rule']?['status'] == 'unavailable'
+              ? 'assigned-no-rule'
+              : st as String;
           _pending = null;
           return _state;
         }

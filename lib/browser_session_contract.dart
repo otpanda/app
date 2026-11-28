@@ -21,6 +21,20 @@ abstract interface class AssignmentBridge {
   void assignmentDismiss();
 }
 
+/// Lasting sender rule actions, separate from one-code assignment.
+abstract interface class RuleBridge {
+  /// Raw JSON of GET /v1/manage/rules/capabilities. Throws on any failure or a
+  /// session change while in flight. Parse with parseRulesCapability.
+  Future<String> rulesCapabilities();
+  Future<String> readRules();
+  Future<void> deleteRule(String ruleId);
+  Future<String> rulePrepare(String target);
+  Future<String> ruleConfirm();
+  Future<String> ruleReconcile();
+  String get ruleState;
+  void ruleDismiss();
+}
+
 /// App-owned email entry, separate from access/session authority.
 abstract interface class AuthEntryBridge {
   String get email;
