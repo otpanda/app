@@ -8,6 +8,7 @@ import 'package:otpanda_client/totp_read_contract.dart';
 import 'package:otpanda_client/totp_preview_panel.dart';
 
 class Fake implements SessionTransport {
+  String code = '001234';
   int calls = 0;
   Completer<SessionResponse>? pending;
   @override
@@ -25,7 +26,7 @@ class Fake implements SessionTransport {
             200,
             jsonEncode({
               'entryId': 'entry',
-              'code': '001234',
+              'code': code,
               'period': 30,
               'validFrom': 30,
               'validUntil': 60,
@@ -44,11 +45,32 @@ Widget host(
   Object scope = 'one',
   String entry = 'entry',
 }) => MaterialApp(
+  theme: ThemeData(fontFamily: 'Figtree'),
   home: Scaffold(
     body: TotpPreviewPanel(store: store, entryId: entry, scopeKey: scope),
   ),
 );
 void main() {
+  testWidgets('padded seven digits fit at mobile width', (t) async {
+    t.view.physicalSize = const Size(390, 844);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+    final transport = Fake()..code = '0000001';
+    final store = TotpReadStore(transport, monotonicMilliseconds: () => 0);
+    await t.pumpWidget(host(store));
+    await t.tap(find.text('Load fictional code'));
+    await t.pumpAndSettle();
+    expect(find.text('000 0001'), findsOneWidget);
+    expect(t.takeException(), isNull);
+    final box = t.getRect(find.text('000 0001'));
+    expect(box.left, greaterThanOrEqualTo(0));
+    expect(box.right, lessThanOrEqualTo(390));
+    expect(box.width, greaterThan(0));
+    await t.pumpWidget(const SizedBox());
+    store.clear();
+  });
+
   testWidgets(
     'explicit load shows leading zeros and clears at monotonic expiry without refetch',
     (t) async {

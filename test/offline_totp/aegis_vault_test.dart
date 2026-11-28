@@ -32,7 +32,10 @@ void main() {
   test('imports TOTP entries with their own algorithm, digits and period', () {
     final out = parseAegisPlainVault(fixture);
     final by = {for (final a in out.accounts) a.accountName: a};
-    expect(by.keys, {'amy', 'cat', 'fay'});
+    expect(by.keys, {'amy', 'ben', 'cat', 'fay'});
+    expect(by['ben']!.digits, 7);
+    expect(by['ben']!.period, 20);
+    expect(by['ben']!.algorithm, OtpAlgorithm.sha256);
     expect(by['cat']!.algorithm, OtpAlgorithm.sha512);
     expect(by['cat']!.digits, 8);
     expect(by['cat']!.period, 50);
@@ -52,7 +55,6 @@ void main() {
   test('unsupported entries are skipped with a reason, never converted', () {
     final out = parseAegisPlainVault(fixture);
     expect(out.skipped.map((s) => (s.position, s.error)), [
-      (2, OtpFormatError.unsupportedDigits),
       (4, OtpFormatError.unsupportedType),
       (5, OtpFormatError.unsupportedType),
       (7, OtpFormatError.malformed),
@@ -62,8 +64,8 @@ void main() {
     ]);
     expect(out.skipped.join(), isNot(contains('dan')));
     // Safe labels identify what did not migrate (local preview only).
-    expect(out.skipped.first.accountName, 'ben');
-    expect(out.skipped.first.issuer, 'Beta');
+    expect(out.skipped.first.accountName, 'dan');
+    expect(out.skipped.first.issuer, 'Delta');
   });
 
   test('encrypted vaults are refused as encrypted, not as garbage', () {

@@ -26,6 +26,17 @@ SessionResponse ok(Object o) => SessionResponse(200, jsonEncode(o));
 SessionResponse session([int expires = 90000]) =>
     ok({'ownerId': 'owner', 'expiresAt': expires});
 void main() {
+  test('seven digits preserve leading zeros and non-default period', () {
+    final c = GeneratedTotp.fromJson({
+      ...record(),
+      'code': '0000001',
+      'period': 20,
+      'validFrom': 40,
+      'validUntil': 60,
+    });
+    expect(c.value, '0000001');
+    expect(c.period, 20);
+  });
   test('server timestamp contract and strict malformed response rejection', () {
     final c = GeneratedTotp.fromJson(record());
     expect(c.value, '001234');
@@ -34,7 +45,10 @@ void main() {
     for (final change in <Map<String, dynamic>>[
       {'entryId': ''},
       {'entryId': 'bad id'},
-      {'code': '1234567'},
+      {'code': '12345'},
+      {'code': '000000001'},
+      {'code': '123456789'},
+      {'code': '00a0001'},
       {'code': null},
       {'period': '30'},
       {'period': 30.5},

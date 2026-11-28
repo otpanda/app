@@ -149,7 +149,7 @@ OtpauthImport parseOtpauth(String input) {
   }.contains(params['algorithm'] ?? 'SHA1')) {
     throw const OtpauthException(OtpauthProblem.unsupportedAlgorithm);
   }
-  if (!const {'6', '8'}.contains(params['digits'] ?? '6')) {
+  if (!const {'6', '7', '8'}.contains(params['digits'] ?? '6')) {
     throw const OtpauthException(OtpauthProblem.unsupportedDigits);
   }
   final period = params['period'] ?? '30';
