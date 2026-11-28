@@ -16,7 +16,9 @@ jobs:
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with: {flutter-version: '3.50.1', channel: stable, cache: true}
       - run: bash tool/bootstrap.sh
-      - run: python3 -m unittest discover -s tool/android-import-picker/qualification -p '*_test.py'
+      - run: |
+          python3 tool/android-import-picker/qualification/uinav_test.py
+          python3 tool/android-import-picker/qualification/verify_test.py
       - name: Enable disposable emulator KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
