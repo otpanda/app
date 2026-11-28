@@ -8,9 +8,18 @@ for i in range(240):
  try:
   adb('shell','uiautomator','dump','/sdcard/rule-ui.xml');s=adb('shell','cat','/sdcard/rule-ui.xml');root=ET.fromstring(s)
   texts=[(n.get('text',''),n.get('resource-id','')) for n in root.iter('node')]
+  if i%5==0:
+   (out/f'ui-{i}.xml').write_text(s)
+   (out/f'focus-{i}.txt').write_text(adb('shell','dumpsys','window','windows'))
+   print('OS_DRIVER_UI',i,[(n.get('package'),n.get('text'),n.get('resource-id'),n.get('class')) for n in root.iter('node') if n.get('text') or 'EditText' in n.get('class','')],flush=True)
+   adb('shell','screencap','-p',f'/sdcard/rule-diag-{i}.png');subprocess.run(['adb','pull',f'/sdcard/rule-diag-{i}.png',str(out/f'ui-{i}.png')],capture_output=True)
+  systemEditors=[n for n in root.iter('node') if n.get('package') in ['com.android.systemui','com.android.settings','com.google.android.permissioncontroller'] and ('EditText' in n.get('class','') or any(v in n.get('resource-id','').lower() for v in ['pinentry','passwordentry','pin_entry','password_entry']))]
   # Only system credential entry, never a Flutter text field or any account prompt.
-  if any('pinEntry' in rid or 'passwordEntry' in rid for _,rid in texts):
+  if systemEditors:
    (out/f'os-credential-{i}.xml').write_text(s);adb('shell','screencap','-p',f'/sdcard/os-rule-{i}.png');subprocess.run(['adb','pull',f'/sdcard/os-rule-{i}.png',str(out/f'os-rule-{i}.png')],capture_output=True)
+   import re
+   bounds=list(map(int,re.findall(r'\d+',systemEditors[0].get('bounds',''))))
+   if len(bounds)==4:adb('shell','input','tap',str((bounds[0]+bounds[2])//2),str((bounds[1]+bounds[3])//2))
    adb('shell','input','text','864291');adb('shell','input','keyevent','66');print('FIXTURE_OS_CREDENTIAL_SUBMITTED',flush=True)
   else:
    for n in root.iter('node'):

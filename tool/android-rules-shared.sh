@@ -5,6 +5,7 @@ OUT="${1:-native-shared-rules-out}"
 mkdir -p "$OUT"
 [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == 1 ]] || { echo 'Refusing non-emulator'; exit 1; }
 adb shell locksettings set-pin 864291
+adb shell locksettings verify --old 864291
 adb shell input keyevent KEYCODE_WAKEUP
 adb shell input keyevent 82
 ( cd "$API_DIR" && npm ci --no-audit --no-fund && node tool/rules-native-harness.mjs --port 8787 ) > "$OUT/harness.log" 2>&1 & H=$!
