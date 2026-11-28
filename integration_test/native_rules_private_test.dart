@@ -27,6 +27,7 @@ const _harness = String.fromEnvironment(
   'HARNESS',
   defaultValue: 'http://127.0.0.1:8787',
 );
+const _shared = bool.fromEnvironment('SHARED_RULES');
 const _prodApi = 'https://otpanda-api.abrahammurciano.workers.dev';
 
 class _MemStore implements NativeSecureStore {
@@ -167,11 +168,38 @@ void main() {
       );
 
       final proof = ChannelDeviceProofSource();
+      String? enrolledKeyId;
+      if (_shared) {
+        expect(await proof.availability(), DeviceProofAvailability.available);
+        final spki = await proof.createKeyForEnrollment();
+        final begin = await _h('POST', '/__harness/enroll-begin', {
+          'jwk': spkiToJwk(spki),
+        });
+        final c = Map<String, dynamic>.from(begin['challenge'] as Map);
+        final fields = DeviceProofFields(
+          purpose: c['purpose'],
+          ownerId: c['ownerId'],
+          keyId: c['keyId'],
+          generation: c['generation'],
+          challenge: c['challenge'],
+          actionDigest: c['actionDigest'],
+          expiresAt: c['expiresAt'],
+        );
+        debugPrint('OS_RULE_PROMPT enrollment');
+        final sig = await t.runAsync(() => proof.sign(fields));
+        final end = await _h('POST', '/__harness/enroll-finish', {
+          'token': begin['token'],
+          'signature': base64Url.encode(sig!).replaceAll('=', ''),
+        });
+        enrolledKeyId = end['keyId'] as String;
+        await proof.saveConfirmed(seed['ownerId'] as String, enrolledKeyId);
+        await _h('POST', '/__harness/shared');
+      }
       Future<({String deviceId, String? keyId, String ownerId})>
       identity() async => (
         ownerId: seed['ownerId'] as String,
         deviceId: controller.session!.deviceId,
-        keyId: null as String?,
+        keyId: enrolledKeyId,
       );
       bridge.assignment = NativeAssignmentDriver(
         post: bridge.assignmentPost,
@@ -226,10 +254,14 @@ void main() {
           entryId: entryId,
         ),
       );
-      await _until(t, find.text('Confirm'));
+      await _until(
+        t,
+        find.text(_shared ? 'Confirm with passkey' : 'Confirm'),
+      );
       await _shot(t, 'rule-assign-private');
       expect((await _h('GET', '/__harness/rules'))['rules'], isEmpty);
-      await t.tap(find.text('Confirm'));
+      debugPrint('OS_RULE_PROMPT step-up');
+      await t.tap(find.text(_shared ? 'Confirm with passkey' : 'Confirm'));
       await _until(t, find.text('Assignment confirmed.'));
       await t.tap(find.text('Done'));
       await assignment;
@@ -254,14 +286,18 @@ void main() {
           },
         ),
       );
-      await _until(t, find.text('Confirm'));
+      await _until(
+        t,
+        find.text(_shared ? 'Confirm with passkey' : 'Confirm'),
+      );
       await _shot(t, 'rule-resume-private');
       expect(
         ((await _h('GET', '/__harness/rules'))['rules'] as List)
             .single['paused_at'],
         isNotNull,
       );
-      await t.tap(find.text('Confirm'));
+      debugPrint('OS_RULE_PROMPT step-up');
+      await t.tap(find.text(_shared ? 'Confirm with passkey' : 'Confirm'));
       await _until(t, find.text('Rule confirmed for future matching codes.'));
       await _shot(t, 'rule-resumed-private');
       await t.tap(find.text('Done'));

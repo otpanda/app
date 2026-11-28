@@ -1,3 +1,4 @@
+import {DurableDeviceKeys,deviceEnrollmentAction} from '../src/durable-device-keys.js';
 // Local, synthetic-only API for the Android Keystore round-trip test.
 // Runs the real auth-only Worker (src/auth-only-worker.js) in Miniflare with a
 // real D1 (SQLite) and the repo's migrations, and exposes it on 127.0.0.1.
@@ -49,7 +50,7 @@ function migrationStatements() {
       if (/^\s*--/.test(line)) continue;
       cur += line + '\n';
       if (/^\s*CREATE\s+(TEMP\s+|TEMPORARY\s+)?TRIGGER\b/i.test(line)) trigger = true;
-      const done = trigger ? /^\s*END\s*;\s*$/i.test(line) : /;\s*$/.test(line);
+      const done = trigger ? (/^\s*END\s*;\s*$/i.test(line)||(/^\s*CREATE\s+TRIGGER/i.test(line)&&/\bBEGIN\b.*\bEND\s*;\s*$/i.test(line))) : /;\s*$/.test(line);
       if (done) { if (cur.trim()) out.push(cur.trim()); cur = ''; trigger = false; }
     }
     if (cur.trim()) out.push(cur.trim());
@@ -83,7 +84,7 @@ const options = await convertV4MiniflareOptions({
 options.workers[0].dev.outboundService = {type: 'fetcher', handler: async r => { throw Error('Unexpected outbound request ' + r.url); }};
 const mf = new Miniflare(options);
 const db = await mf.getD1Database('DB');
-for (const sql of migrationStatements()) await db.prepare(sql).run();
+for (const sql of migrationStatements()) {try{await db.prepare(sql).run();}catch(e){console.error('MIGRATION_FAILED',sql);throw e;}}
 
 const TEMPLATE_SECRET=Array.from({length:32},(_,i)=>(i*7+13).toString(16).padStart(2,'0')).join('');
 const clock = () => Date.now();
@@ -105,7 +106,7 @@ async function seed() {
   await db.prepare("UPDATE sources SET receiver='+15550001111' WHERE source_id=?").bind(source).run();
   await store.receive(account.ownerId, {sender:'+15557778888',receiver:'+15550001111',text:'Your Fictional code is 123456',sourceId: source, eventId: 'seed-code', code: '123456', receivedAt: now, expiresAt: now + 3600000});
 
-  seeded = {ownerId: account.ownerId, entryId: entry, sourceId: source, code: '123456', webDeviceId: web.deviceId};
+  seeded = {ownerId: account.ownerId, entryId: entry, sourceId: source, code: '123456', webDeviceId: web.deviceId, credentialId:a.credential.id, generation:account.generation};
   return seeded;
 }
 
@@ -119,6 +120,19 @@ const server = createServer(async (req, res) => {
       if (u.pathname === '/__harness/health') return json(res, 200, {ok: true});
       if (u.pathname === '/__harness/seed' && req.method === 'POST') {
         const s = await seed(); return json(res, 200, {ownerId: s.ownerId, entryId: s.entryId, sourceId: s.sourceId, code: s.code});
+      }
+      if(u.pathname === '/__harness/enroll-begin' && req.method === 'POST'){
+        const s=await seed(),{jwk}=JSON.parse((await readBody(req)).toString()),keys=new DurableDeviceKeys(db,{clock});
+        // Synthetic strong enrollment authority only; OS possession signature is real and verified below.
+        const b=await keys.beginEnrollment({jwk,strongProof:{ownerId:s.ownerId,credentialId:s.credentialId,generation:s.generation,purpose:'step-up',actionDigest:await deviceEnrollmentAction(jwk),verifiedAt:Date.now()},browserBinding:'s'.repeat(43)});
+        return json(res,b?200:400,b??{error:'synthetic_enroll_refused'});
+      }
+      if(u.pathname === '/__harness/enroll-finish' && req.method === 'POST'){
+        const {token,signature}=JSON.parse((await readBody(req)).toString()),result=await new DurableDeviceKeys(db,{clock}).finish({token,signature,browserBinding:'s'.repeat(43)});
+        return json(res,result?200:400,result??{error:'possession_refused'});
+      }
+      if(u.pathname === '/__harness/shared' && req.method === 'POST'){
+        const s=await seed();await db.prepare("INSERT OR IGNORE INTO accounts(owner_id,created_at)VALUES('synthetic-recipient',?)").bind(Date.now()).run();await db.prepare("INSERT OR IGNORE INTO entry_shares(entry_id,recipient_id,created_at)VALUES(?,'synthetic-recipient',?)").bind(s.entryId,Date.now()).run();return json(res,200,{ok:true});
       }
       if (u.pathname === '/__harness/mint' && req.method === 'POST') {
         const s = await seed(), {challenge} = JSON.parse((await readBody(req)).toString());

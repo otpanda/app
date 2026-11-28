@@ -1,7 +1,7 @@
 name: Isolated native signed rule qualification
 on:
   push:
-    branches: [feat/signed-rule-client]
+    branches: [qualification/rules-current-main-20261128]
 permissions:
   contents: read
 jobs:
@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: otpanda/api
-          ref: 72f4159ea58d8683a5f4d0689a4e50a6a81e9da7
+          ref: 368bca2245c2c02543fc82093ed339d06ded00cb
           path: api-fixture
       - uses: actions/setup-java@v4
         with:
@@ -44,11 +44,11 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            API_DIR="$GITHUB_WORKSPACE/api-fixture" bash tool/android-rules-private.sh native-rules-out
+            API_DIR="$GITHUB_WORKSPACE/api-fixture" bash tool/android-rules-shared.sh native-rules-out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: native-private-rules-evidence
+          name: native-shared-rules-evidence
           path: |
             native-rules-out
           retention-days: 7
