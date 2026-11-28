@@ -54,6 +54,7 @@ jobs:
       - name: Qualify joined UI and runtime on SQLite and local workerd storage
         if: github.ref == 'refs/heads/qualification/import-joined-runtime-v2'
         run: |
+          trap 'rm -rf -- "$GITHUB_WORKSPACE/_qualification_api"' EXIT
           cd _qualification_api
           npm ci
           cd ..
