@@ -26,6 +26,12 @@ for name in ('TotpCalculator.kt', 'SeedCustody.kt', 'AndroidSeedVault.kt',
              'SeedSyncKey.kt', 'SeedSyncWire.kt', 'SeedSyncHandle.kt', 'SeedSyncChannel.kt',
              'InstallId.kt', 'AndroidInstallIdStore.kt', 'AndroidSyncKeyVault.kt', 'SeedSyncStateFileStore.kt'):
     shutil.copyfile(Path(__file__).parent / 'offline-totp' / name, custody / name)
+# Reuse the reviewed strict-text document picker. No custody host dependency.
+picker = Path(__file__).parent / 'android-import-picker'
+document = root / 'main' / 'kotlin' / 'org' / 'otpanda' / 'documentimport'
+document.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(picker / 'DocumentImport.kt', document / 'DocumentImport.kt')
+shutil.copyfile(picker / 'host' / 'ImportPickerHost.kt', root / 'main' / 'kotlin' / 'app' / 'otpanda' / 'ImportPickerHost.kt')
 g = Path('android/app/build.gradle.kts'); s = g.read_text()
 if 'androidx.credentials:credentials:' not in s:
     s = s.rstrip('\n') + '''

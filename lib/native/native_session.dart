@@ -28,11 +28,24 @@ class NativeSessionController extends ChangeNotifier {
   NativeSessionPhase _phase = NativeSessionPhase.unknown;
   NativeSession? _session;
   String? lastError;
+  int _identityEpoch = 0;
+  String? _identityDevice;
+
+  /// Stable across token renewal. Retires every signed-out/device boundary.
+  int get identityEpoch => _identityEpoch;
 
   NativeSessionPhase get phase => _phase;
   NativeSession? get session => _session;
 
   void _set(NativeSessionPhase p, [NativeSession? s, String? err]) {
+    final retired =
+        p == NativeSessionPhase.signedOut ||
+        p == NativeSessionPhase.signInRequired;
+    final next = retired ? null : s?.deviceId ?? _identityDevice;
+    if (next != _identityDevice) {
+      _identityEpoch++;
+      _identityDevice = next;
+    }
     _phase = p;
     _session = s;
     lastError = err;

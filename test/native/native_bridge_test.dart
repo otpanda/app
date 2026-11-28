@@ -52,6 +52,19 @@ class _G implements GoogleIdTokenSource {
   Future<String?> idToken({required String nonce}) async => null;
 }
 
+class _TokenBoundaryController extends NativeSessionController {
+  _TokenBoundaryController(super.auth);
+  bool cross = false;
+  @override
+  Future<String?> accessToken() async {
+    final token = await super.accessToken();
+    if (cross) {
+      await forceRenew();
+    }
+    return token;
+  }
+}
+
 void main() {
   late int renews;
   late int renewStatus;
@@ -106,6 +119,99 @@ void main() {
     renewStatus = 200;
     seenBearers = [];
     apiStatuses = [];
+  });
+
+  test(
+    'transfer response survives same-device access renewal without replay',
+    () async {
+      final c = await signedIn();
+      final epoch = c.identityEpoch;
+      var calls = 0;
+      final bridge = NativeSessionBridge(c, (
+        m,
+        p, {
+        body,
+        query,
+        required bearer,
+      }) async {
+        calls++;
+        await c.forceRenew();
+        return const SessionResponse(200, '{"status":"fenced"}');
+      });
+      final r = await bridge.transferPost('/v1/manage/totp/batch-outcome', {
+        'protocol': 2,
+        'admissionId': 'B' * 32,
+        'batchNonce': 'v2:${'A' * 32}',
+        'fence': true,
+      });
+      expect(r.status, 200);
+      expect(r.body?['status'], 'fenced');
+      expect(calls, 1);
+      expect(c.identityEpoch, epoch);
+    },
+  );
+
+  test(
+    'transfer response refuses a retired identity epoch without replay',
+    () async {
+      final c = await signedIn();
+      final epoch = c.identityEpoch;
+      var calls = 0;
+      final bridge = NativeSessionBridge(c, (
+        m,
+        p, {
+        body,
+        query,
+        required bearer,
+      }) async {
+        calls++;
+        renewStatus = 401;
+        await c.forceRenew();
+        return const SessionResponse(
+          200,
+          '{"status":"saved","entryIds":["one"]}',
+        );
+      });
+      final r = await bridge.transferPost('/v1/manage/totp/batch-outcome', {
+        'protocol': 2,
+        'admissionId': 'B' * 32,
+        'batchNonce': 'v2:${'A' * 32}',
+        'fence': true,
+      });
+      expect(r.status, 503);
+      expect(r.body, null);
+      expect(calls, 1);
+      expect(c.identityEpoch, greaterThan(epoch));
+    },
+  );
+
+  test('transfer token await crossing identity sends no request', () async {
+    final original = await signedIn();
+    final c = _TokenBoundaryController(original.auth);
+    await c.start();
+    final epoch = c.identityEpoch;
+    c.cross = true;
+    renewStatus = 401;
+    var calls = 0;
+    final bridge = NativeSessionBridge(c, (
+      m,
+      p, {
+      body,
+      query,
+      required bearer,
+    }) async {
+      calls++;
+      return const SessionResponse(200, '{}');
+    });
+    final r = await bridge.transferPost('/v1/manage/totp/batch-outcome', {
+      'protocol': 2,
+      'admissionId': 'B' * 32,
+      'batchNonce': 'v2:${'A' * 32}',
+      'fence': true,
+    });
+    expect(r.status, 503);
+    expect(calls, 0);
+    expect(c.identityEpoch, greaterThan(epoch));
   });
 
   test('entry edit: exact bodies, typed ok only, no repeat on failure', () async {

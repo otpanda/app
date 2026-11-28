@@ -30,6 +30,12 @@ enum SettingsCategory {
     'Account tile appearance on this device',
     Icons.view_compact_outlined,
   ),
+  transfer(
+    'settings/transfer-codes',
+    'Transfer codes',
+    'Import or export authenticator accounts',
+    Icons.import_export,
+  ),
   about(
     'settings/about',
     'About',

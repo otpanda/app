@@ -1,3 +1,8 @@
+import '../transfer/owner_bound_import_coordinator.dart';
+import '../transfer/android_import_picker.dart';
+import '../import_recovery_journal.dart';
+import '../transfer/verified_import_flow.dart';
+
 import 'dart:convert';
 import 'dart:io' show Platform;
 
@@ -30,6 +35,18 @@ const String apiOrigin = String.fromEnvironment(
   'OTPANDA_API_ORIGIN',
   defaultValue: 'https://otpanda-api.abrahammurciano.workers.dev',
 );
+
+/// Root file boundary: a document selected across an identity/lock change is
+/// discarded before parsing. The picker itself carries no authority.
+@visibleForTesting
+Future<String?> guardedImportFile({
+  required Future<bool> Function() current,
+  required Future<String?> Function() pick,
+}) async {
+  if (!await current()) return null;
+  final text = await pick();
+  return await current() ? text : null;
+}
 
 Widget buildNativeRoot() {
   if (!Platform.isAndroid) return const NativePlatformBrowserApp();
@@ -67,6 +84,14 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   late final NativeSessionBridge bridge;
   final passkeys = AndroidPasskeySource();
   bool ready = false;
+  bool _importForeground = true;
+  final _importPicker = AndroidImportPicker();
+  OwnerBoundImportCoordinator? _importCoordinator;
+  (int, String)? _importCoordinatorKey;
+  static const _importEnabled = bool.fromEnvironment(
+    'TOTP_IMPORT_ENABLED',
+    defaultValue: false,
+  );
   final localLock = LocalLockController(ChannelLocalLock());
   late final lockNavigation = LockNavigationObserver(localLock);
   void _lockChanged() {
@@ -191,6 +216,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
   // Foreground-only realtime: only a resumed app holds the socket.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _importForeground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       bridge.realtimeSetForeground(true);
     } else if (state != AppLifecycleState.inactive) {
@@ -205,6 +231,7 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     startup.dispose();
     devices.dispose();
     bridge.disposeRealtime();
+    _importPicker.cancel();
     navigationHistory.dispose();
     localLock.removeListener(_lockChanged);
     lockNavigation.dispose();
@@ -225,8 +252,59 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
           signedInBuilder: (context) => NativeNavigation(
             history: navigationHistory,
             builder: (context, route, navigate) {
+              final session = controller.session;
+              final identityEpoch = controller.identityEpoch;
+              final lockGeneration = localLock.lockGeneration;
+              Future<bool> importCurrent() async =>
+                  mounted &&
+                  _importForeground &&
+                  controller.identityEpoch == identityEpoch &&
+                  controller.session?.deviceId == session?.deviceId &&
+                  controller.phase == NativeSessionPhase.signedIn &&
+                  localLock.ready &&
+                  !localLock.locked &&
+                  localLock.lockGeneration == lockGeneration;
+              final coordinatorKey = (identityEpoch, lockGeneration);
+              if (_importEnabled &&
+                  session != null &&
+                  _importCoordinatorKey != coordinatorKey) {
+                _importCoordinatorKey = coordinatorKey;
+                _importCoordinator = OwnerBoundImportCoordinator(
+                  deviceId: session.deviceId,
+                  current: importCurrent,
+                  readSession: () async {
+                    final r = await bridge.read('/v1/manage/session');
+                    return (status: r.status, body: r.body);
+                  },
+                  post: bridge.transferPost,
+                  passkeys: passkeys,
+                  journal: ChannelImportJournal(),
+                );
+              }
               final page = BrowserAccountPage(
                 bridge: bridge,
+                importSaver: _importEnabled ? _importCoordinator : null,
+                transferPageBuilder: !_importEnabled || session == null
+                    ? null
+                    : (existing, refresh) => VerifiedImportFlow(
+                        key: ValueKey((identityEpoch, lockGeneration)),
+                        deviceId: session.deviceId,
+                        coordinator: _importCoordinator,
+                        existing: existing,
+                        onSaved: refresh,
+                        readFile: () => guardedImportFile(
+                          current: importCurrent,
+                          pick: _importPicker.pick,
+                        ),
+                        current: importCurrent,
+                        readSession: () async {
+                          final r = await bridge.read('/v1/manage/session');
+                          return (status: r.status, body: r.body);
+                        },
+                        post: bridge.transferPost,
+                        passkeys: passkeys,
+                        journal: ChannelImportJournal(),
+                      ),
                 localSecuritySetting: LocalLockSetting(controller: localLock),
                 navigation: route,
                 onNavigate: navigate,

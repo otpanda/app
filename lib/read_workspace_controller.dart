@@ -43,6 +43,12 @@ class ReadWorkspaceController extends ChangeNotifier {
   ReadWorkspaceController({required this.bridge, int Function()? clock})
     : clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
+  /// Shared best-effort duplicate keys from the current owned TOTP snapshot.
+  Set<(String?, String)> get importDuplicateKeys => {
+    for (final e in store.entries)
+      if (e.manage && e.totp) (e.issuer, e.account),
+  };
+
   bool get signedIn =>
       !sessionEnded &&
       ['restored', 'session-paused', 'restoring'].contains(bridge.status);
