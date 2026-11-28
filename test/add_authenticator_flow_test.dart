@@ -112,6 +112,31 @@ void main() {
     bridge = _Bridge();
   });
 
+  testWidgets('scan and manual seven-digit URI save exact non-default period', (
+    t,
+  ) async {
+    for (final manual in [false, true]) {
+      bridge = _Bridge();
+      await open(t);
+      const uri =
+          'otpauth://totp/Seven:alice?secret=JBSWY3DPEHPK3PXP&issuer=Seven&digits=7&period=20';
+      if (manual) {
+        await t.tap(find.text('Enter key manually'));
+        await t.pumpAndSettle();
+        await t.enterText(find.byType(TextField), uri);
+        await t.pump();
+        await t.tap(find.text('Next'));
+      } else {
+        scan(uri);
+      }
+      await t.pumpAndSettle();
+      expect(find.text('Verify and add'), findsOneWidget);
+      await t.tap(find.text('Verify and add'));
+      await t.pumpAndSettle();
+      expect(bridge.adds.single, ['Seven', 'alice', uri]);
+      await t.pumpWidget(const SizedBox());
+    }
+  });
   testWidgets(
     'opens straight to the camera: no fields, no Next, no extra tap',
     (t) async {

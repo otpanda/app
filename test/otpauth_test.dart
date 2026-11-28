@@ -13,6 +13,18 @@ void main() {
     expect(r.uri, u);
     expect(r.toString(), isNot(contains(s)));
   });
+  test('seven digit URI is preserved for add-authenticator save', () {
+    const uri =
+        'otpauth://totp/Seven:alice?secret=$s&issuer=Seven&digits=7&period=20';
+    expect(parseOtpauth(uri).uri, uri);
+    expect(parseSetupKey(uri)!.uri, uri);
+    for (final d in ['5', '9', '07', '+7', '7.0']) {
+      expect(
+        () => parseOtpauth(uri.replaceFirst('digits=7', 'digits=$d')),
+        throwsA(isA<OtpauthException>()),
+      );
+    }
+  });
   test('issuer from label prefix; label only becomes name', () {
     expect(parseOtpauth('otpauth://totp/GitHub:bob?secret=$s').name, 'GitHub');
     final r = parseOtpauth('otpauth://totp/bob?secret=$s');
@@ -50,7 +62,7 @@ void main() {
       OtpauthProblem.unsupportedAlgorithm,
     );
     bad(
-      'otpauth://totp/a?secret=$s&digits=7',
+      'otpauth://totp/a?secret=$s&digits=9',
       OtpauthProblem.unsupportedDigits,
     );
     bad(

@@ -17,6 +17,53 @@ Map<String, Object?> _svc(
 }) => {'name': name, 'secret': secret, 'otp': otp};
 
 void main() {
+  test('seven-digit formats and non-default periods are preserved', () {
+    final two = parseTwoFasBackup(
+      _twofas([
+        _svc('Seven', {'account': 'seven@test', 'digits': 7, 'period': 20}),
+      ]),
+    );
+    expect((two.accounts.single.digits, two.accounts.single.period), (7, 20));
+    const uri =
+        'otpauth://totp/Seven:seven@test?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Seven&digits=7&period=60';
+    final account = parseOtpauthUri(uri);
+    expect((account.digits, account.period), (7, 60));
+    expect(
+      (
+        parseOtpauthUri(encodeOtpauthUri(account)).digits,
+        parseOtpauthUri(encodeOtpauthUri(account)).period,
+      ),
+      (7, 60),
+    );
+    final json = parseBitwardenJson(
+      jsonEncode({
+        'encrypted': false,
+        'items': [
+          {
+            'type': 1,
+            'name': 'Seven',
+            'login': {'username': 'seven@test', 'totp': uri},
+          },
+        ],
+      }),
+    );
+    expect((json.accounts.single.digits, json.accounts.single.period), (7, 60));
+    final csv = parseBitwardenCsv(
+      'name,login_username,login_totp\nSeven,seven@test,$uri\n',
+    );
+    expect((csv.accounts.single.digits, csv.accounts.single.period), (7, 60));
+    for (final digits in [5, 9]) {
+      expect(
+        () => account.withParameters(digits: digits),
+        fails(OtpFormatError.unsupportedDigits),
+      );
+      expect(
+        () => parseOtpauthUri(uri.replaceFirst('digits=7', 'digits=$digits')),
+        fails(OtpFormatError.unsupportedDigits),
+      );
+    }
+  });
+
   group('2FAS plain', () {
     test('imports TOTP with parameters; skips HOTP, Steam; marks defaults', () {
       final o = parseTwoFasBackup(
