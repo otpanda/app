@@ -3,6 +3,7 @@ import 'management_contract.dart' show MutationUnconfirmed;
 import 'sharing_contract.dart';
 import 'sharing_page.dart';
 import 'sharing_accept_page.dart';
+import 'transfer/import_review.dart';
 import 'branding.dart';
 import 'display_settings.dart';
 import 'source_settings.dart';
@@ -71,6 +72,13 @@ class BrowserAccountPage extends StatefulWidget {
   final Widget? localSecuritySetting;
   final SharingClient? sharingClient;
   final Object? sharingIdentity;
+  final Widget? transferPage;
+  final Widget Function(
+    Set<(String?, String)> existing,
+    Future<void> Function() refresh,
+  )?
+  transferPageBuilder;
+  final ImportSaver? importSaver;
 
   /// Unified codes or an allowed settings/recovery route. Unknown routes go home.
   final String? navigation;
@@ -92,6 +100,9 @@ class BrowserAccountPage extends StatefulWidget {
     this.localSecuritySetting,
     this.sharingClient,
     this.sharingIdentity,
+    this.transferPage,
+    this.transferPageBuilder,
+    this.importSaver,
     this.navigation,
     this.onNavigate,
   });
@@ -1775,6 +1786,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                   fillPages: const {
                     SettingsCategory.devices,
                     SettingsCategory.sharing,
+                    SettingsCategory.transfer,
                   },
                   footer: settingsFooter(),
                   email: overview?['email'] as String? ?? cachedProfile?.email,
@@ -1852,6 +1864,18 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
                             .where((e) => e.manage)
                             .toList(),
                       ),
+                    SettingsCategory.transfer:
+                        widget.transferPageBuilder?.call(
+                          workspace.importDuplicateKeys,
+                          workspace.refresh,
+                        ) ??
+                        widget.transferPage ??
+                        const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text(
+                            'Transfer codes is not available on this client yet.',
+                          ),
+                        ),
                   },
                 ),
               ),
@@ -1929,6 +1953,7 @@ class _BrowserAccountPageState extends State<BrowserAccountPage>
         ['restored', 'session-paused', 'restoring'].contains(status) &&
         !accountOpen) {
       return ProductShell(
+        importSaver: widget.importSaver,
         navigation: widget.navigation,
         onNavigate: widget.onNavigate,
         organization: organizationReady ? organization : null,

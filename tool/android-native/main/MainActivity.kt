@@ -62,6 +62,8 @@ open class MainActivity : FlutterActivity() {
         GoogleFlavor.register(this, flutterEngine.dartExecutor.binaryMessenger)
         PasskeyHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
         DeviceProofHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
+        ImportJournalHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
+        ImportPickerHost.register(flutterEngine)
         captureLink(intent)
     }
 
