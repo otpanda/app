@@ -6,3 +6,7 @@ export 'offline_totp/otpauth_uri.dart';
 export 'offline_totp/native_seed_custody.dart';
 export 'offline_totp/native_seed_sync_guard.dart';
 export 'offline_totp/totp_calculator.dart';
+export 'offline_totp/import_outcome.dart';
+export 'offline_totp/aegis_vault.dart';
+export 'offline_totp/two_fas.dart';
+export 'offline_totp/bitwarden.dart';

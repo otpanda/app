@@ -15,6 +15,7 @@ import 'assignment_dialog.dart';
 import 'account_details_page.dart';
 import 'detail_routes.dart';
 import 'totp_enrollment.dart';
+import 'transfer/import_review.dart';
 import 'read_workspace_controller.dart';
 
 import 'package:material_ui/material_ui.dart';
@@ -35,6 +36,7 @@ import 'session_contract.dart';
 /// states. No fixture data is ever shown here. Mutations are not offered
 /// until their endpoints exist.
 class ProductShell extends StatefulWidget {
+  final ImportSaver? importSaver;
   final String? navigation;
   final ValueChanged<String>? onNavigate;
   final ReadWorkspaceController controller;
@@ -75,6 +77,7 @@ class ProductShell extends StatefulWidget {
   const ProductShell({
     super.key,
     required this.controller,
+    this.importSaver,
     this.navigation,
     this.onNavigate,
     this.organization,
@@ -1822,7 +1825,14 @@ class _ProductShellState extends State<ProductShell>
     final id = await addTotpDialog(
       context,
       widget.controller.bridge as TotpManagementBridge,
+      importSaver: widget.importSaver,
+      existingImports: widget.controller.importDuplicateKeys,
     );
+    if (id != null && id.isEmpty && mounted) {
+      widget.controller.resume();
+      await widget.controller.refresh();
+      return;
+    }
     if (id != null && mounted) {
       await showDialog<void>(
         context: context,

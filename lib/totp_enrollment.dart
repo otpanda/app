@@ -1,6 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'transfer/import_review.dart';
+import 'transfer/migration_collection.dart';
+import 'transfer/qr_import_detector.dart';
+import 'transfer/transfer_pages.dart';
+import 'offline_totp/otp_account.dart';
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -233,17 +239,32 @@ Future<String?> addTotpDialog(
   TotpManagementBridge bridge, {
   QrCameraBuilder camera = _defaultCamera,
   ServiceDirectory? directory,
+  ImportSaver? importSaver,
+  Set<(String?, String)> existingImports = const {},
 }) async => showDialog<String>(
   context: context,
-  builder: (_) =>
-      _AddTotp(bridge: bridge, camera: camera, directory: directory),
+  builder: (_) => _AddTotp(
+    bridge: bridge,
+    camera: camera,
+    directory: directory,
+    importSaver: importSaver,
+    existingImports: existingImports,
+  ),
 );
 
 class _AddTotp extends StatefulWidget {
   final TotpManagementBridge bridge;
   final QrCameraBuilder camera;
   final ServiceDirectory? directory;
-  const _AddTotp({required this.bridge, required this.camera, this.directory});
+  final ImportSaver? importSaver;
+  final Set<(String?, String)> existingImports;
+  const _AddTotp({
+    required this.bridge,
+    required this.camera,
+    this.directory,
+    this.importSaver,
+    this.existingImports = const {},
+  });
   @override
   State<_AddTotp> createState() => _AddTotpState();
 }
@@ -263,6 +284,7 @@ class _AddTotpState extends State<_AddTotp> {
 
   @override
   void dispose() {
+    migration.clear();
     key.clear();
     label.dispose();
     account.dispose();
@@ -281,8 +303,70 @@ class _AddTotpState extends State<_AddTotp> {
     });
   }
 
+  final migration = MigrationCollection();
+  bool collectingReview = false;
   void onScan(String text) {
-    if (found != null) return;
+    if (found != null || collectingReview) return;
+    if (migration.collected > 0 &&
+        detectImportQr(text) != ImportQrKind.googleMigration) {
+      setState(
+        () => scanError =
+            'Finish scanning this Google export, or cancel and start again.',
+      );
+      return;
+    }
+    if (detectImportQr(text) == ImportQrKind.googleMigration) {
+      final saver = widget.importSaver;
+      if (saver == null) {
+        setState(
+          () => scanError =
+              'Google export import is not available on this client yet.',
+        );
+        return;
+      }
+      try {
+        migration.scan(text);
+        if (!migration.complete) {
+          setState(
+            () => scanError =
+                'Scanned ${migration.collected} of ${migration.expected} Google export QR codes. Show the next one.',
+          );
+          return;
+        }
+        final outcome = migration.outcome();
+        migration.clear();
+        collectingReview = true;
+        Navigator.of(context)
+            .push<bool>(
+              MaterialPageRoute(
+                builder: (_) => ImportReviewPage(
+                  model: ImportReviewModel.fromOutcome(
+                    outcome,
+                    existing: widget.existingImports,
+                  ),
+                  saver: saver,
+                ),
+              ),
+            )
+            .then((saved) {
+              collectingReview = false;
+              if (mounted) {
+                if (saved == true) {
+                  Navigator.of(context).pop<String>('');
+                } else {
+                  setState(
+                    () => scanError = 'Import review closed. If a save was started, open Transfer codes to check its result.',
+                  );
+                }
+              }
+            });
+      } on OtpFormatException {
+        setState(
+          () => scanError = 'That Google export could not be read. Finish this export or cancel and start again.',
+        );
+      }
+      return;
+    }
     try {
       advance(parseOtpauth(text));
     } on OtpauthException catch (e) {

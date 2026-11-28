@@ -36,6 +36,12 @@ enum SettingsCategory {
     'People and machine access',
     Icons.people_outline,
   ),
+  transfer(
+    'settings/transfer-codes',
+    'Transfer codes',
+    'Import or export authenticator accounts',
+    Icons.import_export,
+  ),
   about(
     'settings/about',
     'About',

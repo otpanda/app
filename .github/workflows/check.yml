@@ -35,6 +35,9 @@ jobs:
       - run: python3 tool/check_supported_native.py
       - run: python3 tool/test_service_catalog.py
       - run: node --test test/assignment*.mjs test/session_bootstrap_test.cjs test/realtime*.cjs
+      - name: Qualify enabled native import root with synthetic channels
+        if: github.ref == 'refs/heads/qualification/import-v2-current-sharing-ci'
+        run: flutter test --dart-define=TOTP_IMPORT_ENABLED=true test/native/import_current_root_qualification_test.dart
       - run: flutter analyze
       - name: Check formatting (advisory until a one-time reformat lands after the App53 merge)
         continue-on-error: true
