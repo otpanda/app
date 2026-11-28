@@ -132,7 +132,9 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-    'installed native private Assign v3 and Resume v5 through actual bridge and D1',
+    _shared
+        ? 'installed shared Android real OS Assign Resume Review Edit through actual bridge and D1'
+        : 'installed private Android Assign and Resume through actual bridge and D1',
     (t) async {
       expect((await _h('GET', '/__harness/health'))['ok'], isTrue);
       final seed = await _h('POST', '/__harness/seed');
@@ -254,14 +256,11 @@ void main() {
           entryId: entryId,
         ),
       );
-      await _until(
-        t,
-        find.text(_shared ? 'Confirm with passkey' : 'Confirm'),
-      );
-      await _shot(t, 'rule-assign-private');
+      await _until(t, find.text(_shared ? 'Confirm with device' : 'Confirm'));
+      await _shot(t, _shared ? 'rule-assign-shared' : 'rule-assign-private');
       expect((await _h('GET', '/__harness/rules'))['rules'], isEmpty);
       debugPrint('OS_RULE_PROMPT step-up');
-      await t.tap(find.text(_shared ? 'Confirm with passkey' : 'Confirm'));
+      await t.tap(find.text(_shared ? 'Confirm with device' : 'Confirm'));
       await _until(t, find.text('Assignment confirmed.'));
       await t.tap(find.text('Done'));
       await assignment;
@@ -286,20 +285,17 @@ void main() {
           },
         ),
       );
-      await _until(
-        t,
-        find.text(_shared ? 'Confirm with passkey' : 'Confirm'),
-      );
-      await _shot(t, 'rule-resume-private');
+      await _until(t, find.text(_shared ? 'Confirm with device' : 'Confirm'));
+      await _shot(t, _shared ? 'rule-resume-shared' : 'rule-resume-private');
       expect(
         ((await _h('GET', '/__harness/rules'))['rules'] as List)
             .single['paused_at'],
         isNotNull,
       );
       debugPrint('OS_RULE_PROMPT step-up');
-      await t.tap(find.text(_shared ? 'Confirm with passkey' : 'Confirm'));
+      await t.tap(find.text(_shared ? 'Confirm with device' : 'Confirm'));
       await _until(t, find.text('Rule confirmed for future matching codes.'));
-      await _shot(t, 'rule-resumed-private');
+      await _shot(t, _shared ? 'rule-resumed-shared' : 'rule-resumed-private');
       await t.tap(find.text('Done'));
       await resume;
       expect(
@@ -307,9 +303,60 @@ void main() {
             .single['paused_at'],
         null,
       );
+      if (_shared) {
+        final reviewSeed = await _h('POST', '/__harness/review-seed');
+        expect(reviewSeed['contextId'], isA<String>());
+        String? reviewedRuleId;
+        for (final op in ['review', 'edit']) {
+          final current =
+              (await _h('GET', '/__harness/rules'))['rules'] as List;
+          final target = <String, dynamic>{
+            'operation': op,
+            'entryId': entryId,
+            if (op == 'review') 'contextId': reviewSeed['contextId'],
+            if (op == 'edit') 'ruleId': reviewedRuleId,
+            if (op == 'edit') 'phrase': 'another fictional',
+          };
+          final dialog = showDialog<bool>(
+            context: host,
+            barrierDismissible: false,
+            builder: (_) => RuleActionDialog(bridge: bridge, target: target),
+          );
+          await _until(t, find.text('Confirm with device'));
+          expect(find.textContaining('with your passkey'), findsNothing);
+          await _shot(t, 'rule-$op-shared');
+          debugPrint('OS_RULE_PROMPT $op step-up');
+          await t.tap(find.text('Confirm with device'));
+          await _until(
+            t,
+            find.text('Rule confirmed for future matching codes.'),
+          );
+          await _shot(t, 'rule-$op-confirmed-shared');
+          await t.tap(find.text('Done'));
+          await dialog;
+          final after = (await _h('GET', '/__harness/rules'))['rules'] as List;
+          expect(after.length, 2);
+          if (op == 'review') {
+            reviewedRuleId =
+                after.singleWhere(
+                      (r) => !current.any(
+                        (old) => old['route_id'] == r['route_id'],
+                      ),
+                    )['route_id']
+                    as String;
+          }
+          if (op == 'edit') {
+            expect(
+              after.where((r) => r['phrase'] == 'another fictional').length,
+              1,
+            );
+          }
+          debugPrint('OS_RULE_D1_APPLIED $op');
+        }
+      }
       await t.pumpWidget(const SizedBox.shrink());
       await t.pump();
     },
-    timeout: const Timeout(Duration(minutes: 4)),
+    timeout: const Timeout(Duration(minutes: 6)),
   );
 }

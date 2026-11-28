@@ -48,7 +48,45 @@ class Bridge implements AssignmentBridge {
   void assignmentDismiss() {}
 }
 
+class DeviceBridge extends Bridge implements DeviceConfirmationBridge {}
+
 void main() {
+  testWidgets(
+    'native proof copy names device, web proof copy remains passkey',
+    (t) async {
+      for (final device in [false, true]) {
+        final b = device ? DeviceBridge() : Bridge();
+        await t.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: AssignmentDialog(
+                key: ValueKey(device),
+                bridge: b,
+                sourceId: 'source',
+                eventId: 'event',
+                entryId: 'entry',
+              ),
+            ),
+          ),
+        );
+        await t.pumpAndSettle();
+        expect(
+          find.text(device ? 'Confirm with device' : 'Confirm with passkey'),
+          findsOneWidget,
+        );
+        expect(
+          find.text(device ? 'Confirm with passkey' : 'Confirm with device'),
+          findsNothing,
+        );
+        expect(
+          find.textContaining(
+            device ? 'your device screen lock' : 'your passkey',
+          ),
+          findsOneWidget,
+        );
+      }
+    },
+  );
   testWidgets(
     'future template rule sharing is visible before deliberate confirmation',
     (t) async {

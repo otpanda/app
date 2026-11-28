@@ -149,3 +149,6 @@ abstract interface class FutureTotpBatchBridge implements TotpBatchBridge {
     required int fromSeconds,
   });
 }
+
+/// Marks a bridge whose action proof uses the device OS, not a passkey.
+abstract interface class DeviceConfirmationBridge {}

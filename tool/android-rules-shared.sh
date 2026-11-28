@@ -12,7 +12,7 @@ adb shell input keyevent KEYCODE_WAKEUP
 adb shell input keyevent 82
 ( cd "$API_DIR" && npm ci --no-audit --no-fund && node tool/rules-native-harness.mjs --port 8787 ) > "$OUT/harness.log" 2>&1 & H=$!
 python3 tool/shared-rule-os-unlock.py "$OUT" > "$OUT/os-driver.log" 2>&1 & U=$!
-trap 'python3 tool/shared-rule-test-overlay.py restore "$OUT"; touch "$OUT/stop-os-driver"; kill "$H" "$U" 2>/dev/null || true; wait "$H" "$U" 2>/dev/null || true; adb reverse --remove tcp:8787' EXIT
+trap 'python3 tool/shared-rule-test-overlay.py restore "$OUT"; adb uninstall app.otpanda.sharedfixture || true; touch "$OUT/stop-os-driver"; kill "$H" "$U" 2>/dev/null || true; wait "$H" "$U" 2>/dev/null || true; adb reverse --remove tcp:8787' EXIT
 for i in $(seq 1 80); do grep -q '^READY' "$OUT/harness.log" && break; sleep 2; done
 grep -q '^READY' "$OUT/harness.log"
 adb reverse tcp:8787 tcp:8787

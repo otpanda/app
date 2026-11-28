@@ -89,7 +89,47 @@ class Rules implements RuleBridge {
   }
 }
 
+class DeviceRules extends Rules implements DeviceConfirmationBridge {}
+
 void main() {
+  testWidgets(
+    'rule proof copy distinguishes native device and browser passkey',
+    (t) async {
+      for (final device in [false, true]) {
+        final b = device ? DeviceRules() : Rules();
+        await t.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: RuleActionDialog(
+                key: ValueKey(device),
+                bridge: b,
+                target: const {
+                  'operation': 'resume',
+                  'entryId': 'entry',
+                  'ruleId': 'r2',
+                },
+              ),
+            ),
+          ),
+        );
+        await t.pumpAndSettle();
+        expect(
+          find.text(device ? 'Confirm with device' : 'Confirm with passkey'),
+          findsOneWidget,
+        );
+        expect(
+          find.text(device ? 'Confirm with passkey' : 'Confirm with device'),
+          findsNothing,
+        );
+        expect(
+          find.textContaining(
+            device ? 'your device screen lock' : 'your passkey',
+          ),
+          findsOneWidget,
+        );
+      }
+    },
+  );
   setUpAll(() async {
     Directory('build/rules-visual').createSync(recursive: true);
     for (final family in ['Roboto', 'Figtree']) {

@@ -139,6 +139,13 @@ const server = createServer(async (req, res) => {
         const m = await new NativeSessionService(db, {clock}).mint({sourceDeviceId: s.webDeviceId, challenge, redirectUri: NATIVE_REDIRECT});
         return m ? json(res, 200, {code: m.code}) : json(res, 400, {error: 'mint_refused'});
       }
+      if(u.pathname === '/__harness/review-seed' && req.method === 'POST'){
+        const s=await seed(),now=Date.now(),key=await crypto.subtle.importKey('raw',keyBytes,{name:'AES-GCM'},false,['encrypt','decrypt']);
+        const store=new SourceEntryStore(db,new CodeCipher({keys:new Map([['synthetic',key]]),activeKeyId:'synthetic'}),{templateSecret:TEMPLATE_SECRET,contextRetentionMs:30*86400000,contextDigestSecret:TEMPLATE_SECRET,clock});
+        await store.receive(s.ownerId,{sender:'+15556669999',receiver:'+15550001111',text:'Another Fictional code is 654321',context:{kind:'sms',text:'Another Fictional code is 654321'},sourceId:s.sourceId,eventId:'review-code',code:'654321',receivedAt:now,expiresAt:now+60000});
+        const ctx=await db.prepare('SELECT context_id FROM unassigned_context WHERE owner_id=? AND latest_event_id=?').bind(s.ownerId,'review-code').first();
+        return json(res,200,{contextId:ctx?.context_id});
+      }
       if(u.pathname === '/__harness/rules')return json(res,200,{rules:(await db.prepare('SELECT route_id,entry_id,paused_at,phrase FROM service_routes').all()).results});
       if(u.pathname === '/__harness/rules-pause' && req.method === 'POST'){
         const s=await seed();await db.prepare('UPDATE sources SET revoked_at=? WHERE source_id=?').bind(Date.now(),s.sourceId).run();await db.prepare('UPDATE sources SET revoked_at=NULL WHERE source_id=?').bind(s.sourceId).run();return json(res,200,{ok:true});

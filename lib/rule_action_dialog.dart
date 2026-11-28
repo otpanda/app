@@ -23,6 +23,7 @@ class _RuleActionDialogState extends State<RuleActionDialog> {
   String state = 'loading';
   Map<String, dynamic>? summary;
   bool proof = true;
+  bool get deviceConfirmation => widget.bridge is DeviceConfirmationBridge;
   bool busy = true;
   int checks = 0;
   Timer? timer;
@@ -154,11 +155,15 @@ class _RuleActionDialogState extends State<RuleActionDialog> {
                 'loading' => 'Checking the selected entry…',
                 'confirm' =>
                   proof
-                      ? 'Check the account and recipients before confirming with your passkey.'
+                      ? (deviceConfirmation
+                            ? 'Check the account and recipients before confirming with your device screen lock.'
+                            : 'Check the account and recipients before confirming with your passkey.')
                       : 'This entry is not shared with anyone. Check it before confirming.',
                 'authenticating' =>
                   proof
-                      ? 'Complete the passkey prompt. Do not submit again.'
+                      ? (deviceConfirmation
+                            ? 'Complete the device screen-lock prompt. Do not submit again.'
+                            : 'Complete the passkey prompt. Do not submit again.')
                       : 'Saving the rule. Do not submit again.',
                 'applied' => 'Rule confirmed for future matching codes.',
                 'not-applied' => 'Server confirmed the rule was not changed.',
@@ -179,7 +184,13 @@ class _RuleActionDialogState extends State<RuleActionDialog> {
           if (state == 'confirm')
             FilledButton(
               onPressed: busy ? null : confirm,
-              child: Text(proof ? 'Confirm with passkey' : 'Confirm'),
+              child: Text(
+                proof
+                    ? (deviceConfirmation
+                          ? 'Confirm with device'
+                          : 'Confirm with passkey')
+                    : 'Confirm',
+              ),
             ),
           if (uncertain)
             OutlinedButton(

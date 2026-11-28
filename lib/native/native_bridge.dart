@@ -62,6 +62,7 @@ class NativeSessionBridge
         FutureTotpBatchBridge,
         TotpCreationCapability,
         AssignmentBridge,
+        DeviceConfirmationBridge,
         RuleBridge,
         EntryManagementBridge,
         EntryDomainsBridge,
