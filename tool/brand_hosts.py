@@ -41,6 +41,7 @@ Path('web/index.html').write_text(f'''<!DOCTYPE html>
 <html lang="en"><head>
 <base href="$FLUTTER_BASE_HREF">
 <meta charset="UTF-8">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OTPanda</title>
 <meta name="application-name" content="OTPanda">

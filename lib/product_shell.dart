@@ -1467,6 +1467,34 @@ class _ProductShellState extends State<ProductShell>
   );
 
   Widget body() {
+    if (widget.controller.mutationUpdating) {
+      final feedback = const Padding(
+        padding: EdgeInsets.all(24),
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.sync, size: 28),
+                SizedBox(height: 16),
+                Text('Updating shared accounts...'),
+                SizedBox(height: 8),
+                Text(
+                  'The next refresh may wait up to 15 seconds before starting. Loading depends on your connection.',
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (widget.controller.store.entries.isEmpty) return feedback;
+      return _bodyContent();
+    }
+    return _bodyContent();
+  }
+
+  Widget _bodyContent() {
     if (phase == _Phase.loading) {
       return const Padding(
         padding: EdgeInsets.all(40),

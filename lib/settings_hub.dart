@@ -30,6 +30,12 @@ enum SettingsCategory {
     'Account tile appearance on this device',
     Icons.view_compact_outlined,
   ),
+  sharing(
+    'settings/sharing',
+    'Sharing & machines',
+    'People and machine access',
+    Icons.people_outline,
+  ),
   about(
     'settings/about',
     'About',

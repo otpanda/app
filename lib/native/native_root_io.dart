@@ -1,3 +1,6 @@
+import '../sharing_contract.dart';
+import '../sharing_transport.dart';
+
 import 'dart:convert';
 import 'dart:io' show Platform;
 
@@ -188,9 +191,12 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
     }
   }
 
+  bool _sharingForeground = true;
+
   // Foreground-only realtime: only a resumed app holds the socket.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _sharingForeground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       bridge.realtimeSetForeground(true);
     } else if (state != AppLifecycleState.inactive) {
@@ -225,8 +231,34 @@ class _BootState extends State<_Boot> with WidgetsBindingObserver {
           signedInBuilder: (context) => NativeNavigation(
             history: navigationHistory,
             builder: (context, route, navigate) {
+              final session = controller.session;
+              final identityEpoch = controller.identityEpoch;
+              final lockGeneration = localLock.lockGeneration;
+              Future<bool> sharingCurrent() async =>
+                  mounted &&
+                  _sharingForeground &&
+                  controller.identityEpoch == identityEpoch &&
+                  controller.session?.deviceId == session?.deviceId &&
+                  controller.phase == NativeSessionPhase.signedIn &&
+                  localLock.ready &&
+                  !localLock.locked &&
+                  localLock.lockGeneration == lockGeneration;
               final page = BrowserAccountPage(
                 bridge: bridge,
+                sharingIdentity: (identityEpoch, lockGeneration),
+                sharingClient:
+                    !const bool.fromEnvironment(
+                          'SHARING_ENABLED',
+                          defaultValue: false,
+                        ) ||
+                        session == null
+                    ? null
+                    : SharingClient(
+                        BoundSharingTransport(
+                          current: sharingCurrent,
+                          send: bridge.sharingPost,
+                        ),
+                      ),
                 localSecuritySetting: LocalLockSetting(controller: localLock),
                 navigation: route,
                 onNavigate: navigate,

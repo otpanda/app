@@ -138,3 +138,21 @@ abstract interface class FutureTotpBatchBridge implements TotpBatchBridge {
     required int fromSeconds,
   });
 }
+
+/// Host holds a tab-only invite secret. It never crosses this interface.
+abstract interface class SharingInviteBridge {
+  bool get invitePending;
+  Future<SessionResponse> acceptPendingInvite();
+  void dismissInvite();
+}
+
+/// Explicit host capability; epoch is an opaque retirement marker, never a bearer.
+abstract interface class SharingManagementBridge {
+  bool get sharingAvailable;
+  int get sharingEpoch;
+  Future<SessionResponse> sharingPost(
+    String path,
+    Map<String, Object?> body,
+    int epoch,
+  );
+}

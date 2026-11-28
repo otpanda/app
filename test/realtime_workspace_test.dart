@@ -85,6 +85,103 @@ Future<void> settle() async {
 }
 
 void main() {
+  testWidgets(
+    'share read interrupted by preserved suspend restarts on resume',
+    (t) async {
+      var now = 100;
+      final b = Bridge();
+      final c = ReadWorkspaceController(bridge: b, clock: () => now);
+      await c.refresh();
+      final gate = Completer<SessionResponse>();
+      b.handler = (_) async => gate.future;
+      c.refreshAfterMutation(showUpdating: true);
+      now += 15000;
+      await t.pump(const Duration(seconds: 15));
+      expect(c.loading, true);
+      c.suspend(preserve: true);
+      gate.complete(const SessionResponse(503, '{}'));
+      await t.pump();
+      expect(c.mutationUpdating, true);
+      b.handler = (_) async => const SessionResponse(503, '{}');
+      c.resume();
+      now += 15000;
+      await t.pump(const Duration(seconds: 15));
+      expect(c.mutationUpdating, false);
+      expect(c.loading, false);
+      c.clear();
+      c.dispose();
+    },
+  );
+  testWidgets('share feedback clears after gated trailing completion', (
+    t,
+  ) async {
+    var now = 100;
+    final c = ReadWorkspaceController(bridge: Bridge(), clock: () => now);
+    await c.refresh();
+    c.refreshAfterMutation(showUpdating: true);
+    expect(c.mutationUpdating, true);
+    await c.refresh();
+    expect(
+      c.mutationUpdating,
+      true,
+    ); // early gate does not consume pending feedback
+    now += 15000;
+    await t.pump(const Duration(seconds: 15));
+    expect(c.mutationUpdating, false);
+    c.dispose();
+  });
+  testWidgets('share feedback preserve suspend resumes queued read', (t) async {
+    var now = 100;
+    final c = ReadWorkspaceController(bridge: Bridge(), clock: () => now);
+    await c.refresh();
+    c.refreshAfterMutation(showUpdating: true);
+    c.suspend(preserve: true);
+    now += 15000;
+    await t.pump(const Duration(seconds: 15));
+    expect(c.mutationUpdating, true);
+    c.resume();
+    await t.pump();
+    expect(c.mutationUpdating, false);
+    c.dispose();
+  });
+  testWidgets('share feedback error ends waiting without implying success', (
+    t,
+  ) async {
+    var now = 100;
+    final b = Bridge();
+    final c = ReadWorkspaceController(bridge: b, clock: () => now);
+    await c.refresh();
+    b.handler = (_) async => const SessionResponse(503, '{}');
+    c.refreshAfterMutation(showUpdating: true);
+    now += 15000;
+    await t.pump(const Duration(seconds: 15));
+    expect(c.mutationUpdating, false);
+    expect(c.message, isNotEmpty);
+    c.clear();
+    c.dispose();
+  });
+  testWidgets('older in flight read cannot clear share trailing feedback', (
+    t,
+  ) async {
+    var now = 100;
+    final b = Bridge(), gate = Completer<SessionResponse>();
+    b.handler = (p) async => p.endsWith('/session')
+        ? gate.future
+        : const SessionResponse(200, '{"records":[]}');
+    final c = ReadWorkspaceController(bridge: b, clock: () => now);
+    final older = c.refresh();
+    c.refreshAfterMutation(showUpdating: true);
+    gate.complete(const SessionResponse(503, '{}'));
+    await older;
+    expect(c.mutationUpdating, true);
+    b.handler = (_) async => const SessionResponse(503, '{}');
+    now += 15000;
+    await t.pump(const Duration(seconds: 15));
+    expect(c.mutationUpdating, false);
+    c.clear();
+    c.dispose();
+  });
+
   testWidgets('local mutation queues one refresh behind the gate', (
     tester,
   ) async {

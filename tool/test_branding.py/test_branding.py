@@ -26,3 +26,5 @@ for size in (16,32):
 
 for name in ('otty-favicon-v7-16.png','otty-favicon-v7-32.png'):
  assert Path('web',name).read_bytes()==Path('assets/brand-v7',name.replace('otty-favicon-v7-','otty-tile-')).read_bytes()
+
+assert '<meta name="referrer" content="no-referrer">' in html

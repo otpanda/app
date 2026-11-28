@@ -1,3 +1,10 @@
+import 'package:otpanda_client/main.dart' show otpandaTheme;
+
+import 'dart:io';
+
+import 'package:otpanda_client/sharing_contract.dart';
+import 'package:otpanda_client/management_contract.dart';
+
 import 'dart:convert';
 import 'dart:async';
 
@@ -168,7 +175,178 @@ double readingOrder(WidgetTester t, Finder f) {
   return p.dy * 10000 + p.dx;
 }
 
+class InviteHostBridge extends Bridge implements SharingInviteBridge {
+  bool pending = true;
+  int accepts = 0;
+  @override
+  bool get invitePending => pending;
+  @override
+  void dismissInvite() {
+    pending = false;
+  }
+
+  @override
+  Future<SessionResponse> acceptPendingInvite() async {
+    pending = false;
+    accepts++;
+    return const SessionResponse(
+      200,
+      '{"ok":true,"mode":"all","canDelegate":false}',
+    );
+  }
+}
+
+class OwnerHostBridge extends Bridge implements SharingManagementBridge {
+  final transport = ShellSharingTransport();
+  @override
+  bool get sharingAvailable => true;
+  @override
+  int get sharingEpoch => 1;
+  @override
+  Future<SessionResponse> sharingPost(
+    String p,
+    Map<String, Object?> b,
+    int epoch,
+  ) => transport.request(p, 'POST', b);
+}
+
 void main() {
+  setUpAll(() async {
+    for (final f in ['Figtree', 'BricolageGrotesque']) {
+      final l = FontLoader(f);
+      for (final w in f == 'Figtree' ? [400, 500, 600, 700] : [700, 800]) {
+        l.addFont(
+          Future.value(
+            ByteData.sublistView(
+              File('assets/fonts/$f-$w.ttf').readAsBytesSync(),
+            ),
+          ),
+        );
+      }
+      await l.load();
+    }
+    final icons = FontLoader('MaterialIcons')
+      ..addFont(
+        Future.value(
+          ByteData.sublistView(
+            File(
+              '${Platform.environment['FLUTTER_ROOT'] ?? '/downloads/otpanda/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+            ).readAsBytesSync(),
+          ),
+        ),
+      );
+    await icons.load();
+  });
+  testWidgets('verified shell mounts owner sharing only with capability', (
+    t,
+  ) async {
+    final narrow = Platform.environment['NARROW_SHARING'] == '1';
+    if (narrow) {
+      t.view.physicalSize = const Size(390, 844);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.resetPhysicalSize);
+      addTearDown(t.view.resetDevicePixelRatio);
+    }
+    final b = Bridge()..status = 'restored';
+    final transport = ShellSharingTransport();
+    final client = SharingClient(transport);
+    await t.pumpWidget(
+      MaterialApp(
+        theme: otpandaTheme(),
+        home: BrowserAccountPage(
+          bridge: b,
+          workspaceEnabled: true,
+          accountOnly: true,
+          navigation: 'settings/sharing',
+          sharingClient: client,
+          sharingIdentity: 1,
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(transport.paths, contains('/v1/manage/sharing/contacts/list'));
+    expect(transport.paths, contains('/v1/manage/machine/profiles/list'));
+    if (Platform.environment['GOLDENS'] == '1') {
+      await expectLater(
+        find.byType(BrowserAccountPage),
+        matchesGoldenFile(
+          narrow
+              ? 'goldens/sharing_shell_owner_mobile.png'
+              : 'goldens/sharing_shell_owner.png',
+        ),
+      );
+    }
+  });
+
+  testWidgets(
+    'host invite only exposes pending and consumes on deliberate acceptance',
+    (t) async {
+      final narrow = Platform.environment['NARROW_SHARING'] == '1';
+      if (narrow) {
+        t.view.physicalSize = const Size(390, 844);
+        t.view.devicePixelRatio = 1;
+        addTearDown(t.view.reset);
+      }
+      final b = InviteHostBridge()..status = 'restored';
+      String? route;
+      await t.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: BrowserAccountPage(
+            bridge: b,
+            workspaceEnabled: true,
+            accountOnly: true,
+            navigation: 'invite',
+            onNavigate: (r) => route = r,
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      if (Platform.environment['GOLDENS'] == '1') {
+        await expectLater(
+          find.byType(BrowserAccountPage),
+          matchesGoldenFile(
+            narrow
+                ? 'goldens/sharing_host_accept_mobile.png'
+                : 'goldens/sharing_host_accept.png',
+          ),
+        );
+      }
+      expect(b.accepts, 0);
+      expect(find.byKey(const Key('accept-confirm')), findsOneWidget);
+      await t.tap(find.byKey(const Key('accept-confirm')));
+      await t.pumpAndSettle();
+      expect(b.accepts, 1);
+      expect(b.pending, false);
+      expect(find.byKey(const Key('accept-success')), findsOneWidget);
+      await t.tap(find.byKey(const Key('accept-done')));
+      await t.pumpAndSettle();
+      expect(route, 'codes');
+    },
+    skip: !const bool.fromEnvironment('SHARING_ENABLED'),
+  );
+
+  testWidgets(
+    'browser owner Settings obtains explicit host capability without injected client',
+    (t) async {
+      final b = OwnerHostBridge()..status = 'restored';
+      await t.pumpWidget(
+        MaterialApp(
+          theme: otpandaTheme(),
+          home: BrowserAccountPage(
+            bridge: b,
+            workspaceEnabled: true,
+            accountOnly: true,
+            navigation: 'settings/sharing',
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      expect(b.transport.paths, contains('/v1/manage/sharing/invite/list'));
+      expect(find.byKey(const Key('invite-button')), findsOneWidget);
+    },
+    skip: !const bool.fromEnvironment('SHARING_ENABLED'),
+  );
   for (final fails in [false, true]) {
     testWidgets(
       'dispatched cloud tag PUT with lost response stays unknown and cannot resend',
@@ -1169,4 +1347,42 @@ void main() {
       isTrue,
     );
   });
+}
+
+class ShellSharingTransport implements ManagementTransport {
+  final paths = <String>[];
+  @override
+  Future<SessionResponse> request(
+    String path,
+    String method,
+    Map<String, Object?>? body,
+  ) async {
+    paths.add(path);
+    return SessionResponse(
+      200,
+      jsonEncode(
+        path.endsWith('/invite/accept')
+            ? {'ok': true, 'mode': 'allow', 'canDelegate': false}
+            : path.endsWith('/invite/list')
+            ? {
+                'invites': Platform.environment['PENDING_SHARING'] == '1'
+                    ? [
+                        {
+                          'inviteId': 'lost1',
+                          'mode': 'all',
+                          'canDelegate': false,
+                          'createdAt': 1800000000000,
+                          'expiresAt': 1800086400000,
+                        },
+                      ]
+                    : [],
+              }
+            : path.endsWith('/contacts/list')
+            ? {'contacts': []}
+            : path.endsWith('/profiles/list')
+            ? {'profiles': []}
+            : {'entries': []},
+      ),
+    );
+  }
 }
